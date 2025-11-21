@@ -1,0 +1,5 @@
+{
+  "name": "RemoteHub - 团队远程协作平台",
+  "description": "专为团队设计的集中式远程环境管理平台。支持 RDP, SSH, Web, ToDesk, 向日葵等多种协议，具备 AI 辅助排错、一键生成连接及 VPN 依赖管理功能。",
+  "requestFramePermissions": []
+}
