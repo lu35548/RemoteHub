@@ -126,6 +126,22 @@ export class AuthService {
     return users.filter(u => u.lastActiveAt > threshold).sort((a, b) => b.lastActiveAt - a.lastActiveAt);
   }
 
+  static async heartbeat(): Promise<void> {
+    const uid = await storage.read<string | null>(DB_KEYS.SESSION, null);
+    if (!uid) return;
+    
+    const users = await storage.read<User[]>(DB_KEYS.USERS, []);
+    const user = users.find(u => u.id === uid);
+    
+    if (user) {
+      // Only update if more than 10 seconds have passed to avoid thrashing if called frequently
+      if (Date.now() - user.lastActiveAt > 10000) {
+         user.lastActiveAt = Date.now();
+         await this.updateUserInternal(users, user);
+      }
+    }
+  }
+
   private static async updateUserInternal(users: User[], updatedUser: User): Promise<void> {
     const idx = users.findIndex(u => u.id === updatedUser.id);
     if (idx !== -1) {

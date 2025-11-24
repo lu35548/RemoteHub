@@ -215,8 +215,8 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({ connection, vpnDependen
         <div className="p-5 flex flex-col h-full">
           {/* Header */}
           <div className="flex justify-between items-start mb-5">
-            <div className="flex items-center gap-4 overflow-hidden">
-              <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 border backdrop-blur-md shadow-inner transition-all group-hover:scale-105 duration-300 ${protocolStyle}`}>
+            <div className="flex items-center gap-4 min-w-0">
+              <div className={`relative z-10 w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 border backdrop-blur-md shadow-inner transition-all group-hover:scale-105 duration-300 ${protocolStyle} overflow-hidden isolate`}>
                 <ProtocolIcon protocol={connection.protocol} />
               </div>
               <div className="min-w-0">
@@ -277,10 +277,10 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({ connection, vpnDependen
                 {connection.username && (
                   <div className="group/row relative flex flex-col justify-center bg-slate-950/50 rounded-lg p-2 border border-white/5 hover:border-blue-500/30 transition-colors h-[52px]">
                     <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-0.5">USER</span>
-                    <span className="text-slate-300 font-mono text-xs truncate select-all">{connection.username}</span>
+                    <span className="text-slate-300 font-mono text-xs truncate select-all pr-8">{connection.username}</span>
                     <button 
                       onClick={(e) => handleDirectCopy(e, connection.username!, 'user_row')} 
-                      className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 text-slate-500 hover:text-blue-400 hover:bg-blue-500/10 rounded-md opacity-0 group-hover/row:opacity-100 transition-all"
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 text-slate-500 hover:text-blue-400 hover:bg-blue-500/10 rounded-md opacity-0 group-hover/row:opacity-100 transition-all active:scale-95"
                     >
                       {isCopied && copyTarget === 'user_row' ? <Check size={12} /> : <Copy size={12} />}
                     </button>
@@ -289,21 +289,27 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({ connection, vpnDependen
                 
                 {connection.password && (
                   <div className="group/row relative flex flex-col justify-center bg-slate-950/50 rounded-lg p-2 border border-white/5 hover:border-blue-500/30 transition-colors h-[52px] col-span-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">PASS</span>
-                      <button onClick={(e) => { e.stopPropagation(); setShowPassword(!showPassword); }} className="text-slate-600 hover:text-slate-300 transition-colors">
-                        {showPassword ? <EyeOff size={10} /> : <Eye size={10} />}
-                      </button>
-                    </div>
-                    <span className="text-slate-300 font-mono text-xs truncate select-all mt-0.5">
+                    <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-0.5">PASS</span>
+                    <span className="text-slate-300 font-mono text-xs truncate select-all pr-14">
                       {showPassword ? connection.password : '••••••••'}
                     </span>
-                    <button 
-                      onClick={(e) => handleDirectCopy(e, connection.password!, 'pass_row')} 
-                      className="absolute right-1.5 bottom-1.5 p-1.5 text-slate-500 hover:text-blue-400 hover:bg-blue-500/10 rounded-md opacity-0 group-hover/row:opacity-100 transition-all"
-                    >
-                      {isCopied && copyTarget === 'pass_row' ? <Check size={12} /> : <Copy size={12} />}
-                    </button>
+                    
+                    <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); setShowPassword(!showPassword); }} 
+                        className="p-1.5 text-slate-600 hover:text-slate-300 transition-colors rounded-md active:scale-95"
+                        title={showPassword ? "隐藏" : "显示"}
+                      >
+                        {showPassword ? <EyeOff size={12} /> : <Eye size={12} />}
+                      </button>
+                      <button 
+                        onClick={(e) => handleDirectCopy(e, connection.password!, 'pass_row')} 
+                        className={`p-1.5 text-slate-500 hover:text-blue-400 hover:bg-blue-500/10 rounded-md transition-all active:scale-95 ${isCopied && copyTarget === 'pass_row' ? 'opacity-100' : 'opacity-0 group-hover/row:opacity-100'}`}
+                        title="复制"
+                      >
+                        {isCopied && copyTarget === 'pass_row' ? <Check size={12} /> : <Copy size={12} />}
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -314,6 +320,17 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({ connection, vpnDependen
               <div className="flex items-center justify-between text-[10px] bg-indigo-500/5 px-3 py-2 rounded-lg border border-indigo-500/10 group-hover:border-indigo-500/20 transition-colors">
                 <div className="flex items-center gap-2 text-indigo-300/80"><Shield size={12} /><span>Via: {vpnDependency.name}</span></div>
                 <button onClick={handleVpnConnect} className="text-indigo-400 hover:text-indigo-200 flex items-center gap-1 font-medium transition-colors"><Power size={10} />{vpnDependency.vpnType === VpnType.WEB ? '跳转' : '复制'}</button>
+              </div>
+            )}
+
+            {/* Tags */}
+            {connection.tags && connection.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {connection.tags.map((tag, idx) => (
+                  <span key={idx} className="px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-slate-800/40 text-slate-500 border border-white/5 group-hover:border-white/10 transition-colors">
+                    #{tag}
+                  </span>
+                ))}
               </div>
             )}
           </div>

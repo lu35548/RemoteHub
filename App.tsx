@@ -55,6 +55,7 @@ const AppContent: React.FC<AppContentProps> = ({ currentUser, onLogout }) => {
   useEffect(() => {
     refreshData();
     const updateOnlineUsers = async () => {
+      await AuthService.heartbeat();
       const users = await AuthService.getOnlineUsers();
       setOnlineUsers(users);
     };
