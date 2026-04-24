@@ -1,0 +1,1 @@
+{"success":false,"error":{"code":"APP_ERROR","message":"Rate limit exceeded","timestamp":"2025-12-16T04:54:21.155Z","path":"/api/v1/auth/login","method":"POST"}}

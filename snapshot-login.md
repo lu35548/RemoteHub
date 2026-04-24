@@ -1,0 +1,21 @@
+uid=12_0 RootWebArea "RemoteHub Manager" url="http://localhost:3002/"
+  uid=12_1 heading "RemoteHub" level="1"
+  uid=12_2 button
+  uid=12_3 heading "工作台" level="2"
+  uid=12_4 button "所有资源"
+  uid=12_5 button "VPN 网络管理"
+  uid=12_6 heading "客户项目" level="2"
+  uid=12_7 button
+  uid=12_8 textbox "搜索客户..."
+  uid=12_9 StaticText "未找到相关客户"
+  uid=12_10 button "A admin ADMIN"
+  uid=12_11 button "退出登录"
+  uid=12_12 main
+    uid=12_13 heading "所有远程资源" level="2"
+    uid=12_14 StaticText "0"
+    uid=12_15 StaticText "0"
+    uid=12_16 StaticText "人在线"
+    uid=12_17 textbox "搜索主机, IP, 标签..."
+    uid=12_18 button "新建资源"
+    uid=12_19 StaticText "暂无资源配置"
+    uid=12_20 StaticText "点击右上角新建按钮开始添加"

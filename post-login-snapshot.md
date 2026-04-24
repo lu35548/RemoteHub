@@ -1,0 +1,51 @@
+uid=10_0 RootWebArea "RemoteHub Manager" url="http://localhost:3006/"
+  uid=10_1 ignored
+    uid=10_2 ignored
+      uid=10_3 generic
+        uid=10_4 generic
+          uid=10_5 generic
+            uid=10_6 generic
+            uid=10_7 generic
+          uid=10_8 generic
+            uid=10_9 ignored
+              uid=10_10 ignored
+                uid=10_11 ignored
+                uid=10_12 heading "RemoteHub" level="1"
+                  uid=10_13 StaticText "RemoteHub"
+                    uid=10_14 InlineTextBox
+                uid=10_15 paragraph
+                  uid=10_16 StaticText "企业级远程协作与管理平台"
+                    uid=10_17 InlineTextBox
+              uid=10_18 generic
+                uid=10_19 ignored
+                  uid=10_20 LabelText
+                    uid=10_21 StaticText "账号"
+                      uid=10_22 InlineTextBox
+                  uid=10_23 generic
+                    uid=10_24 textbox "请输入用户名" value="admin"
+                      uid=10_25 ignored
+                      uid=10_26 generic
+                        uid=10_27 StaticText "admin"
+                          uid=10_28 InlineTextBox
+                uid=10_29 ignored
+                  uid=10_30 LabelText
+                    uid=10_31 StaticText "密码"
+                      uid=10_32 InlineTextBox
+                  uid=10_33 generic
+                    uid=10_34 textbox "••••••••" value="••••••••"
+                      uid=10_35 ignored
+                      uid=10_36 generic
+                        uid=10_37 StaticText "••••••••"
+                          uid=10_38 InlineTextBox
+                uid=10_39 ignored
+                  uid=10_40 StaticText "用户名或密码错误"
+                    uid=10_41 InlineTextBox
+                uid=10_42 button "安全登录"
+                  uid=10_43 ignored
+                    uid=10_44 StaticText "安全登录"
+                      uid=10_45 InlineTextBox
+              uid=10_46 ignored
+                uid=10_47 ignored
+                  uid=10_48 StaticText "内部系统 · 仅限授权访问"
+                    uid=10_49 InlineTextBox
+        uid=10_50 generic
