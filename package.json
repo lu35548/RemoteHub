@@ -1,0 +1,21 @@
+{
+  "name": "remotehub",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"pnpm --filter @remotehub/backend dev\" \"pnpm --filter @remotehub/frontend dev\"",
+    "build": "pnpm --filter @remotehub/shared build && pnpm --filter @remotehub/backend build && pnpm --filter @remotehub/frontend build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma",
+      "esbuild"
+    ]
+  }
+}
