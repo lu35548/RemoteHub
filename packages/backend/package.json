@@ -15,36 +15,41 @@
     "db:seed": "prisma db seed"
   },
   "dependencies": {
-    "@remotehub/shared": "workspace:*",
     "@prisma/client": "^6.0.0",
-    "express": "^5.1.0",
+    "@remotehub/shared": "workspace:*",
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.7",
-    "helmet": "^8.0.0",
-    "express-rate-limit": "^7.5.0",
     "cors": "^2.8.5",
-    "winston": "^3.17.0",
+    "express": "^5.1.0",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.0.0",
+    "jose": "^6.2.2",
     "node-cron": "^3.0.3",
-    "uuid": "^11.0.0"
+    "uuid": "^11.0.0",
+    "winston": "^3.17.0"
   },
   "devDependencies": {
-    "@types/express": "^5.0.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/cookie-parser": "^1.4.8",
     "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
     "@types/node-cron": "^3.0.11",
     "@types/uuid": "^10.0.0",
-    "prisma": "^6.0.0",
-    "typescript": "^5.7.0",
-    "tsx": "^4.19.0",
-    "vitest": "^3.0.0",
-    "esbuild": "^0.25.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
-    "eslint": "^9.0.0"
+    "esbuild": "^0.25.0",
+    "eslint": "^9.0.0",
+    "prisma": "^6.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
   },
   "prisma": {
     "seed": "node prisma/seed.js"
   },
-  "files": ["dist", "prisma", "src"]
+  "files": [
+    "dist",
+    "prisma",
+    "src"
+  ]
 }
