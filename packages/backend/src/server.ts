@@ -6,6 +6,7 @@ import cors from 'cors';
 import { env } from './config/env.js';
 import { logger } from './utils/logger.js';
 import { AppError, createAppError } from './utils/appError.js';
+import { startSessionCleaner } from './utils/sessionCleaner.js';
 import type { Request, Response, NextFunction } from 'express';
 
 const app: Express = express();
@@ -126,6 +127,7 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 
 // ─── Start server ───
 const PORT = env.PORT;
+startSessionCleaner();
 app.listen(PORT, () => {
   logger.info(`Server running on port ${PORT} (${env.NODE_ENV})`);
 });
