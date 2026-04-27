@@ -9,7 +9,29 @@ import {
   DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE,
 } from '@remotehub/shared';
 
+// ─── lastAccessed 节流 ───
+
+const lastAccessedUpdates = new Map<string, number>();
+const LAST_ACCESSED_THROTTLE_MS = 5 * 60 * 1000; // 5 minutes
+
 // ─── Types ───
+
+type UserRef = { id: string; nickname: string };
+type UserRefMap = Map<string, UserRef>;
+
+async function resolveUserRefs(ids: string[]): Promise<UserRefMap> {
+  const uniqueIds = [...new Set(ids.filter(Boolean))];
+  if (uniqueIds.length === 0) return new Map();
+  const users = await prisma.user.findMany({
+    where: { id: { in: uniqueIds } },
+    select: { id: true, nickname: true },
+  });
+  return new Map(users.map(u => [u.id, { id: u.id, nickname: u.nickname }]));
+}
+
+function getUserRef(userMap: UserRefMap, id: string): UserRef {
+  return userMap.get(id) ?? { id, nickname: '已删除用户' };
+}
 
 interface ConnectionCreateData {
   projectId: string;
@@ -64,11 +86,15 @@ export async function listConnections(
       orderBy: { updatedAt: 'desc' },
       skip: (page - 1) * pageSize,
       take: pageSize,
+      include: { project: { select: { id: true, name: true } } },
     }),
     prisma.connection.count({ where }),
   ]);
 
-  return { data: connections.map(mapToListItem), pagination: { page, pageSize, total } };
+  const userIds = connections.flatMap(c => [c.createdBy, c.updatedBy]).filter(Boolean) as string[];
+  const userMap = await resolveUserRefs(userIds);
+
+  return { data: connections.map(c => mapToListItem(c, userMap)), pagination: { page, pageSize, total } };
 }
 
 /** 创建连接 */
@@ -104,7 +130,8 @@ export async function createConnection(userId: string, data: ConnectionCreateDat
 
   try {
     const connection = await prisma.connection.create({ data: createData });
-    return toDetail(connection, false);
+    const userMap = await resolveUserRefs([connection.createdBy, connection.updatedBy]);
+    return toDetail(connection, false, userMap);
   } catch (error) {
     await handlePrismaUniqueViolation(error);
     throw error;
@@ -116,7 +143,19 @@ export async function getConnection(connectionId: string, userRole: string) {
   const connection = await prisma.connection.findUnique({ where: { id: connectionId } });
   if (!connection) throw createAppError('CONN_002');
 
-  return toDetail(connection, userRole === 'admin');
+  // C5: lastAccessed 节流更新
+  const now = Date.now();
+  const lastUpdate = lastAccessedUpdates.get(connectionId);
+  if (!lastUpdate || now - lastUpdate > LAST_ACCESSED_THROTTLE_MS) {
+    lastAccessedUpdates.set(connectionId, now);
+    prisma.connection.update({
+      where: { id: connectionId },
+      data: { lastAccessed: new Date() },
+    }).catch(() => {}); // fire-and-forget
+  }
+
+  const userMap = await resolveUserRefs([connection.createdBy, connection.updatedBy]);
+  return toDetail(connection, userRole !== 'viewer', userMap);
 }
 
 /** 更新连接 */
@@ -192,7 +231,8 @@ export async function updateConnection(userId: string, connectionId: string, dat
       where: { id: connectionId },
       data: updateData,
     });
-    return toDetail(connection, false);
+    const userMap = await resolveUserRefs([connection.createdBy, connection.updatedBy]);
+    return toDetail(connection, false, userMap);
   } catch (error) {
     if (error instanceof Error && (error as unknown as { code: string }).code === 'P2025') {
       throw createAppError('CONN_002');
@@ -227,6 +267,18 @@ export async function decryptPassword(connectionId: string) {
     select: { encryptedPass: true },
   });
   if (!connection) throw createAppError('CONN_002');
+
+  // C5: lastAccessed 节流更新
+  const now = Date.now();
+  const lastUpdate = lastAccessedUpdates.get(connectionId);
+  if (!lastUpdate || now - lastUpdate > LAST_ACCESSED_THROTTLE_MS) {
+    lastAccessedUpdates.set(connectionId, now);
+    prisma.connection.update({
+      where: { id: connectionId },
+      data: { lastAccessed: new Date() },
+    }).catch(() => {}); // fire-and-forget
+  }
+
   if (!connection.encryptedPass) {
     return { password: '' };
   }
@@ -330,12 +382,15 @@ function mapToListItem(c: {
   tags: string | null;
   lastAccessed: Date | null;
   createdBy: string;
+  updatedBy: string;
   createdAt: Date;
   updatedAt: Date;
-}) {
+  project?: { id: string; name: string } | null;
+}, userMap: UserRefMap) {
   return {
     id: c.id,
     projectId: c.projectId,
+    project: c.project ?? null,
     name: c.name,
     host: c.host,
     port: c.port,
@@ -343,7 +398,8 @@ function mapToListItem(c: {
     vpnType: c.vpnType,
     tags: c.tags,
     lastAccessed: c.lastAccessed?.toISOString() ?? null,
-    createdBy: c.createdBy,
+    createdBy: getUserRef(userMap, c.createdBy),
+    updatedBy: getUserRef(userMap, c.updatedBy),
     createdAt: c.createdAt.toISOString(),
     updatedAt: c.updatedAt.toISOString(),
   };
@@ -368,7 +424,7 @@ function toDetail(c: {
   updatedBy: string;
   createdAt: Date;
   updatedAt: Date;
-}, includeEncryptedPass: boolean) {
+}, includeEncryptedPass: boolean, userMap: UserRefMap) {
   return {
     id: c.id,
     projectId: c.projectId,
@@ -384,8 +440,8 @@ function toDetail(c: {
     notes: c.notes,
     tags: c.tags,
     lastAccessed: c.lastAccessed?.toISOString() ?? null,
-    createdBy: c.createdBy,
-    updatedBy: c.updatedBy,
+    createdBy: getUserRef(userMap, c.createdBy),
+    updatedBy: getUserRef(userMap, c.updatedBy),
     createdAt: c.createdAt.toISOString(),
     updatedAt: c.updatedAt.toISOString(),
   };

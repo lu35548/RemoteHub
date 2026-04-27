@@ -12,6 +12,9 @@ vi.mock('../utils/prisma.js', () => ({
       delete: vi.fn(),
       count: vi.fn(),
     },
+    user: {
+      findMany: vi.fn(),
+    },
   },
 }));
 
@@ -96,6 +99,11 @@ function setupFindUnique(...values: any[]) {
 describe('connectionService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // 默认 resolveUserRefs 返回用户昵称
+    (prisma.user.findMany as MockFn).mockResolvedValue([
+      { id: 'user-1', nickname: 'User One' },
+      { id: 'admin-1', nickname: 'Admin' },
+    ]);
   });
 
   // ────────────────────────────────────────────────
