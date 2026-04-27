@@ -1,0 +1,20 @@
+{$HOST:remotehub.example.com} {
+    encode gzip
+
+    header {
+        X-Frame-Options DENY
+        X-Content-Type-Options nosniff
+        X-XSS-Protection "1; mode=block"
+        Strict-Transport-Security "max-age=31536000"
+    }
+
+    handle /api/* {
+        reverse_proxy backend:3001
+    }
+
+    handle {
+        root * /srv/frontend
+        try_files {path} /index.html
+        file_server
+    }
+}
