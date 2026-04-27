@@ -83,21 +83,23 @@ export async function updateMemberRole(projectId: string, targetUserId: string, 
   });
 }
 
-/** 移除成员/退出 §4.2 */
+/** 移除成员/退出 §4.2（事务：owner count 检查 + delete） */
 export async function removeMember(projectId: string, targetUserId: string, _callerUserId: string, _callerRole: string) {
-  const member = await prisma.projectMember.findUnique({
-    where: { projectId_userId: { projectId, userId: targetUserId } },
-  });
-  if (!member) throw createAppError('MEMBER_001');
-
-  // 如果移除的是 owner，检查 owner count §4.2
-  if (member.role === 'owner') {
-    const ownerCount = await prisma.projectMember.count({
-      where: { projectId, role: 'owner' },
+  return prisma.$transaction(async (tx) => {
+    const member = await tx.projectMember.findUnique({
+      where: { projectId_userId: { projectId, userId: targetUserId } },
     });
-    if (ownerCount <= 1) throw createAppError('MEMBER_002');
-  }
+    if (!member) throw createAppError('MEMBER_001');
 
-  await prisma.projectMember.delete({ where: { id: member.id } });
-  return { id: member.id };
+    // 如果移除的是 owner，检查 owner count §4.2
+    if (member.role === 'owner') {
+      const ownerCount = await tx.projectMember.count({
+        where: { projectId, role: 'owner' },
+      });
+      if (ownerCount <= 1) throw createAppError('MEMBER_002');
+    }
+
+    await tx.projectMember.delete({ where: { id: member.id } });
+    return { id: member.id };
+  });
 }

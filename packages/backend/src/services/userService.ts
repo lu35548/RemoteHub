@@ -44,11 +44,8 @@ export async function getUser(id: string) {
   return user;
 }
 
-/** 管理员修改用户 §4.2 */
+/** 管理员修改用户 §4.2（事务：admin count 检查 + update） */
 export async function updateUser(callerId: string, targetId: string, data: { nickname?: string; role?: string; isActive?: boolean }) {
-  const target = await prisma.user.findUnique({ where: { id: targetId } });
-  if (!target) throw createAppError('USER_002');
-
   // 白名单过滤 §4.2
   const updateData: Record<string, unknown> = {};
 
@@ -63,59 +60,68 @@ export async function updateUser(callerId: string, targetId: string, data: { nic
     if (data.role !== 'admin' && data.role !== 'user') {
       throw createAppError('VAL_001', [{ field: 'role', message: '无效的用户角色' }]);
     }
-    // 从 admin 降级 → 检查 admin 数量 §4.2
-    if (target.role === 'admin' && data.role === 'user') {
-      const adminCount = await prisma.user.count({ where: { role: 'admin', isActive: true } });
-      if (adminCount <= 1) throw createAppError('AUTH_003');
-    }
     updateData.role = data.role;
   }
 
   if (data.isActive !== undefined) {
-    // 禁用最后一个 admin §4.2
-    if (data.isActive === false && target.role === 'admin') {
-      const adminCount = await prisma.user.count({ where: { role: 'admin', isActive: true } });
-      if (adminCount <= 1) throw createAppError('AUTH_003');
-    }
     updateData.isActive = data.isActive;
   }
 
-  const updated = await prisma.user.update({
-    where: { id: targetId },
-    data: updateData,
-    select: { id: true, username: true, nickname: true, role: true, isActive: true, lastActiveAt: true, createdAt: true },
-  });
+  return prisma.$transaction(async (tx) => {
+    const target = await tx.user.findUnique({ where: { id: targetId } });
+    if (!target) throw createAppError('USER_002');
 
-  return updated;
+    // 从 admin 降级 → 检查 admin 数量 §4.2
+    if (data.role !== undefined && target.role === 'admin' && data.role === 'user') {
+      const adminCount = await tx.user.count({ where: { role: 'admin', isActive: true } });
+      if (adminCount <= 1) throw createAppError('AUTH_003');
+    }
+
+    // 禁用最后一个 admin §4.2
+    if (data.isActive === false && target.role === 'admin') {
+      const adminCount = await tx.user.count({ where: { role: 'admin', isActive: true } });
+      if (adminCount <= 1) throw createAppError('AUTH_003');
+    }
+
+    const updated = await tx.user.update({
+      where: { id: targetId },
+      data: updateData,
+      select: { id: true, username: true, nickname: true, role: true, isActive: true, lastActiveAt: true, createdAt: true },
+    });
+
+    return updated;
+  });
 }
 
-/** 删除用户 §4.2 */
+/** 删除用户 §4.2（事务：admin/owner count 检查 + delete） */
 export async function deleteUser(callerId: string, targetId: string) {
   // 禁止删除自己 §4.2
   if (callerId === targetId) throw createAppError('AUTH_003');
 
-  const target = await prisma.user.findUnique({ where: { id: targetId } });
-  if (!target) throw createAppError('USER_002');
+  return prisma.$transaction(async (tx) => {
+    const target = await tx.user.findUnique({ where: { id: targetId } });
+    if (!target) throw createAppError('USER_002');
 
-  // 禁止删除最后一个 admin §4.2
-  if (target.role === 'admin') {
-    const adminCount = await prisma.user.count({ where: { role: 'admin', isActive: true } });
-    if (adminCount <= 1) throw createAppError('AUTH_003');
-  }
+    // 禁止删除最后一个 admin §4.2
+    if (target.role === 'admin') {
+      const adminCount = await tx.user.count({ where: { role: 'admin', isActive: true } });
+      if (adminCount <= 1) throw createAppError('AUTH_003');
+    }
 
-  // 检查是否是唯一 owner §4.2
-  const ownedProjects = await prisma.projectMember.findMany({
-    where: { userId: targetId, role: 'owner' },
-    select: { projectId: true },
-  });
-
-  for (const pm of ownedProjects) {
-    const ownerCount = await prisma.projectMember.count({
-      where: { projectId: pm.projectId, role: 'owner' },
+    // 检查是否是唯一 owner §4.2
+    const ownedProjects = await tx.projectMember.findMany({
+      where: { userId: targetId, role: 'owner' },
+      select: { projectId: true },
     });
-    if (ownerCount <= 1) throw createAppError('MEMBER_003');
-  }
 
-  await prisma.user.delete({ where: { id: targetId } });
-  return { id: targetId };
+    for (const pm of ownedProjects) {
+      const ownerCount = await tx.projectMember.count({
+        where: { projectId: pm.projectId, role: 'owner' },
+      });
+      if (ownerCount <= 1) throw createAppError('MEMBER_003');
+    }
+
+    await tx.user.delete({ where: { id: targetId } });
+    return { id: targetId };
+  });
 }
