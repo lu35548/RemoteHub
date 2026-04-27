@@ -87,11 +87,13 @@ import { healthRoutes } from './routes/healthRoutes.js';
 import { authRoutes } from './routes/authRoutes.js';
 import { userRoutes } from './routes/userRoutes.js';
 import { projectRoutes } from './routes/projectRoutes.js';
+import { memberRoutes } from './routes/memberRoutes.js';
 
 app.use('/api/v1/health', healthRoutes);
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/projects', projectRoutes);
+app.use('/api/v1/projects/:id/members', memberRoutes);
 
 // ─── 404 ───
 app.use((_req: Request, _res: Response, next: NextFunction) => {
