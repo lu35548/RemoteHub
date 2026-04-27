@@ -11,7 +11,7 @@ export const authRoutes: RouterType = Router();
 authRoutes.post('/login', authController.login);
 authRoutes.post('/register', authMiddleware, roleMiddleware('admin'), authController.register);
 authRoutes.post('/refresh', authController.refresh);
-authRoutes.post('/logout', authController.logout);
+authRoutes.post('/logout', authMiddleware, authController.logout);
 authRoutes.get('/me', authMiddleware, authController.me);
 authRoutes.post('/change-password', authMiddleware, authController.changePassword);
 authRoutes.patch('/profile', authMiddleware, authController.updateProfile);
