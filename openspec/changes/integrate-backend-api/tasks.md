@@ -1,3 +1,11 @@
+> ⚠️ **状态说明（2026-06-24 审计更新）**
+> 本 tasks.md 的完成标记（尤其 §6.1–6.6）指向的是**根目录 `backend/`（旧 TypeORM 实现）**，该实现已在 v2 refactor 中被整体重写为 `packages/backend/`（Prisma 6 + Express 5 + MySQL）。
+> - 旧 `backend/` 保留为 phase2 移植参考，**非活代码**，不在 pnpm workspace、不参与构建
+> - 当前 `packages/backend/` 仅实现一期核心（auth / user / project / member / connection），有 145 个 mock 单元测试
+> - §6.x 描述的审计 / 备份 / 监控 / WebSocket / 导出 / 安全功能，将在 phase2 于新架构重新实现，参见 `docs/superpowers/specs/2026-04-23-remotehub-v2-phase2-design.md`
+> - §8（测试）的集成测试项全部未完成
+> - 详见审计报告：`docs/superpowers/specs/2026-06-24-remotehub-audit.md`
+
 ## 1. Frontend Preparation
 - [x] 1.1 Create API adapter interface replacing localStorage adapter
 - [x] 1.2 Add environment configuration for API endpoints

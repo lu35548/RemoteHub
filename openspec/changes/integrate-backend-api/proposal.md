@@ -1,3 +1,11 @@
+> ⚠️ **状态：已被取代（2026-04 v2 refactor）**
+> 本 change 描述的"集成后端 API"方案已以全新架构重新实现，**本文件仅作历史记录**：
+> - 旧实现位于根目录 `backend/`（TypeORM + 大量 mock），保留为历史参考，**非活代码**，不参与构建（不在 pnpm workspace）
+> - 当前活代码在 `packages/backend/`（Express 5 + Prisma 6 + MySQL）
+> - 权威设计文档：`docs/superpowers/specs/2026-04-23-remotehub-v2-refactor-design.md`
+> - 本 change 未走 archive 流程；其 `tasks.md` 的完成标记反映的是已废弃的旧 `backend/`，**不代表** `packages/backend/` 现状
+> - 详见审计报告：`docs/superpowers/specs/2026-06-24-remotehub-audit.md`
+
 # Change: Integrate Backend API and Database Support
 
 ## Why

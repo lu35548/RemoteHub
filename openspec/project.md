@@ -1,197 +1,132 @@
 # Project Context
 
 ## Purpose
-RemoteHub 是一个团队远程协作平台，旨在为企业和团队提供统一的远程连接管理解决方案。项目的主要目标是：
+RemoteHub 是一个团队远程协作平台，为企业和团队提供统一的远程连接资源（RDP/SSH/VNC/VPN 及商业远程工具）集中管理。核心目标：
 
-- 集中管理团队成员的远程连接资源（服务器、桌面、VPN等）
-- 提供基于项目的资源组织和权限管理
-- 支持多种远程协议和连接方式
-- 实现用户认证和在线状态跟踪
-- 提供直观易用的Web界面，支持快速资源访问
-- 集成AI助手功能，提供智能辅助和建议
+- 集中管理团队成员的远程连接资源
+- 提供基于项目的资源组织和细粒度权限管理（owner/editor/viewer + 全局 admin）
+- 支持多种远程协议和 VPN 依赖关系
+- 用户认证（JWT + refresh token 轮换）、在线状态跟踪、审计留痕
+- 公司服务器一键部署（Docker），支持内网 + 外网访问，支撑几百人并发
 
 ## Tech Stack
-### 前端技术栈
-- **React 19.2.0** - 主要UI框架
-- **TypeScript 5.8.2** - 类型安全的JavaScript
-- **Vite 6.2.0** - 构建工具和开发服务器
-- **Tailwind CSS** - 样式框架（通过CDN或本地构建）
+RemoteHub 是 pnpm workspace monorepo（`packages/{shared,backend,frontend}`）。
 
-### UI组件和图标
-- **Lucide React 0.554.0** - 现代化图标库
-- 自定义UI组件系统（Toast、Modal、Confirmation等）
+### 后端（packages/backend）
+- **Express 5** + TypeScript（strict）— REST API
+- **Prisma 6.x** + **MySQL 8** — ORM 与数据库（开发/生产统一 MySQL；SQLite 仅限快速演示）
+- **jose** — JWT（access token，默认 15min）
+- **bcryptjs**（12 轮）— 用户密码哈希
+- **AES-256-GCM** — 连接密码对称加密（单一全局 `ENCRYPTION_KEY`，版本前缀 `v1:`，支持密钥轮换）
+- **cookie-parser / helmet / express-rate-limit / cors** — 中间件
+- **winston** — 结构化日志
+- **node-cron** — 定时任务（Session 清理 03:00）
 
-### AI集成
-- **Google Gemini API (@google/genai 1.30.0)** - AI助手功能
+### 前端（packages/frontend）
+- **React 19** + **Vite 6** + TypeScript（strict）
+- **TanStack Query** — 服务端状态管理
+- 统一 HTTP 客户端（401 自动刷新拦截器 + 应用初始化门）
+- **Lucide React** — 图标
+- Tailwind CSS
 
-### 开发工具
-- **@vitejs/plugin-react 5.0.0** - React支持
-- **@types/node 22.14.0** - Node.js类型定义
+### 共享包（packages/shared）
+- 前后端共享的类型（API DTO）、枚举（Protocol / VpnType / UserRole / MemberRole）、常量、验证器
 
-### 数据存储
-- **浏览器本地存储** - 主要数据持久化方案
-- **自定义存储适配器** - 统一的存储抽象层
+### 部署
+- **Docker Compose** + **Caddy 2**（反向代理，自动 HTTPS / 内网证书）
+- 后端两阶段构建（esbuild 编译 `seed.ts` → `seed.js`）
+- 数据库通过 `prisma migrate deploy` 应用迁移
 
-### 运行环境
-- **现代浏览器** - 支持ES2022特性
-- **无需后端服务器** - 纯前端应用
+### 测试
+- **Vitest** — 前后端统一测试框架
+- 后端现有 145 个 mock 单元测试（auth/user/project/member/connection 的 service + controller + middleware）
+- 集成测试基础设施待建（phase2 目标）
 
 ## Project Conventions
 
-### Code Style
-#### 命名约定
-- **文件命名**: 使用PascalCase命名组件文件（如 `ConnectionCard.tsx`），camelCase命名服务文件（如 `auth.service.ts`）
-- **组件命名**: React组件使用PascalCase（如 `ConnectionModal`）
-- **变量和函数**: 使用camelCase（如 `handleSaveConnection`）
-- **常量**: 使用UPPER_SNAKE_CASE命名枚举和常量
-- **接口和类型**: 使用PascalCase，以`I`或`Props`结尾的可选前缀
+### 架构分层（后端）
+- **routes** → **controllers**（输入验证，并行收集错误）→ **services**（业务逻辑 + Prisma）→ **utils**（prisma / encryption / password / logger / appError）
+- 三层权限中间件链：`authMiddleware`（JWT → 查用户 → `req.user`）→ `roleMiddleware`（全局角色）→ `projectRoleMiddleware`（项目级角色，admin 绕过）
+- 统一响应格式 `{ success, data | error }`；错误码体系（AUTH / USER / PROJ / CONN / MEMBER / VAL / SYS）
 
-#### 代码组织
-- **组件结构**: 按功能分组，每个组件一个文件
-- **导入顺序**: React相关导入 → 第三方库 → 本地组件 → 服务 → 类型定义
-- **导出方式**: 主要使用命名导出，默认导出用于主要组件
+### 命名约定
+- 表名 snake_case 复数（`@@map`），列名 snake_case（`@map`）
+- 组件 PascalCase，服务 camelCase
+- 提交格式 `<类型>: <描述>`（feat / fix / refactor / test / docs / chore），描述用中文
 
-#### TypeScript规范
-- 启用严格类型检查
-- 使用接口定义数据结构（`types.ts`）
-- 为所有函数参数和返回值指定类型
-- 使用枚举表示固定选项集
+### TypeScript 规范
+- `strict: true`（后端 + 前端 + shared）
+- 禁止 `any`（用 `unknown` + 类型收窄）、禁止 `@ts-ignore`
+- 共享类型从 `@remotehub/shared` 导入
 
-### Architecture Patterns
-#### 分层架构
-- **表现层**: React组件和UI逻辑
-- **服务层**: 业务逻辑和数据操作（`services/`）
-- **存储层**: 数据持久化抽象（`storage.adapter.ts`）
+### 数据库规范
+- 不用 JSON / Enum 数据库类型（String + 应用层验证），保证 MySQL / SQL Server 兼容
+- 可能含中文的字段不指定 `@db.VarChar`
+- `createdBy` / `updatedBy` 不建外键（String 存 userId，删除用户保留原值）
+- 生产用 `prisma migrate deploy`，禁止 `db push`
 
-#### 设计模式
-- **服务层模式**: 使用静态类封装数据操作
-- **适配器模式**: 存储适配器抽象本地存储操作
-- **提供者模式**: UI上下文提供全局状态（Toast、Confirm）
-- **守卫模式**: 认证守卫保护路由访问
-
-#### 状态管理
-- 使用React Hooks进行本地状态管理
-- 无外部状态管理库
-- 服务层处理数据同步
-
-### Testing Strategy
-#### 测试框架
-- 目前项目未配置测试框架
-- 建议使用Jest + React Testing Library进行单元测试
-- 使用Vitest进行集成测试
-
-#### 测试重点
-- **服务层测试**: 数据操作和业务逻辑
-- **组件测试**: 用户交互和UI渲染
-- **认证流程**: 登录、权限验证、会话管理
-- **数据持久化**: 本地存储读写操作
-
-#### 测试约定
-- 使用describe-it组织测试结构
-- 测试文件命名: `*.test.ts` 或 `*.spec.ts`
-- 覆盖率目标: 80%以上
-
-### Git Workflow
-#### 分支策略
-- **main**: 生产环境分支
-- **develop**: 开发环境分支
-- **feature/功能名**: 功能开发分支
-- **hotfix/修复名**: 紧急修复分支
-
-#### 提交约定
-使用中文提交信息，格式:
-```
-<类型>: <描述>
-
-[可选的详细描述]
-```
-
-类型包括:
-- `feat`: 新功能
-- `fix`: 修复
-- `docs`: 文档更新
-- `style`: 样式调整
-- `refactor`: 重构
-- `test`: 测试相关
-- `chore`: 构建工具、依赖更新等
-
-### Architecture Patterns
-[Document your architectural decisions and patterns]
-
-### Testing Strategy
-[Explain your testing approach and requirements]
-
-### Git Workflow
-[Describe your branching strategy and commit conventions]
+### 安全规范
+- 用户密码 bcryptjs 12 轮；连接密码 AES-256-GCM
+- JWT access ≤30min；refresh token HTTP-only + Secure + SameSite=Strict Cookie，轮换 + 重用检测
+- 速率限制：登录 5/min、注册 3/min、刷新 20/min、通用 200/min
+- 密码字段永不返回前端（Service 层 strip）
 
 ## Domain Context
-### 远程连接管理领域
-#### 支持的协议类型
-- **RDP (远程桌面协议)**: Windows远程桌面连接
-- **SSH**: Linux/Unix服务器安全连接
-- **VNC**: 虚拟网络计算，跨平台桌面共享
-- **HTTP/HTTPS**: Web应用访问
-- **VPN**: 虚拟专用网络连接
-- **远程工具**: ToDesk、向日葵、TeamViewer、AnyDesk等商业远程软件
 
-#### 业务概念
-- **项目**: 作为容器组织相关连接资源
-- **连接**: 具体的远程连接配置，包含主机、端口、认证信息等
-- **用户**: 系统使用者，支持管理员和普通用户角色
-- **审计**: 数据变更的追踪记录（创建者、修改者、时间戳）
-- **在线状态**: 用户活跃度跟踪，基于心跳机制
+### 远程连接管理
+#### 支持的协议
+- **标准**：RDP、SSH、VNC、HTTP、HTTPS
+- **VPN**：SSL_VPN、IPSEC、WIREGUARD、OPENVPN、OTHER
+- **商业远程工具**：TODESK、SUNLOGIN、TEAMVIEWER、ANYDESK
 
-#### 数据模型
-- **用户认证**: 基于本地存储的会话管理
-- **权限控制**: 基于角色的访问控制（RBAC）
-- **数据关系**: 项目与连接的一对多关系
-- **依赖管理**: VPN连接之间的依赖关系
+#### 核心业务概念
+- **项目（Project）**：连接资源的组织容器，名称全局唯一
+- **连接（Connection）**：具体远程连接配置（主机 / 端口 / 协议 / 加密密码 / VPN 依赖等）
+- **用户（User）**：全局角色 admin / user
+- **项目成员（ProjectMember）**：项目级角色 owner / editor / viewer
+- **VPN 依赖**：连接可依赖同项目内的 VPN 连接（自引用关联，含循环检测 / 删除保护 / 同项目约束）
+- **审计字段**：createdBy / updatedBy / createdAt / updatedAt 记录变更溯源
 
-### UI/UX设计原则
-- **现代化界面**: 深色主题（slate-950），强调对比度
-- **响应式设计**: 支持不同屏幕尺寸的自适应布局
-- **直观操作**: 拖拽、快捷键、上下文菜单
-- **状态反馈**: 加载状态、成功/错误提示
-- **国际化**: 支持中文界面，具备扩展多语言能力
+#### 权限模型
+- admin 全局权限，可操作任意资源
+- 项目级角色仅对已加入项目生效；用户只能访问所属项目的连接
+- 删除保护：唯一 owner 不可删除 / 降级、最后一个 admin 不可删除 / 禁用、被依赖的 VPN 不可直接删除
+
+### UI/UX 原则
+- 深色主题（slate-950），强调对比度
+- 响应式布局，状态反馈（加载 / 成功 / 错误）
+- 中文界面
 
 ## Important Constraints
+
 ### 技术约束
-- **纯前端应用**: 无后端服务器支持，所有数据存储在浏览器本地
-- **浏览器兼容性**: 需要支持现代浏览器的ES2022特性
-- **数据持久化**: 依赖localStorage，有存储容量限制（通常5-10MB）
-- **安全性**: 密码仅使用简单哈希，不适合存储敏感信息
-- **同步机制**: 无实时数据同步，多用户间数据不共享
+- **部署形态**：Docker Compose 单机部署，Caddy 反向代理，目标几百人并发
+- **数据库**：MySQL 统一（开发 + 生产）；SQL Server 为可选非默认路径（需独立迁移目录）
+- **Prisma 版本锁定 6.x**（不用 v7，生产稳定性争议）
+- **密钥管理**：`JWT_SECRET`、`ENCRYPTION_KEY` 从环境变量读取，缺失即启动报错；支持 `ENCRYPTION_KEY_OLD` 懒迁移轮换
 
 ### 业务约束
-- **单机部署**: 每个用户的数据独立存储，无法实现团队数据共享
-- **用户管理**: 仅支持本地用户账户，无外部认证集成
-- **审计要求**: 所有数据变更需要记录创建者、修改者和时间戳
-- **数据备份**: 需要用户手动导出配置文件进行备份
+- 多用户共享数据，基于项目的 RBAC 权限隔离
+- 连接密码加密存储，解密走专用接口（owner/editor/admin），明文不持久化
+- 一期从零开始，不迁移 localStorage 历史数据
 
-### 法律和合规
-- **数据隐私**: 所有数据存储在用户本地，符合数据隐私保护要求
-- **开源协议**: 项目代码需要明确开源许可证
-- **第三方API**: Gemini API使用需要遵守Google服务条款
+### 当前已知缺口（2026-06-24 审计）
+- ⚠️ Prisma migration 文件缺失（`packages/backend/prisma/migrations/` 不存在），生产部署 `migrate deploy` 会失败
+- ⚠️ 无 CI（`.github/` 空，145 个测试无自动化兜底）
+- phase2（审计日志 / 监控 / 安全增强 / 备份 / WebSocket / 密码重置 / 导入导出 / 项目增强 / 2FA / K8s 探针 / Swagger）尚未实施
+- 前端仅 API 客户端骨架，16 个 UI 组件仍留在根目录 `RemoteHub/` 未迁移
 
 ## External Dependencies
-### API服务
-- **Google Gemini API**:
-  - 用途: AI助手功能，提供智能建议和辅助
-  - 认证: 通过API密钥认证
-  - 配置: 环境变量 `GEMINI_API_KEY`
-  - 依赖包: `@google/genai@1.30.0`
 
-### 构建依赖
-- **Vite构建工具**: 现代化前端构建工具
-- **React插件**: 支持JSX和React开发
-- **TypeScript编译器**: 类型检查和编译
+### 运行时
+- **MySQL 8.0** — 主数据库
+- **Caddy 2** — 反向代理 + 自动 HTTPS
+- **Docker** — 容器化部署
 
-### 运行时依赖
-- **React运行时**: 组件渲染和状态管理
-- **Lucide React**: 图标组件库
-- **现代浏览器特性**: ES2022、ESModules、Web APIs
+### 关键 npm 依赖
+- 后端：express、@prisma/client、jose、bcryptjs、helmet、express-rate-limit、cookie-parser、winston、node-cron、cors
+- 前端：react、react-dom、@tanstack/react-query、lucide-react
+- 共享：typescript
 
-### 开发依赖
-- **Node.js**: 运行开发环境和构建工具
-- **TypeScript**: 类型定义和编译器
-- **Vite**: 开发服务器和构建工具
+### 外部服务
+- 无（一期不依赖任何外部 SaaS；邮件 / SMTP 为 phase2 预留，默认不实现）
