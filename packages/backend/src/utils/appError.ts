@@ -29,6 +29,7 @@ export const ERROR_CODES: Record<string, number> = {
   MEMBER_003: 409,
   VAL_001: 422,
   SYS_001: 500,
+  SYS_002: 404,
 };
 
 export const ERROR_MESSAGES: Record<string, string> = {
@@ -50,6 +51,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   MEMBER_003: '用户是项目唯一owner，无法删除',
   VAL_001: '输入验证失败',
   SYS_001: '内部服务器错误',
+  SYS_002: '路由不存在',
 };
 
 export function createAppError(code: string, details?: Array<{ field: string; message: string }>): AppError {
@@ -67,6 +69,7 @@ export async function handlePrismaUniqueViolation(error: unknown): Promise<never
     if (target === 'name') throw createAppError('PROJ_001');
     if (target === 'projectId,name') throw createAppError('CONN_005');
     if (target === 'projectId,userId') throw createAppError('MEMBER_001');
+    if (target === 'tokenHash') throw createAppError('SYS_001');
   }
   throw error;
 }

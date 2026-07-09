@@ -75,7 +75,7 @@ if (env.CORS_ORIGIN) {
 }
 
 // 6. Trust proxy
-app.set('trust proxy', true);
+app.set('trust proxy', 1); // 单跳反代（Caddy），防 X-Forwarded-For 伪造绕过速率限制
 
 // ─── Rate limiters applied to routes ───
 app.use('/api/v1/auth/login', loginLimiter);
@@ -100,7 +100,7 @@ app.use('/api/v1/connections', connectionRoutes);
 
 // ─── 404 ───
 app.use((_req: Request, _res: Response, next: NextFunction) => {
-  next(createAppError('SYS_001'));
+  next(createAppError('SYS_002'));
 });
 
 // ─── Global error handler ───
