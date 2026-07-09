@@ -84,7 +84,18 @@ export async function updateMemberRole(projectId: string, targetUserId: string, 
 }
 
 /** 移除成员/退出 §4.2（事务：owner count 检查 + delete） */
-export async function removeMember(projectId: string, targetUserId: string, _callerUserId: string, _callerRole: string) {
+export async function removeMember(projectId: string, targetUserId: string, callerUserId: string, callerRole: string) {
+  // 非 admin 需校验调用者项目角色 §4.2：owner 可移除任意成员，editor/viewer 只能移除自己
+  if (callerRole !== 'admin') {
+    const caller = await prisma.projectMember.findUnique({
+      where: { projectId_userId: { projectId, userId: callerUserId } },
+    });
+    if (!caller) throw createAppError('AUTH_003');
+    if (caller.role !== 'owner' && targetUserId !== callerUserId) {
+      throw createAppError('AUTH_003');
+    }
+  }
+
   return prisma.$transaction(async (tx) => {
     const member = await tx.projectMember.findUnique({
       where: { projectId_userId: { projectId, userId: targetUserId } },

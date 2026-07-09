@@ -35,7 +35,7 @@ export async function getConnection(req: Request, res: Response, next: NextFunct
   try {
     const id = req.params['id'];
     if (typeof id !== 'string') throw new Error('缺少 id');
-    const data = await connectionService.getConnection(id, req.user.role);
+    const data = await connectionService.getConnection(id, req.user.id, req.user.role);
     res.json({ success: true, data });
   } catch (err) { next(err); }
 }

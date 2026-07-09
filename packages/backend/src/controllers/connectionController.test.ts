@@ -167,7 +167,7 @@ describe('connectionController', () => {
       const { req, res, next } = mockReqRes({ id: 'c1' }, undefined, undefined, { id: 'u1', role: 'viewer' });
       await connectionController.getConnection(req, res, next);
 
-      expect(connectionService.getConnection).toHaveBeenCalledWith('c1', 'viewer');
+      expect(connectionService.getConnection).toHaveBeenCalledWith('c1', 'u1', 'viewer');
       expect(res.json).toHaveBeenCalledWith({ success: true, data: mockData });
       expect(next).not.toHaveBeenCalled();
     });

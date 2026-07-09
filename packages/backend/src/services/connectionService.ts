@@ -139,9 +139,20 @@ export async function createConnection(userId: string, data: ConnectionCreateDat
 }
 
 /** 连接详情 */
-export async function getConnection(connectionId: string, userRole: string) {
+export async function getConnection(connectionId: string, userId: string, userGlobalRole: string) {
   const connection = await prisma.connection.findUnique({ where: { id: connectionId } });
   if (!connection) throw createAppError('CONN_002');
+
+  // 决定是否返回 encryptedPass：admin 全权；否则按项目角色（owner/editor 可见，viewer 不可）§4.2
+  let includeEncryptedPass: boolean;
+  if (userGlobalRole === 'admin') {
+    includeEncryptedPass = true;
+  } else {
+    const member = await prisma.projectMember.findUnique({
+      where: { projectId_userId: { projectId: connection.projectId, userId } },
+    });
+    includeEncryptedPass = member?.role === 'owner' || member?.role === 'editor';
+  }
 
   // C5: lastAccessed 节流更新
   const now = Date.now();
@@ -155,7 +166,7 @@ export async function getConnection(connectionId: string, userRole: string) {
   }
 
   const userMap = await resolveUserRefs([connection.createdBy, connection.updatedBy]);
-  return toDetail(connection, userRole !== 'viewer', userMap);
+  return toDetail(connection, includeEncryptedPass, userMap);
 }
 
 /** 更新连接 */
