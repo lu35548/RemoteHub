@@ -14,7 +14,7 @@ export const env = {
   ENCRYPTION_KEY: requireEnv('ENCRYPTION_KEY'),
   ENCRYPTION_KEY_OLD: process.env.ENCRYPTION_KEY_OLD || null,
   ADMIN_USERNAME: process.env.ADMIN_USERNAME || 'admin',
-  ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || 'Admin123',
+  ADMIN_PASSWORD: requireEnv('ADMIN_PASSWORD'),
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',
   RATE_LIMIT_LOGIN_MAX: parseInt(process.env.RATE_LIMIT_LOGIN_MAX || '5', 10),
   RATE_LIMIT_REGISTER_MAX: parseInt(process.env.RATE_LIMIT_REGISTER_MAX || '3', 10),
@@ -22,3 +22,11 @@ export const env = {
   RATE_LIMIT_GENERAL_MAX: parseInt(process.env.RATE_LIMIT_GENERAL_MAX || '200', 10),
   CORS_ORIGIN: process.env.CORS_ORIGIN || '',
 } as const;
+
+// 密钥格式校验（fail-fast，启动时即暴露配置错误，避免运行时才报 ERR_CRYPTO_INVALID_KEYLEN）
+if (Buffer.from(env.ENCRYPTION_KEY, 'base64').length !== 32) {
+  throw new Error('ENCRYPTION_KEY 必须是 base64 编码且解码后为 32 字节（AES-256-GCM）');
+}
+if (env.JWT_SECRET.length < 32) {
+  throw new Error('JWT_SECRET 长度至少 32 字符');
+}

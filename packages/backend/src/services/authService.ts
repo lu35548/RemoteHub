@@ -116,6 +116,7 @@ export async function refresh(oldRefreshToken: string) {
 
     // 并发 refresh：30 秒内 §5.1
     if (session.consumedAt && Date.now() - session.consumedAt.getTime() < REFRESH_CONCURRENT_WINDOW_SEC * 1000) {
+      if (session.expiresAt <= new Date()) throw createAppError('AUTH_002');
       // 允许，返回新 token
       const accessToken = await signAccessToken(session.user.id);
       const newRefreshToken = generateRefreshToken();

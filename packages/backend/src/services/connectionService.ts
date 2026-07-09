@@ -119,8 +119,8 @@ export async function createConnection(userId: string, data: ConnectionCreateDat
     username: data.username ?? null,
     encryptedPass: data.password ? encrypt(data.password) : null,
     protocol: data.protocol,
-    vpnType: data.vpnType ?? null,
-    vpnLoginUrl: data.vpnLoginUrl ?? null,
+    vpnType: data.protocol === 'VPN' ? (data.vpnType ?? null) : null,
+    vpnLoginUrl: data.protocol === 'VPN' ? (data.vpnLoginUrl ?? null) : null,
     requiredVpnId: data.requiredVpnId ?? null,
     notes: data.notes ?? null,
     tags: data.tags ?? null,
@@ -203,18 +203,24 @@ export async function updateConnection(userId: string, connectionId: string, dat
     requiredVpnId: updatePayload.requiredVpnId !== undefined ? updatePayload.requiredVpnId as string | null : current.requiredVpnId,
   });
 
-  // protocol 从 VPN 改为非 VPN → 检查 dependents 并清空 VPN 字段
-  if (current.protocol === 'VPN' && merged.protocol !== 'VPN') {
-    const dependents = await prisma.connection.count({
-      where: { requiredVpnId: connectionId },
-    });
-    if (dependents > 0) {
-      throw createAppError('CONN_004');
+  // protocol 非 VPN → 强制 vpn 字段为 null §3.1（含 VPN→非VPN 降级：先查 dependents）
+  if (merged.protocol !== 'VPN') {
+    if (current.protocol === 'VPN') {
+      // 降级（VPN→非VPN）：检查 dependents + 清所有 VPN 字段
+      const dependents = await prisma.connection.count({
+        where: { requiredVpnId: connectionId },
+      });
+      if (dependents > 0) {
+        throw createAppError('CONN_004');
+      }
+      updatePayload.vpnType = null;
+      updatePayload.vpnLoginUrl = null;
+      updatePayload.requiredVpnId = null;
+    } else {
+      // 非降级（非VPN→非VPN）：只清 vpnType/vpnLoginUrl，requiredVpnId 保留（非 VPN 可依赖 VPN）
+      updatePayload.vpnType = null;
+      updatePayload.vpnLoginUrl = null;
     }
-    // 清空 VPN 字段
-    updatePayload.vpnType = null;
-    updatePayload.vpnLoginUrl = null;
-    updatePayload.requiredVpnId = null;
   }
 
   // VPN 依赖检查
@@ -347,27 +353,32 @@ function validateVpnConsistency(
       throw createAppError('VAL_001', [{ field: 'requiredVpnId', message: 'VPN 连接不能依赖其他 VPN' }]);
     }
   }
+  // protocol !== 'VPN' 的字段强制 null 在 createConnection/updateConnection 的 payload 构造中处理（自动置 null）
 }
 
 async function validateVpnDependency(vpnId: string, projectId: string, selfId?: string) {
+  // 目标不存在先查（CONN_002）§3.1 第6条：此检查必须在其他约束之前执行
+  const target = await prisma.connection.findUnique({ where: { id: vpnId } });
+  if (!target) {
+    throw createAppError('CONN_002');
+  }
+
   // 禁止自引用
   if (selfId && vpnId === selfId) {
     throw createAppError('VAL_001', [{ field: 'requiredVpnId', message: '不能依赖自身' }]);
   }
 
-  // 目标必须存在且同项目
-  const target = await prisma.connection.findUnique({ where: { id: vpnId } });
-  if (!target) {
-    throw createAppError('VAL_001', [{ field: 'requiredVpnId', message: '依赖的 VPN 连接不存在' }]);
-  }
+  // 同项目限制
   if (target.projectId !== projectId) {
     throw createAppError('VAL_001', [{ field: 'requiredVpnId', message: '依赖的 VPN 连接不在同一项目' }]);
   }
+
+  // 必须是 VPN 协议
   if (target.protocol !== 'VPN') {
     throw createAppError('VAL_001', [{ field: 'requiredVpnId', message: '依赖的连接必须是 VPN 协议' }]);
   }
 
-  // 循环检测（depth < 10）
+  // 循环检测（最大深度 10 层，超出 CONN_003）§3.1 第2条
   let current: { id: string; requiredVpnId: string | null } | null = target;
   let depth = 0;
   while (current?.requiredVpnId && depth < 10) {
@@ -379,6 +390,10 @@ async function validateVpnDependency(vpnId: string, projectId: string, selfId?: 
       select: { id: true, requiredVpnId: true },
     });
     depth++;
+  }
+  // depth 达 10 且链未到头 → 超出最大深度
+  if (current?.requiredVpnId) {
+    throw createAppError('CONN_003');
   }
 }
 

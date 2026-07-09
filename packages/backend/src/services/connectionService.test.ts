@@ -172,7 +172,8 @@ describe('connectionService', () => {
     it('自引用 → 抛出 VAL_001', async () => {
       const connId = 'conn-self';
       setupFindUnique(
-        { ...mockConnection, id: connId, protocol: 'SSH' }, // updateConnection 获取 current
+        { ...mockConnection, id: connId, protocol: 'SSH' }, // updateConnection current
+        { ...mockConnection, id: connId, protocol: 'SSH' }, // validateVpnDependency target（自己）
       );
 
       await expect(
@@ -195,11 +196,9 @@ describe('connectionService', () => {
           protocol: 'SSH',
           requiredVpnId: 'nonexistent-vpn',
         }),
-      ).rejects.toThrow('AppError:VAL_001');
+      ).rejects.toThrow('AppError:CONN_002');
 
-      expect(createAppError).toHaveBeenCalledWith('VAL_001', expect.arrayContaining([
-        expect.objectContaining({ message: '依赖的 VPN 连接不存在' }),
-      ]));
+      expect(createAppError).toHaveBeenCalledWith('CONN_002');
     });
 
     it('目标跨项目 → 抛出 VAL_001（依赖的 VPN 连接不在同一项目）', async () => {

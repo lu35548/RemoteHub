@@ -8,7 +8,7 @@ import { validateNickname, validatePassword as validatePwd } from '@remotehub/sh
 
 const REFRESH_COOKIE_OPTIONS = {
   httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
+  secure: true,
   sameSite: 'strict' as const,
   path: '/api/v1/auth',
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 天
@@ -16,7 +16,7 @@ const REFRESH_COOKIE_OPTIONS = {
 
 const CLEAR_COOKIE_OPTIONS = {
   httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
+  secure: true,
   sameSite: 'strict' as const,
   path: '/api/v1/auth',
   maxAge: 0,
