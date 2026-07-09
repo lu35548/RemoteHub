@@ -186,3 +186,58 @@ phase2 **0% 实施**（git log 无 phase2 feature commit，`packages/backend/src
 1. **B3/B4 执行节奏**: 报告 review 通过后，B3（plan 修订）与 B4（清理）是否连续执行？
 2. **B5 时机**: BLOCKER-1（migration）建议审计完后第一时间单独修（上线即坏级），是否立即安排？
 3. **前端迁移立项**: 是否在 phase2 之前启动前端迁移子项目的 brainstorming？
+
+---
+
+## 附录 A：代码级审查发现（2026-06-24 多维度代码审查）
+
+5 维度并行审查（security / performance / architecture / correctness / testing）+ 跨层一致性核对。去重后新增 **4 个代码级 BLOCKER**（叠加 §4.1 的 migration / CI，共 6 个 BLOCKER）。
+
+### A.1 代码级 BLOCKER
+
+| ID | 问题 | 证据（file:line） | 状态 |
+|----|------|-------------------|------|
+| B-3 | removeMember viewer 越权删成员（含 owner） | `memberService.ts:86` caller 参数 `_` 前缀未用；`memberRoutes.ts:14` 挂 `projectRoleMiddleware('viewer')` | ✅ 已修（commit 4af159e） |
+| B-4 | viewer 拿到 encryptedPass | `connectionController.ts:37` 传全局角色 → `connectionService.ts:157` `!== 'viewer'` 恒 true → `includeEncryptedPass` 恒 true | ✅ 已修（commit 4af159e） |
+| B-5 | refresh 事务不完整 | `authService.ts:95` `updateMany` 标记 consumedAt 在事务外，`:160` `$transaction([create])` 只含 create；create 失败则旧 token 已废、新 token 没发 | ⏳ 纳入 B5（认证核心，需重设计事务边界 + 更新测试 mock 支持回调形式） |
+| B-6 | 3 核心 service 零测试 + getConnection 未测 | `userService`/`projectService`/`memberService` 无 `.test.ts`；`getConnection` 的 viewer 密码隔离分支被 controller 测试 mock 掉（自欺） | ⏳ 纳入 B3（补 service 测试） |
+
+### A.2 新增 HIGH（精选）
+
+| 问题 | 证据 | 维度 |
+|------|------|------|
+| 默认 admin 密码 `Admin123` | `env.ts:17` | security |
+| `trust proxy: true` 可伪造 X-Forwarded-For，速率限制形同虚设 | `server.ts:78` | security |
+| VPN 循环深度≥10 静默放行，未返回 CONN_003 | `connectionService.ts:359-371` | correctness |
+| protocol≠VPN 时未强制 vpnType/vpnLoginUrl/requiredVpnId 为 null | `connectionService.ts:327-339` | correctness |
+| 并发 refresh 未校验 expiresAt，过期 token 在并发窗口被错误续签 | `authService.ts:117-133` | correctness |
+| VPN 目标不存在返回 VAL_001（422）而非 CONN_002（404） | `connectionService.ts:348-351` | correctness |
+| 404 路由兜底返回 500（SYS_001 错用） | `server.ts:102-104` | architecture+correctness |
+| controller 直接操作 Prisma（authController 回填 userAgent/ip） | `authController.ts:38` | architecture |
+| healthRoutes 无分层（route 内直接 `$queryRaw`） | `routes/healthRoutes.ts` | architecture |
+| changePassword 测试只断言"事务被调"，未验证撤 session | `authService.test.ts:280-287` | testing |
+| P2002 → 业务码映射零测试（mock 直接 re-throw） | `authService.test.ts:36`、`connectionService.test.ts:35` | testing |
+| 内存 Map 无淘汰（lastActiveUpdates / lastAccessedUpdates） | `auth.ts:7` + `connectionService.ts:14` | performance+architecture+correctness |
+| `server.ts` 顶层 `app.listen` 副作用，阻塞集成测试 | `server.ts:130` | architecture |
+| 连接池 connection_limit=30 缺失（代码层未兜底） | `env.ts:10` + `prisma.ts:5` | performance（与 §4.1 BLOCKER-1 同源） |
+
+另有 MEDIUM ~30 条、LOW ~20 条（详见各维度 reviewer 报告原文）。
+
+### A.3 交叉验证亮点
+
+**B-4（viewer 拿密码）**：security reviewer 在"已检查未发现问题"里误判"viewer 拿不到 encryptedPass"（false negative），correctness reviewer 发现传的是全局角色而非项目角色，`!== 'viewer'` 恒 true。**单维度审查会漏掉这个真实可利用漏洞**——这正是 spawn 多维 team 的价值。
+
+### A.4 完成度修正（代码审查后）
+
+| 维度 | 原评估 | 修正后 | 原因 |
+|------|--------|--------|------|
+| 安全就绪度 | 隐含 ~70% | ~50% → 修复 B-3/B-4 后 ~60% | 2 个可利用漏洞（已修），仍有默认密码/trust proxy 等 HIGH |
+| 测试有效性 | "145 测试通过" | ~40% | 3 核心 service 零覆盖，controller 测试 mock 掉被测逻辑自欺 |
+| 一期综合 | ~85% | ~70% → 修复 B-3/B-4 后 ~73% | 代码级问题拉低 |
+
+### A.5 修复优先级（更新）
+
+1. ✅ B-3 + B-4 已修（commit 4af159e）
+2. **B-5** refresh 事务 + **BLOCKER-1** migration → B5 批次（数据/部署破坏性）
+3. **B-6** 补 3 service 测试 + **BLOCKER-2** CI → B3/B5 批次
+4. 其余 HIGH（默认密码、trust proxy、VPN 约束、404 兜底等）→ phase2 前或随 phase2 修
