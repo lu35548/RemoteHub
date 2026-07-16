@@ -102,6 +102,11 @@ export async function createConnection(userId: string, data: ConnectionCreateDat
   // 验证字段
   validateConnectionFields(data);
 
+  // password 长度校验 §3.1（加密前，防超长导致存储溢出）
+  if (data.password && data.password.length > 200) {
+    throw createAppError('VAL_001', [{ field: 'password', message: '密码长度不能超过 200 字符' }]);
+  }
+
   // VPN 一致性检查
   validateVpnConsistency(data.protocol, data);
 
@@ -234,7 +239,8 @@ export async function updateConnection(userId: string, connectionId: string, dat
     const pw = updatePayload.password;
     if (pw === null || pw === '') {
       updatePayload.encryptedPass = null;
-    } else if (typeof pw === 'string' && pw.length > 0) {
+    } else if (typeof pw === 'string') {
+      if (pw.length > 200) throw createAppError('VAL_001', [{ field: 'password', message: '密码长度不能超过 200 字符' }]);
       updatePayload.encryptedPass = encrypt(pw);
     }
     delete updatePayload.password;

@@ -103,7 +103,8 @@ export async function deleteUser(callerId: string, targetId: string) {
     if (!target) throw createAppError('USER_002');
 
     // 禁止删除最后一个 admin §4.2
-    if (target.role === 'admin') {
+    // 仅当 target 是 active admin 时才做 last-admin 检查（删 inactive admin 不应被拦）§4.2
+    if (target.role === 'admin' && target.isActive) {
       const adminCount = await tx.user.count({ where: { role: 'admin', isActive: true } });
       if (adminCount <= 1) throw createAppError('AUTH_003');
     }
