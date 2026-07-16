@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ── Mocks ──────────────────────────────────────────────────────────────
-vi.mock('../utils/prisma.js', () => ({
-  prisma: {
+vi.mock('../utils/prisma.js', () => {
+  const prismaMock = {
     user: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
     session: {
       create: vi.fn(),
@@ -11,9 +11,14 @@ vi.mock('../utils/prisma.js', () => ({
       deleteMany: vi.fn(),
       delete: vi.fn(),
     },
-    $transaction: vi.fn((ops: any[]) => Promise.all(ops)),
-  },
-}));
+    $transaction: vi.fn(async (arg: any) => {
+      // 支持交互式事务回调形式（tx = prismaMock）+ 数组形式
+      if (typeof arg === 'function') return arg(prismaMock);
+      return Promise.all(arg);
+    }),
+  };
+  return { prisma: prismaMock };
+});
 
 vi.mock('../utils/password.js', () => ({
   verifyPassword: vi.fn(),

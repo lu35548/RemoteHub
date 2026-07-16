@@ -91,84 +91,83 @@ export async function register(callerRole: string, data: { username: string; nic
 export async function refresh(oldRefreshToken: string) {
   const tokenHash = hashRefreshToken(oldRefreshToken);
 
-  // 原子标记 consumedAt §5.1
-  const marked = await prisma.session.updateMany({
-    where: { tokenHash, consumedAt: null },
-    data: { consumedAt: new Date() },
-  });
+  // 待事务外执行的清理（禁用删 session / 重用撤销所有 session）—— 确保生效，不被事务 throw 回滚
+  let postAction: (() => Promise<void>) | null = null;
+  const runAction = async () => {
+    if (postAction) await postAction();
+  };
 
-  if (marked.count === 0) {
-    // 区分重用攻击 vs 并发 refresh §5.1
-    const session = await prisma.session.findUnique({ where: { tokenHash }, include: { user: true } });
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      // 原子标记 consumedAt（事务内：create 失败则回滚 consumedAt，token 仍有效）§5.1
+      const marked = await tx.session.updateMany({
+        where: { tokenHash, consumedAt: null },
+        data: { consumedAt: new Date() },
+      });
 
-    if (!session) {
-      // case 4: 无效 token
-      throw createAppError('AUTH_004');
-    }
+      if (marked.count === 0) {
+        // token 已被消费 → 区分重用 vs 并发 vs 无效
+        const session = await tx.session.findUnique({ where: { tokenHash }, include: { user: true } });
+        if (!session) throw createAppError('AUTH_004');
 
-    // 用户已禁用 §5.1
-    if (!session.user.isActive) {
-      await prisma.session.delete({ where: { id: session.id } }).catch(() => {});
-      const error = createAppError('AUTH_004');
-      (error as any).clearCookie = true;
-      throw error;
-    }
+        if (!session.user.isActive) {
+          postAction = async () => {
+            await prisma.session.delete({ where: { id: session.id } }).catch(() => {});
+          };
+          const error = createAppError('AUTH_004');
+          (error as any).clearCookie = true;
+          throw error;
+        }
 
-    // 并发 refresh：30 秒内 §5.1
-    if (session.consumedAt && Date.now() - session.consumedAt.getTime() < REFRESH_CONCURRENT_WINDOW_SEC * 1000) {
+        // 并发 refresh：30s 内
+        if (session.consumedAt && Date.now() - session.consumedAt.getTime() < REFRESH_CONCURRENT_WINDOW_SEC * 1000) {
+          if (session.expiresAt <= new Date()) throw createAppError('AUTH_002');
+          const accessToken = await signAccessToken(session.user.id);
+          const newRefreshToken = generateRefreshToken();
+          const newTokenHash = hashRefreshToken(newRefreshToken);
+          await tx.session.create({
+            data: { userId: session.user.id, tokenHash: newTokenHash, expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) },
+          });
+          return { accessToken, refreshToken: newRefreshToken, clearCookie: false };
+        }
+
+        // 重用攻击：撤销所有 session（事务外执行确保生效）
+        postAction = async () => {
+          await prisma.session.deleteMany({ where: { userId: session.userId } });
+        };
+        throw createAppError('AUTH_004');
+      }
+
+      // 正常情况：检查 token 有效性和用户状态
+      const session = await tx.session.findUnique({ where: { tokenHash }, include: { user: true } });
+      if (!session) throw createAppError('AUTH_004');
       if (session.expiresAt <= new Date()) throw createAppError('AUTH_002');
-      // 允许，返回新 token
+
+      if (!session.user.isActive) {
+        postAction = async () => {
+          await prisma.session.delete({ where: { id: session.id } }).catch(() => {});
+        };
+        const error = createAppError('AUTH_004');
+        (error as any).clearCookie = true;
+        throw error;
+      }
+
       const accessToken = await signAccessToken(session.user.id);
       const newRefreshToken = generateRefreshToken();
       const newTokenHash = hashRefreshToken(newRefreshToken);
-
-      await prisma.session.create({
-        data: {
-          userId: session.user.id,
-          tokenHash: newTokenHash,
-          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-        },
+      await tx.session.create({
+        data: { userId: session.user.id, tokenHash: newTokenHash, expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) },
       });
-
       return { accessToken, refreshToken: newRefreshToken, clearCookie: false };
-    }
+    });
 
-    // 重用攻击：撤销用户所有 session §5.1
-    await prisma.session.deleteMany({ where: { userId: session.userId } });
-    throw createAppError('AUTH_004');
+    await runAction();
+    return result;
+  } catch (err) {
+    // 事务 throw（禁用/重用/过期）：回滚后执行清理（确保 delete/deleteMany 生效）
+    await runAction();
+    throw err;
   }
-
-  // 正常情况：检查 token 有效性和用户状态
-  const session = await prisma.session.findUnique({ where: { tokenHash }, include: { user: true } });
-  if (!session) throw createAppError('AUTH_004');
-
-  if (session.expiresAt <= new Date()) {
-    throw createAppError('AUTH_002');
-  }
-
-  if (!session.user.isActive) {
-    await prisma.session.delete({ where: { id: session.id } }).catch(() => {});
-    const error = createAppError('AUTH_004');
-    (error as any).clearCookie = true;
-    throw error;
-  }
-
-  // 事务：创建新 session（旧 session 已在 updateMany 中标记 consumedAt）
-  const accessToken = await signAccessToken(session.user.id);
-  const newRefreshToken = generateRefreshToken();
-  const newTokenHash = hashRefreshToken(newRefreshToken);
-
-  await prisma.$transaction([
-    prisma.session.create({
-      data: {
-        userId: session.user.id,
-        tokenHash: newTokenHash,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      },
-    }),
-  ]);
-
-  return { accessToken, refreshToken: newRefreshToken, clearCookie: false };
 }
 
 /** Logout §5.1 */
