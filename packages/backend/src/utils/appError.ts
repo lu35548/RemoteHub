@@ -1,4 +1,7 @@
 export class AppError extends Error {
+  /** authController 据此在响应中清除 refreshToken cookie（禁用用户/重置密码场景） */
+  clearCookie?: boolean;
+
   constructor(
     public readonly code: string,
     public readonly statusCode: number,

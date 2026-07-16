@@ -115,7 +115,7 @@ export async function refresh(oldRefreshToken: string) {
             await prisma.session.delete({ where: { id: session.id } }).catch(() => {});
           };
           const error = createAppError('AUTH_004');
-          (error as any).clearCookie = true;
+          error.clearCookie = true;
           throw error;
         }
 
@@ -148,7 +148,7 @@ export async function refresh(oldRefreshToken: string) {
           await prisma.session.delete({ where: { id: session.id } }).catch(() => {});
         };
         const error = createAppError('AUTH_004');
-        (error as any).clearCookie = true;
+        error.clearCookie = true;
         throw error;
       }
 
