@@ -199,7 +199,7 @@ phase2 **0% 实施**（git log 无 phase2 feature commit，`packages/backend/src
 |----|------|-------------------|------|
 | B-3 | removeMember viewer 越权删成员（含 owner） | `memberService.ts:86` caller 参数 `_` 前缀未用；`memberRoutes.ts:14` 挂 `projectRoleMiddleware('viewer')` | ✅ 已修（commit 4af159e） |
 | B-4 | viewer 拿到 encryptedPass | `connectionController.ts:37` 传全局角色 → `connectionService.ts:157` `!== 'viewer'` 恒 true → `includeEncryptedPass` 恒 true | ✅ 已修（commit 4af159e） |
-| B-5 | refresh 事务不完整 | `authService.ts:95` `updateMany` 标记 consumedAt 在事务外，`:160` `$transaction([create])` 只含 create；create 失败则旧 token 已废、新 token 没发 | ⏳ 纳入 B5（认证核心，需重设计事务边界 + 更新测试 mock 支持回调形式） |
+| B-5 | refresh 事务不完整 | `authService.ts:95` `updateMany` 标记 consumedAt 在事务外，`:160` `$transaction([create])` 只含 create；create 失败则旧 token 已废、新 token 没发 | ✅ 已修（commit 33b9dfd，交互式事务 + postAction 事务外清理 + 测试 mock 支持回调） |
 | B-6 | 3 核心 service 零测试 + getConnection 未测 | `userService`/`projectService`/`memberService` 无 `.test.ts`；`getConnection` 的 viewer 密码隔离分支被 controller 测试 mock 掉（自欺） | ⏳ 纳入 B3（补 service 测试） |
 
 ### A.2 新增 HIGH（精选）

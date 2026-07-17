@@ -122,13 +122,13 @@ packages/shared/src/
 
 ## P0-BLOCKER: 上线阻塞项（phase2 开工前必修）
 
-> **2026-06-24 审计新增。** 这些是代码审查发现的 BLOCKER，必须在 phase2 功能开发前解决。详见 `docs/superpowers/specs/2026-06-24-remotehub-audit.md` 附录 A。B-3/B-4 已修（commit 4af159e），其余待修。
+> **权威以收尾 spec 为准**：phase2 开工前的所有前置（持久化切换、migration、CI、补测试、前端迁移）以 `docs/superpowers/specs/2026-07-17-v2-followup-design.md` 为准；本批次 Task 细节若与之冲突，以收尾 spec 为准（避免双轨）。已修：B-3/B-4（4af159e）、B-5 refresh 事务（33b9dfd）、13+ HIGH/MEDIUM（4af159e..e3a865b）。待办：持久化切换 + migration + CI + B-6 补测试 + 前端迁移。
 
 ### Task 0.0.1: 生成 Prisma migration（BLOCKER-1）
 
 **Files:** `packages/backend/prisma/migrations/`（新建）
 
-- [ ] 本地连开发 MySQL 执行 `npx prisma migrate dev --name init`，生成初始 migration
+- [ ] 切 SQLite 后（收尾 spec §1），`DATABASE_URL=file:./dev.db`，执行 `npx prisma migrate dev --name init` 生成初始 migration
 - [ ] 提交 `migrations/` 目录
 - [ ] 验证干净库 `prisma migrate deploy` 能建出 5 张表
 - [ ] `prisma migrate status` 无 pending
@@ -140,7 +140,7 @@ packages/shared/src/
 - [ ] workflow: `pnpm install` → `shared build` → `lint` → `test`，Node 20
 - [ ] PR 触发，main 分支保护
 
-### Task 0.0.3: 修复 refresh 事务（B-5）
+### Task 0.0.3: 修复 refresh 事务（B-5） ✅ 已修（commit 33b9dfd，全修阶段；下方步骤为已完成记录）
 
 **Files:** `packages/backend/src/services/authService.ts`
 
@@ -2084,7 +2084,7 @@ git commit -m "feat: complete P2 — import/export, project enhancement, 2FA, K8
 phase2-design §19（二期前端页面设计）标注为 **blocked**，直到前端迁移子项目（Task 0.0.5）完成。前端迁移是 phase2 硬前置（design §23），当前 0% 且无 spec。§19 相关前端工作不得在迁移完成前启动。
 
 ### 新增 P0-TEST：集成测试基建
-原 plan 缺集成测试基建 Task（design §20.2/§24.2 要求 supertest + 测试库 + globalSetup，plan 无对应 Task）。**新增 P0-TEST Task**：装 `supertest` + `@types/supertest`、建 `remotehub_test` 库、`tests/globalSetup.ts`（prisma db push --force-reset + seed）、清理策略（逆序 deleteMany）。与 Task 0.0.4（补 service 单测）协同——单元测试先补，集成测试基建在 P0 收尾建。
+原 plan 缺集成测试基建 Task（design §20.2/§24.2 要求 supertest + 测试库 + globalSetup，plan 无对应 Task）。**新增 P0-TEST Task**：装 `supertest` + `@types/supertest`、用临时 SQLite 测试库 `file:./test.db`（切 SQLite 后无需独立 DB 服务，见收尾 spec §1 + phase2 design §20.2）、`tests/globalSetup.ts`（prisma db push --force-reset + seed）、清理策略（逆序 deleteMany）。与 Task 0.0.4（补 service 单测）协同——单元测试先补，集成测试基建在 P0 收尾建。
 
 ### 代码审查发现纳入
 phase2 实施时一并修代码审查 HIGH 项（见附录 A.2）：默认 admin 密码改 requireEnv、trust proxy 改单跳/ CIDR、VPN 循环深度≥10 抛 CONN_003、protocol≠VPN 强制 vpn 字段 null、并发 refresh 校验 expiresAt、VPN 目标不存在返回 CONN_002、404 兜底加 SYS_002、controller 输入验证+白名单、内存 Map 加淘汰、server.ts 拆 app.ts 消除副作用。

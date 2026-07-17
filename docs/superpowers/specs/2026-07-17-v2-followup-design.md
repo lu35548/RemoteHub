@@ -66,6 +66,7 @@ export { prisma };
 `docker/Dockerfile.backend`：
 - `prisma migrate deploy` 仍适用（provider 无关）
 - 删除 mysql-client 安装（phase2 备份改用 VACUUM INTO，不再需 mysqldump）
+- **加 better-sqlite3 build tools**（原生模块编译所需）：alpine `RUN apk add --no-cache python3 make g++`；`node:20` debian `RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*`（装在 multi-stage 的 builder 阶段）
 
 ### 1.5 兼容性矩阵（已有代码影响）
 
@@ -205,6 +206,9 @@ jobs:
 
 1. **SQLite WAL pragma 执行时机**：server.ts 启动时执行（推荐）vs prisma.ts 模块加载时（需 top-level await）。实施时定。
 2. **SQLCipher 可行性**（phase2 后续）：Prisma 6 driver adapter 是否支持加密 SQLite？若需透明加密，验证 `better-sqlite3-sqlcipher` 兼容性。本次 MVP 不做。
+3. **schema generator previewFeatures**：Prisma driver adapter 模式（§1.3）可能需 `previewFeatures = ["driverAdapters"]`（Prisma 6 是否 GA 免 preview 待验证）。实施时确认 schema.prisma generator 配置。
+4. **CI lint 前置**：§3 CI 跑 `pnpm -r lint`，需确认 packages/backend/frontend 实际有 ESLint config + lint script（refactor design §11.8 声称有，未核实）。若无，CI 第一步即失败。
+5. **seedCheck 死代码矛盾**（既存，切 SQLite 不影响）：architecture 审查发现 `seedCheck.ts` 代码无 import（死代码），但 refactor design §6.2 Dockerfile CMD `node dist/utils/seedCheck.js` 调用它。需理清：删 seedCheck 改启动序列，或保留并补 import。
 
 ## 7.5 已确认决策（user review 2026-07-17）
 
