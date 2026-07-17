@@ -33,6 +33,7 @@
 - 保留 `@unique` / `@map` / `@@index` / `@@map` / `@id` / `@default(uuid())` / `@updatedAt` / 关系（均 provider 无关）
 - `Int?`（port）/ `Boolean` / `DateTime` 不变
 - **schema 设计原则统一**：design §2.4 原为"MySQL/SQL Server 跨 provider"，现锁定 SQLite，原"可能含中文不指定 VarChar"等规则失效（SQLite 全 TEXT，无长度概念）
+- **应用层长度校验前提** ⚠️：移除 @db.VarChar 后 DB 层无长度兜底（SQLite TEXT 无限长）。必须确保应用层覆盖所有字段长度校验（design §3.1 已列 username/name/host/tags/password 等；correctness L5 指出 username/notes/vpnLoginUrl 等未应用层校验 —— **切 SQLite 前补全**，归入 B-6 补测试一并覆盖）。不引入 SQLite CHECK 约束（Prisma migration 维护复杂，应用层校验更一致）
 
 ### 1.3 Prisma Client（driver adapter + WAL）
 
@@ -200,13 +201,18 @@ jobs:
 
 ---
 
-## 7. Open Questions（需用户确认/实施时验证）
+## 7. Open Questions（实施时验证）
 
 1. **SQLite WAL pragma 执行时机**：server.ts 启动时执行（推荐）vs prisma.ts 模块加载时（需 top-level await）。实施时定。
-2. **SQLCipher 可行性**：Prisma 6 driver adapter 是否支持加密 SQLite？若 phase2 需透明加密，要验证 `better-sqlite3-sqlcipher` 兼容性（本次 MVP 不做）。
-3. **better-sqlite3 原生编译**：better-sqlite3 是原生模块，Docker alpine 镜像需 build tools 或用预编译。Dockerfile.backend 可能需加 `python3/make/g++`（design §2.3 bcryptjs 选型同理）。实施时验证 Docker 构建。
-4. **dev 库现有数据**：dev.db 若有测试数据，切 provider 后丢弃可接受？（一期从零，应可接受）
-5. **phase2 备份模块**：原 design 用 mysqldump，切 SQLite 后改 VACUUM INTO，phase2-design §7 要同步更新（归入 phase2 plan 修订）。
+2. **SQLCipher 可行性**（phase2 后续）：Prisma 6 driver adapter 是否支持加密 SQLite？若需透明加密，验证 `better-sqlite3-sqlcipher` 兼容性。本次 MVP 不做。
+
+## 7.5 已确认决策（user review 2026-07-17）
+
+- ✅ **better-sqlite3 原生编译**：接受权衡，Dockerfile.backend 加 build tools（python3/make/g++），Docker 构建时验证
+- ✅ **phase2 备份模块**：本次同步更新 phase2-design §7（mysqldump → VACUUM INTO，删 mysql-client 依赖）
+- ✅ **前端迁移**：本次 spec 只规划，实施走独立子项目
+- ✅ **dev 数据**：切 provider 后丢弃（一期从零）
+- ✅ **schema @db.VarChar 移除**：合适（SQLite 全 TEXT 无长度概念），**前提是补全应用层字段长度校验**（见 §1.2，归入 B-6）
 
 ---
 
