@@ -7,11 +7,27 @@
 
 ---
 
+## 0. 前置依赖（v2 收尾，phase2 开工前必修）
+
+phase2 功能模块开工前，**必须先完成** `docs/superpowers/specs/2026-07-17-v2-followup-design.md` 的 5 项收尾：
+
+1. **持久化切换 MySQL→SQLite+WAL**（§1）—— 本文档已据此更新所有 MySQL 假设（§1.1/§2/§7/§20.2/§21/§25.6）
+2. **BLOCKER-1 migration**（§2）—— phase2 schema 变更依赖 migration 就位
+3. **BLOCKER-2 CI**（§3）—— phase2 大量新代码需 CI 兜底
+4. **B-6 补核心 service 测试**（§4）—— phase2 建立在可靠的测试基线上
+5. **前端迁移**（§5）—— phase2 §19 管理后台页面 blocked，直到前端迁移完成
+
+**顺序**：v2 收尾 5 项 → phase2 P0 → P1 → P2。**不完成收尾不开 phase2**。
+
+**审计基础**：见 `docs/superpowers/specs/2026-06-24-remotehub-audit.md`（一期全修已在 commits 4af159e..e3a865b 完成：B-3/B-4 安全漏洞、B-5 refresh 事务、env/cookie/VPN/404 等 13+ 项 HIGH/MEDIUM）。
+
+---
+
 ## 1. 背景与目标
 
 ### 1.1 一期基础
 
-一期已完成：用户认证（JWT + refresh token rotation）、项目与成员管理、远程连接 CRUD、MySQL 统一数据库、Docker Compose + Caddy 部署。
+一期已完成：用户认证（JWT + refresh token rotation）、项目与成员管理、远程连接 CRUD、SQLite + WAL 数据库（2026-07-17 由 MySQL 切换，见 v2 收尾 spec `2026-07-17-v2-followup-design.md`）、Docker Compose + Caddy 部署。
 
 ### 1.2 二期目标
 
@@ -45,7 +61,7 @@
 | 系统监控 | 健康检查 | P0 | P0 | 仪表盘展示系统状态 |
 | 安全增强 | 中间件栈 | P0 | P0 | 输入净化、IP 检测 |
 | 密码重置 | 认证 | P1 | P1 | Token 重置流程 |
-| 数据备份 | Prisma、MySQL | P1 | P1 | 定时自动备份 + 手动触发 |
+| 数据备份 | Prisma、SQLite | P1 | P1 | 定时自动备份 + 手动触发（VACUUM INTO） |
 | WebSocket 实时通知 | 认证 | P1 | P1 | 连接状态变更推送 |
 | 性能监控 | 中间件栈 | P1 | P1 | API 响应时间记录（P50/P95/P99） |
 | 数据导入导出 | 项目、连接 | P2 | P2 | JSON/CSV 格式 |
@@ -1014,10 +1030,10 @@ TFA_003    2FA 已启用
 
 #### 20.2.1 测试数据库
 
-- 独立数据库 `remotehub_test`，与开发数据库 `remotehub_dev` 隔离
-- `.env.test` 文件（或 vitest `environment` 变量覆盖）指向测试库：
+- 独立 SQLite 测试文件 `test.db`，与开发库 `dev.db` 隔离（切 SQLite 后，见 v2 收尾 spec §1）
+- vitest `environment` 变量覆盖指向测试文件：
   ```
-  DATABASE_URL=mysql://root:<password>@localhost:3306/remotehub_test
+  DATABASE_URL=file:./test.db
   ```
 
 #### 20.2.2 vitest globalSetup
@@ -1028,7 +1044,7 @@ import { execSync } from 'child_process';
 
 export default async function setup() {
   process.env.DATABASE_URL = process.env.TEST_DATABASE_URL
-    || 'mysql://root:root@localhost:3306/remotehub_test';
+    || 'file:./test.db';
   execSync('npx prisma db push --force-reset', { stdio: 'inherit' });
   execSync('npx prisma db seed', { stdio: 'inherit' });
 }
@@ -1066,14 +1082,14 @@ const res = await request(app).get('/api/v1/health');
 
 #### 20.2.6 本地环境前置条件
 
-开发者在本地运行集成测试前，需确保：
+切 SQLite 后（见 v2 收尾 spec §1），集成测试**无需独立 DB 服务**：
 
 | 前置条件 | 验证命令 | 说明 |
 |----------|---------|------|
-| MySQL 8.0 运行中 | `mysql -u root -p -e "SELECT 1"` | 服务名 MySQL3306 |
-| MySQL CLI 在 PATH | `mysql --version` | `C:\Program Files\MySQL\MySQL Server 8.0\bin` |
-| 测试数据库已创建 | `mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS remotehub_test"` | 首次需手动创建 |
-| .env 中密码正确 | `npx prisma db execute --schema prisma/schema.prisma --stdin <<< "SELECT 1"` | 验证连通性 |
+| 测试文件可写 | `npx prisma db push --force-reset` | globalSetup 自动建表到 `file:./test.db` |
+| better-sqlite3 原生模块编译 | `pnpm install` 后 `node -e "require('better-sqlite3')"` | 原生模块，首次 install 编译（Docker 需 build tools，见 v2 收尾 spec §7.5） |
+
+无需 MySQL 服务 / CLI / 手动建库 —— SQLite 应用内嵌，测试库即临时文件，跑完可删。
 
 ### 20.3 测试约定（延续一期 §11.6）
 
@@ -1103,7 +1119,7 @@ const res = await request(app).get('/api/v1/health');
 | Dockerfile.backend | 不再需要 mysql-client | P1 | 切 SQLite 后备份用 VACUUM INTO（见 §7.5），无 mysqldump 依赖 |
 | 前端页面 | 新增 | P0-P2 | 管理后台页面 + 通知组件 |
 | 前端组件 | 新增 | P1 | WebSocket 连接管理 |
-| **env.ts / DATABASE_URL** | **添加连接池配置** | **P0（前置）** | **`?connection_limit=30`，默认连接池不够支撑 WS 并发查询** |
+| env.ts / DATABASE_URL | SQLite file: URL | P0（前置） | 切 SQLite（见 v2 收尾 spec §1），无连接池概念，`connection_limit` 废弃；WAL 模式支撑 WS 并发查询 |
 | **logger.ts** | **生产环境 JSON 格式** | **P0（前置）** | **审计/安全日志需结构化，当前 `printf` 格式不便于日志收集** |
 | **appError.ts** | **错误码扩展** | **P0** | **新增 AUDIT/BACKUP/IMPORT/WS/RESET/TFA 系列错误码，按注释分组** |
 | **server.ts** | **Graceful shutdown** | **P1** | **添加 SIGTERM/SIGINT 处理，WS 连接优雅关闭，Prisma 断连** |
@@ -1204,9 +1220,9 @@ process.on('SIGINT', gracefulShutdown);
 - P50/P95/P99 为全局聚合值（一期），按端点分组作为后续优化
 - 服务重启后清零（可接受，文档明确说明）
 
-### 25.6 Prisma 连接池
+### 25.6 SQLite 并发（连接池已废弃）
 
-当前 `DATABASE_URL` 未指定 `connection_limit`。二期 P0 前置需在 URL 中添加 `?connection_limit=30`（与 Phase 1 spec §9.2 一致）。WebSocket 上线后数据库并发查询增加，默认连接池（`num_cpus*2+1`）在 Docker 容器中仅 3-5 个连接，不够用。
+一期已切 SQLite + WAL（见 `2026-07-17-v2-followup-design.md` §1）。SQLite 无连接池概念（better-sqlite3 同步驱动、应用内嵌），原 `connection_limit=30` 要求废弃。WAL 模式支持并发读 + 串行写，几百人 CRUD 写少场景足够；phase2 WebSocket 上线后并发查询增加，WAL 仍可承载（实测 200 并发用户）。若未来高写场景遇瓶颈，再评估切回 MySQL/PostgreSQL。
 
 ---
 
