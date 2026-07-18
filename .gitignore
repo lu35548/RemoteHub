@@ -7,3 +7,11 @@ dist/
 .DS_Store
 Thumbs.db
 *.tsbuildinfo
+
+# Prisma seed 编译产物（Task 8 删 esbuild 步骤后不再生成）
+packages/backend/prisma/seed.js
+# SQLite 数据库文件
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
