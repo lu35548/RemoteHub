@@ -13,7 +13,7 @@
 | `2026-04-23-remotehub-v2-phase2-design.md` | **phase2 功能设计**（审计/监控/安全/备份/WS/2FA 等 11 模块） | R3 审查完成（v2.1-draft），待 v2 收尾后实施；§0 前置依赖已声明 |
 | `2026-04-30-remotehub-v2-phase2.md` | **phase2 实施 plan** | P0-BLOCKER 批次（前置）已加 + 修订说明 |
 | `2026-06-24-remotehub-audit.md` | **项目审计报告**（含附录 A 代码审查 6 BLOCKER） | 完成，驱动一期全修 |
-| `2026-07-17-v2-followup-design.md` | **v2 收尾设计**（持久化切换 + BLOCKER + 测试 + 前端迁移） | spec 定稿，待转 writing-plans |
+| `2026-07-17-v2-followup-design.md` | **v2 收尾设计**（持久化切换 + BLOCKER + 测试 + 前端迁移） | ✅ spec 定稿（两轮 grill：D1–D10 拍板 + F1–F6 订正 + 5 OQ 关闭/保留），待转 writing-plans |
 
 ---
 
@@ -43,7 +43,7 @@
 |------|------|
 | 一期全修 | ✅ commits `4af159e..e3a865b`（B-3/B-4 安全漏洞 + B-5 refresh 事务 + 13 HIGH/MEDIUM，145 测试始终绿） |
 | 一期安全就绪度 | ~50% → ~80% |
-| v2 收尾 spec | ✅ 定稿（待转 writing-plans 出实施 plan） |
+| v2 收尾 spec | ✅ 定稿（两轮 grill review 完成，D1–D10 + F1–F6 + 5 OQ 关闭/保留），待转 writing-plans |
 | phase2 | ❌ 0% 实施（待 v2 收尾） |
 | 前端迁移 | ❌ 0%（独立子项目，未立项） |
 
