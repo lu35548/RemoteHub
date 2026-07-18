@@ -15,6 +15,7 @@
     "db:seed": "prisma db seed"
   },
   "dependencies": {
+    "@prisma/adapter-better-sqlite3": "6.19.3",
     "@prisma/client": "^6.0.0",
     "@remotehub/shared": "workspace:*",
     "bcryptjs": "^2.4.3",
@@ -45,7 +46,7 @@
     "vitest": "^3.0.0"
   },
   "prisma": {
-    "seed": "node prisma/seed.js"
+    "seed": "tsx prisma/seed.ts"
   },
   "files": [
     "dist",

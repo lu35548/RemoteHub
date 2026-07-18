@@ -15,7 +15,8 @@
       "@prisma/client",
       "@prisma/engines",
       "prisma",
-      "esbuild"
+      "esbuild",
+      "better-sqlite3"
     ]
   }
 }
