@@ -1,11 +1,12 @@
 import { PrismaClient } from '@prisma/client';
 import { PrismaBetterSQLite3 } from '@prisma/adapter-better-sqlite3';
 import { env } from '../config/env.js';
+import { resolveSqliteUrl } from './sqliteUrl.js';
 
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
 
 function createPrisma(): PrismaClient {
-  const adapter = new PrismaBetterSQLite3({ url: env.DATABASE_URL });
+  const adapter = new PrismaBetterSQLite3({ url: resolveSqliteUrl(env.DATABASE_URL) });
   return new PrismaClient({ adapter });
 }
 
