@@ -3,6 +3,7 @@ import {
   validateUsername, validateNickname, validatePassword,
   validateProjectName, validateConnectionName,
   validateHost, validatePort, validateTags,
+  validateDescription, validateIcon, validateNotes, validateVpnLoginUrl,
 } from './validators.js';
 
 describe('validateUsername', () => {
@@ -71,4 +72,49 @@ describe('validateHost', () => {
   it('拒绝空', () => { expect(validateHost('').valid).toBe(false); });
   it('拒绝超长', () => { expect(validateHost('x'.repeat(256)).valid).toBe(false); });
   it('接受合法', () => { expect(validateHost('192.168.1.1')).toEqual({ valid: true }); });
+});
+
+describe('validateDescription', () => {
+  it('接受空字符串外的合法长度', () => {
+    expect(validateDescription('x').valid).toBe(true);
+    expect(validateDescription('a'.repeat(2000)).valid).toBe(true);
+  });
+  it('拒绝超长', () => {
+    expect(validateDescription('a'.repeat(2001)).valid).toBe(false);
+  });
+});
+
+describe('validateIcon', () => {
+  it('接受预设图标', () => {
+    expect(validateIcon('folder').valid).toBe(true);
+    expect(validateIcon('server').valid).toBe(true);
+  });
+  it('拒绝非预设图标', () => {
+    expect(validateIcon('not-exist').valid).toBe(false);
+  });
+});
+
+describe('validateNotes', () => {
+  it('null/undefined 合法', () => {
+    expect(validateNotes(null).valid).toBe(true);
+    expect(validateNotes(undefined).valid).toBe(true);
+  });
+  it('拒绝超长', () => {
+    expect(validateNotes('a'.repeat(2001)).valid).toBe(false);
+  });
+  it('接受上限内', () => {
+    expect(validateNotes('a'.repeat(2000)).valid).toBe(true);
+  });
+});
+
+describe('validateVpnLoginUrl', () => {
+  it('null/undefined 合法', () => {
+    expect(validateVpnLoginUrl(null).valid).toBe(true);
+  });
+  it('拒绝超长', () => {
+    expect(validateVpnLoginUrl('a'.repeat(501)).valid).toBe(false);
+  });
+  it('接受上限内', () => {
+    expect(validateVpnLoginUrl('https://vpn.example.com').valid).toBe(true);
+  });
 });

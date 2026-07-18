@@ -35,4 +35,11 @@ export const PROJECT_ICONS = [
 ] as const;
 export type ProjectIcon = typeof PROJECT_ICONS[number];
 
+export const NOTES_MAX_LENGTH = 2000;
+export const VPN_LOGIN_URL_MAX_LENGTH = 500;
+
+export function isIcon(value: string): value is ProjectIcon {
+  return (PROJECT_ICONS as readonly string[]).includes(value);
+}
+
 export const ENCRYPTION_VERSION = 'v1';

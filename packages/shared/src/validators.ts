@@ -1,8 +1,10 @@
 import {
   USERNAME_MIN_LENGTH, USERNAME_MAX_LENGTH, USERNAME_PATTERN,
   NICKNAME_MAX_LENGTH, PASSWORD_MIN_LENGTH, PASSWORD_MAX_LENGTH,
-  PROJECT_NAME_MAX_LENGTH, CONNECTION_NAME_MAX_LENGTH,
+  PROJECT_NAME_MAX_LENGTH, PROJECT_DESCRIPTION_MAX_LENGTH,
+  CONNECTION_NAME_MAX_LENGTH,
   HOST_MAX_LENGTH, PORT_MIN, PORT_MAX, TAGS_MAX_LENGTH,
+  NOTES_MAX_LENGTH, VPN_LOGIN_URL_MAX_LENGTH, isIcon,
 } from './constants.js';
 import { isProtocol, isUserRole, isMemberRole, isVpnType } from './enums.js';
 
@@ -82,5 +84,25 @@ export function validatePort(value: number | null | undefined): ValidationResult
 
 export function validateTags(value: string | null | undefined): ValidationResult {
   if (value != null && value.length > TAGS_MAX_LENGTH) return fail(`标签不能超过 ${TAGS_MAX_LENGTH} 个字符`);
+  return { valid: true };
+}
+
+export function validateDescription(value: string): ValidationResult {
+  if (value.length > PROJECT_DESCRIPTION_MAX_LENGTH) return fail(`项目描述不能超过 ${PROJECT_DESCRIPTION_MAX_LENGTH} 个字符`);
+  return { valid: true };
+}
+
+export function validateIcon(value: string): ValidationResult {
+  if (!isIcon(value)) return fail('无效的项目图标');
+  return { valid: true };
+}
+
+export function validateNotes(value: string | null | undefined): ValidationResult {
+  if (value != null && value.length > NOTES_MAX_LENGTH) return fail(`备注不能超过 ${NOTES_MAX_LENGTH} 个字符`);
+  return { valid: true };
+}
+
+export function validateVpnLoginUrl(value: string | null | undefined): ValidationResult {
+  if (value != null && value.length > VPN_LOGIN_URL_MAX_LENGTH) return fail(`VPN 登录地址不能超过 ${VPN_LOGIN_URL_MAX_LENGTH} 个字符`);
   return { valid: true };
 }
