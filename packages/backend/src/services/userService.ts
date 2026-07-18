@@ -1,7 +1,7 @@
 // packages/backend/src/services/userService.ts
 import { prisma } from '../utils/prisma.js';
 import { createAppError } from '../utils/appError.js';
-import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, USER_SEARCH_MAX_RESULTS } from '@remotehub/shared';
+import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, USER_SEARCH_MAX_RESULTS, validateNickname, validateRole } from '@remotehub/shared';
 
 /** 用户列表（admin）§4 */
 export async function listUsers(page: number = 1, pageSize: number = DEFAULT_PAGE_SIZE) {
@@ -50,16 +50,14 @@ export async function updateUser(callerId: string, targetId: string, data: { nic
   const updateData: Record<string, unknown> = {};
 
   if (data.nickname !== undefined) {
-    if (!data.nickname || data.nickname.length > 50) {
-      throw createAppError('VAL_001', [{ field: 'nickname', message: '昵称不合法' }]);
-    }
+    const v = validateNickname(data.nickname);
+    if (!v.valid) throw createAppError('VAL_001', [{ field: 'nickname', message: v.message }]);
     updateData.nickname = data.nickname;
   }
 
   if (data.role !== undefined) {
-    if (data.role !== 'admin' && data.role !== 'user') {
-      throw createAppError('VAL_001', [{ field: 'role', message: '无效的用户角色' }]);
-    }
+    const v = validateRole(data.role);
+    if (!v.valid) throw createAppError('VAL_001', [{ field: 'role', message: v.message }]);
     updateData.role = data.role;
   }
 

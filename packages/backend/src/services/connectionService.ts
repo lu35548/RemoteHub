@@ -6,6 +6,7 @@ import { encrypt, decrypt } from '../utils/encryption.js';
 import {
   validateConnectionName, validateHost, validatePort,
   validateProtocol, validateVpnType, validateTags,
+  validateNotes, validateVpnLoginUrl,
   DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE,
 } from '@remotehub/shared';
 
@@ -197,6 +198,8 @@ export async function updateConnection(userId: string, connectionId: string, dat
     protocol: (updatePayload.protocol as string | undefined) ?? current.protocol,
     vpnType: updatePayload.vpnType !== undefined ? updatePayload.vpnType as string | null : current.vpnType,
     tags: updatePayload.tags !== undefined ? updatePayload.tags as string | null : current.tags,
+    notes: updatePayload.notes !== undefined ? updatePayload.notes as string | null : current.notes,
+    vpnLoginUrl: updatePayload.vpnLoginUrl !== undefined ? updatePayload.vpnLoginUrl as string | null : current.vpnLoginUrl,
   };
 
   // 验证字段
@@ -316,7 +319,9 @@ function validateConnectionFields(data: {
   port?: number | null;
   protocol: string;
   vpnType?: string | null;
+  vpnLoginUrl?: string | null;
   tags?: string | null;
+  notes?: string | null;
 }) {
   const errors: Array<{ field: string; message: string }> = [];
 
@@ -340,6 +345,15 @@ function validateConnectionFields(data: {
   if (data.tags !== undefined) {
     const vTags = validateTags(data.tags);
     if (!vTags.valid) errors.push({ field: 'tags', message: vTags.message });
+  }
+
+  if (data.notes !== undefined) {
+    const vNotes = validateNotes(data.notes);
+    if (!vNotes.valid) errors.push({ field: 'notes', message: vNotes.message });
+  }
+  if (data.vpnLoginUrl !== undefined) {
+    const vUrl = validateVpnLoginUrl(data.vpnLoginUrl);
+    if (!vUrl.valid) errors.push({ field: 'vpnLoginUrl', message: vUrl.message });
   }
 
   if (errors.length > 0) {

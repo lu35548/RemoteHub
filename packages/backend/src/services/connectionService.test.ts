@@ -601,3 +601,20 @@ describe('connectionService', () => {
     });
   });
 });
+
+describe('validateConnectionFields - notes/vpnLoginUrl', () => {
+  it('超长 notes 返回 VAL_001', async () => {
+    await expect(createConnection('user-1', {
+      projectId: 'proj-1',
+      name: 'c1', host: 'h', protocol: 'SSH',
+      notes: 'a'.repeat(2001),
+    })).rejects.toMatchObject({ code: 'VAL_001' });
+  });
+  it('超长 vpnLoginUrl 返回 VAL_001', async () => {
+    await expect(createConnection('user-1', {
+      projectId: 'proj-1',
+      name: 'c1', host: 'h', protocol: 'VPN', vpnType: 'OPENVPN',
+      vpnLoginUrl: 'a'.repeat(501),
+    })).rejects.toMatchObject({ code: 'VAL_001' });
+  });
+});

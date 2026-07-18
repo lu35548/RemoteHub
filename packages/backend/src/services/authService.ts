@@ -3,7 +3,7 @@ import { prisma } from '../utils/prisma.js';
 import { verifyPassword, hashPassword } from '../utils/password.js';
 import { signAccessToken, generateRefreshToken, hashRefreshToken } from '../utils/jwt.js';
 import { createAppError, handlePrismaUniqueViolation } from '../utils/appError.js';
-import { validateUsername, validateNickname, validatePassword as validatePwd } from '@remotehub/shared';
+import { validateUsername, validateNickname, validatePassword as validatePwd, validateRole } from '@remotehub/shared';
 import { REFRESH_CONCURRENT_WINDOW_SEC } from '@remotehub/shared';
 import type { UserPublic } from '@remotehub/shared';
 
@@ -61,8 +61,9 @@ export async function register(callerRole: string, data: { username: string; nic
   if (!n.valid) errors.push({ field: 'nickname', message: n.message });
   const p = validatePwd(data.password);
   if (!p.valid) errors.push({ field: 'password', message: p.message });
-  if (data.role && data.role !== 'admin' && data.role !== 'user') {
-    errors.push({ field: 'role', message: '无效的用户角色' });
+  if (data.role !== undefined) {
+    const r = validateRole(data.role);
+    if (!r.valid) errors.push({ field: 'role', message: r.message });
   }
   if (errors.length > 0) throw createAppError('VAL_001', errors);
 
