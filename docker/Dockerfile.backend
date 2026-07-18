@@ -3,13 +3,13 @@ RUN corepack enable
 
 FROM base AS builder
 WORKDIR /app
+RUN apk add --no-cache python3 make g++
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
 COPY packages/shared/ packages/shared/
 COPY packages/backend/ packages/backend/
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
 RUN pnpm --filter @remotehub/shared build
 RUN pnpm --filter @remotehub/backend build
-RUN npx esbuild packages/backend/prisma/seed.ts --outfile=packages/backend/prisma/seed.js --platform=node --format=cjs --bundle
 RUN pnpm --filter @remotehub/backend --prod deploy /prod/backend
 RUN cp -r packages/backend/dist /prod/backend/dist
 RUN cp -r packages/backend/prisma /prod/backend/prisma
@@ -19,4 +19,4 @@ WORKDIR /app
 COPY --from=builder /prod/backend .
 RUN npx prisma generate
 EXPOSE 3001
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/utils/seedCheck.js && node dist/server.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/server.js"]
