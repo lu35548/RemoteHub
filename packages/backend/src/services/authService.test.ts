@@ -1,23 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ── Mocks ──────────────────────────────────────────────────────────────
-vi.mock('../utils/prisma.js', () => {
-  const prismaMock = {
-    user: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
-    session: {
-      create: vi.fn(),
-      updateMany: vi.fn(),
-      findUnique: vi.fn(),
-      deleteMany: vi.fn(),
-      delete: vi.fn(),
-    },
-    $transaction: vi.fn(async (arg: any) => {
-      // 支持交互式事务回调形式（tx = prismaMock）+ 数组形式
-      if (typeof arg === 'function') return arg(prismaMock);
-      return Promise.all(arg);
-    }),
-  };
-  return { prisma: prismaMock };
+vi.mock('../utils/prisma.js', async () => {
+  const { createPrismaMock } = await import('../test/helpers/prismaMock.js');
+  return { prisma: createPrismaMock() };
 });
 
 vi.mock('../utils/password.js', () => ({

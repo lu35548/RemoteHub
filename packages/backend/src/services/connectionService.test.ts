@@ -2,21 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ── Mock 外部依赖 ──
 
-vi.mock('../utils/prisma.js', () => ({
-  prisma: {
-    connection: {
-      findMany: vi.fn(),
-      findUnique: vi.fn(),
-      create: vi.fn(),
-      update: vi.fn(),
-      delete: vi.fn(),
-      count: vi.fn(),
-    },
-    user: {
-      findMany: vi.fn(),
-    },
-  },
-}));
+vi.mock('../utils/prisma.js', async () => {
+  const { createPrismaMock } = await import('../test/helpers/prismaMock.js');
+  return { prisma: createPrismaMock() };
+});
 
 vi.mock('../utils/encryption.js', () => ({
   encrypt: vi.fn((p: string) => `encrypted:${p}`),
