@@ -5,8 +5,12 @@ vi.mock('../utils/prisma.js', async () => {
   return { prisma: createPrismaMock() };
 });
 
-import { prisma } from '../utils/prisma.js';
+import { prisma as _prisma } from '../utils/prisma.js';
 import { listUsers, searchUsers, getUser, updateUser, deleteUser } from './userService.js';
+
+// vi.mock 在运行期替换实现，但 TS 仍按真实 PrismaClient 类型检查；
+// 测试文件内将 prisma 视作 mock（any，eslint 测试文件已豁免 no-explicit-any）。
+const prisma = _prisma as any;
 
 beforeEach(() => { vi.clearAllMocks(); });
 

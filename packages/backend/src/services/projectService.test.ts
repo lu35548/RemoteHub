@@ -5,8 +5,10 @@ vi.mock('../utils/prisma.js', async () => {
   return { prisma: createPrismaMock() };
 });
 
-import { prisma } from '../utils/prisma.js';
+import { prisma as _prisma } from '../utils/prisma.js';
 import { createProject, updateProject, deleteProject, listProjects } from './projectService.js';
+
+const prisma = _prisma as any;
 
 beforeEach(() => { vi.clearAllMocks(); });
 

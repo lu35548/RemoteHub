@@ -618,38 +618,38 @@ describe('getConnection - B-4 encryptedPass 权限', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('admin 拿到 encryptedPass', async () => {
-    prisma.connection.findUnique.mockResolvedValue(fakeConnection);
-    prisma.user.findMany.mockResolvedValue([]);
+    (prisma.connection.findUnique as MockFn).mockResolvedValue(fakeConnection);
+    (prisma.user.findMany as MockFn).mockResolvedValue([]);
     const r = await getConnection('conn-1', 'admin-1', 'admin');
     expect(r.encryptedPass).toBe('enc-secret');
   });
 
   it('owner 拿到 encryptedPass', async () => {
-    prisma.connection.findUnique.mockResolvedValue(fakeConnection);
-    prisma.projectMember.findUnique.mockResolvedValue({ role: 'owner' });
-    prisma.user.findMany.mockResolvedValue([]);
+    (prisma.connection.findUnique as MockFn).mockResolvedValue(fakeConnection);
+    (prisma.projectMember.findUnique as MockFn).mockResolvedValue({ role: 'owner' });
+    (prisma.user.findMany as MockFn).mockResolvedValue([]);
     const r = await getConnection('conn-1', 'owner-1', 'user');
     expect(r.encryptedPass).toBe('enc-secret');
   });
 
   it('editor 拿到 encryptedPass', async () => {
-    prisma.connection.findUnique.mockResolvedValue(fakeConnection);
-    prisma.projectMember.findUnique.mockResolvedValue({ role: 'editor' });
-    prisma.user.findMany.mockResolvedValue([]);
+    (prisma.connection.findUnique as MockFn).mockResolvedValue(fakeConnection);
+    (prisma.projectMember.findUnique as MockFn).mockResolvedValue({ role: 'editor' });
+    (prisma.user.findMany as MockFn).mockResolvedValue([]);
     const r = await getConnection('conn-1', 'editor-1', 'user');
     expect(r.encryptedPass).toBe('enc-secret');
   });
 
   it('viewer 拿不到 encryptedPass（B-4）', async () => {
-    prisma.connection.findUnique.mockResolvedValue(fakeConnection);
-    prisma.projectMember.findUnique.mockResolvedValue({ role: 'viewer' });
-    prisma.user.findMany.mockResolvedValue([]);
+    (prisma.connection.findUnique as MockFn).mockResolvedValue(fakeConnection);
+    (prisma.projectMember.findUnique as MockFn).mockResolvedValue({ role: 'viewer' });
+    (prisma.user.findMany as MockFn).mockResolvedValue([]);
     const r = await getConnection('conn-1', 'viewer-1', 'user');
     expect(r).not.toHaveProperty('encryptedPass');
   });
 
   it('连接不存在抛 CONN_002', async () => {
-    prisma.connection.findUnique.mockResolvedValue(null);
+    (prisma.connection.findUnique as MockFn).mockResolvedValue(null);
     await expect(getConnection('nope', 'u1', 'user')).rejects.toMatchObject({ code: 'CONN_002' });
   });
 });
