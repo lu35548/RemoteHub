@@ -125,11 +125,46 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   });
 });
 
-// ─── Start server ───
-const PORT = env.PORT;
-startSessionCleaner();
-app.listen(PORT, () => {
-  logger.info(`Server running on port ${PORT} (${env.NODE_ENV})`);
+// ─── Start server（async bootstrap：WAL → seed → cleaner → listen）§1.8 ───
+import { prisma } from './utils/prisma.js';
+import { seedAdmin } from './utils/seedAdmin.js';
+
+async function ensureAdminSeed() {
+  const adminCount = await prisma.user.count({ where: { role: 'admin' } });
+  if (adminCount > 0) {
+    logger.info('Admin user exists, skipping seed');
+    return;
+  }
+  logger.info('No admin user found, running seed...');
+  const admin = await seedAdmin(prisma);
+  logger.info(`Seeded admin user "${admin.username}" (${admin.id})`);
+}
+
+async function bootstrap() {
+  const PORT = env.PORT;
+
+  // 1. WAL（任何 DB 操作前；$queryRaw 带断言，切不成必须知道）§1.3/D4
+  const [wal] = await prisma.$queryRaw<Array<{ journal_mode: string }>>`PRAGMA journal_mode = WAL`;
+  if (wal?.journal_mode !== 'wal') {
+    throw new Error(`SQLite WAL 切换失败: ${JSON.stringify(wal)}`);
+  }
+  logger.info('SQLite WAL 已启用');
+
+  // 2. seed 检测（缺 admin 则建；用已开 WAL 的 prisma 单例）§1.9/D3
+  await ensureAdminSeed();
+
+  // 3. session cleaner（cron，启动不立即写，放 WAL 后一致）
+  startSessionCleaner();
+
+  // 4. listen（DB 就绪后才接请求）
+  app.listen(PORT, () => {
+    logger.info(`Server running on port ${PORT} (${env.NODE_ENV})`);
+  });
+}
+
+bootstrap().catch((err) => {
+  logger.error('启动失败', { error: err.message, stack: err.stack });
+  process.exit(1);
 });
 
 export { app };
