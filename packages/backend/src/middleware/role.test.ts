@@ -21,7 +21,6 @@ vi.mock('../utils/prisma.js', () => ({
 import { roleMiddleware } from './role.js';
 import { projectRoleMiddleware } from './projectRole.js';
 import { prisma } from '../utils/prisma.js';
-import { createAppError } from '../utils/appError.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────
 function mockReqRes(user?: { id: string; role: string }, overrides: Partial<Request> = {}) {

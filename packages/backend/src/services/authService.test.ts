@@ -44,8 +44,8 @@ vi.mock('../utils/appError.js', () => ({
 // ── Imports (after mocks) ──────────────────────────────────────────────
 import { login, register, refresh, logout, changePassword, getMe, updateProfile } from './authService.js';
 import { prisma } from '../utils/prisma.js';
-import { verifyPassword, hashPassword } from '../utils/password.js';
-import { signAccessToken, generateRefreshToken, hashRefreshToken } from '../utils/jwt.js';
+import { verifyPassword } from '../utils/password.js';
+import { hashRefreshToken } from '../utils/jwt.js';
 import { createAppError } from '../utils/appError.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────

@@ -49,7 +49,7 @@ export async function addMember(projectId: string, userId: string, role: string)
 
     return { id: member.id, userId, role, addedAt: member.addedAt.toISOString() };
   } catch (error) {
-    if ((error as any).code === 'MEMBER_001') throw error;
+    if ((error as { code?: string }).code === 'MEMBER_001') throw error;
     await handlePrismaUniqueViolation(error);
     throw error;
   }

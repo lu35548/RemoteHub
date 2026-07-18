@@ -4,7 +4,6 @@ import * as authService from '../services/authService.js';
 import { createAppError } from '../utils/appError.js';
 import { hashRefreshToken } from '../utils/jwt.js';
 import { prisma } from '../utils/prisma.js';
-import { validateNickname, validatePassword as validatePwd } from '@remotehub/shared';
 
 const REFRESH_COOKIE_OPTIONS = {
   httpOnly: true,
@@ -72,8 +71,9 @@ export async function refresh(req: Request, res: Response, next: NextFunction) {
     }
 
     res.json({ success: true, data: { accessToken: result.accessToken } });
-  } catch (err: any) {
-    if (err.clearCookie || err.code === 'AUTH_004' || err.code === 'AUTH_002') {
+  } catch (err) {
+    const e = err as { clearCookie?: boolean; code?: string };
+    if (e.clearCookie || e.code === 'AUTH_004' || e.code === 'AUTH_002') {
       res.cookie('refreshToken', '', CLEAR_COOKIE_OPTIONS);
     }
     next(err);

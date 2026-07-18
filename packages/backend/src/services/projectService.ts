@@ -137,7 +137,7 @@ export async function updateProject(userId: string, projectId: string, data: { n
     const userMap = await resolveUserRefs([project.createdBy, project.updatedBy]);
     return toProjectDetail(project, userMap);
   } catch (error) {
-    if (error instanceof Error && (error as any).code === 'P2025') {
+    if (error instanceof Error && (error as { code?: string }).code === 'P2025') {
       throw createAppError('PROJ_002');
     }
     await handlePrismaUniqueViolation(error);
@@ -151,7 +151,7 @@ export async function deleteProject(projectId: string) {
     await prisma.project.delete({ where: { id: projectId } });
     return { id: projectId };
   } catch (error) {
-    if (error instanceof Error && (error as any).code === 'P2025') {
+    if (error instanceof Error && (error as { code?: string }).code === 'P2025') {
       throw createAppError('PROJ_002');
     }
     throw error;
