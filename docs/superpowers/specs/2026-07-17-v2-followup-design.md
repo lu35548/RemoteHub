@@ -230,6 +230,9 @@ $transaction: vi.fn(async (arg) => typeof arg === 'function' ? arg(prismaMock) :
 
 **本次 spec 仅规划**，实施走独立 brainstorming → spec → plan。
 
+> ⚠️ **未闭环声明（2026-07-18 grill meta-review）**：前端迁移的**详细 spec/plan 当前不存在**——本 §5 仅为范围规划（组件分级 + 工作量待核实 + 阻塞关系），不是可执行 spec。前端迁移是 **phase2 §19 的硬前置**，属 **v2 收尾后的显式未闭环项**。
+> **触发条件**：phase2 §19（管理后台页面）启动前**必须**先立项前端迁移（走独立 brainstorming → spec → plan），否则 phase2 §19 blocked。触发前，任何"留给前端迁移子项目"的引用（如 Plan B 的 frontend lint+test 前置）应视为**未承接**——不要假定它已有方案。
+
 ### 5.1 组件分级（审计报告 §6）
 - ✅ 可迁移（10）：ConnectionCard, ConnectionModal, LoginPage, ProjectModal, ProjectIcons, Icons, LoadingStates, UIComponents, UserManagementModal, Sidebar
 - ❌ 弃用（5）：AIAssistant, DatabaseConfigModal, MigrationControlPanel, MigrationWizard, StorageModeToggle

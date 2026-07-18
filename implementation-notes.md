@@ -6,8 +6,8 @@
 - [x] **D8** B-6 mock helper —— ✅ 抽 `createPrismaMock()`，新增 3 + 现有 2 service test 全迁移（5→1）
 - [x] **D9** 集成测试 —— ✅ 把 spec §2 BLOCKER-1 验收做成集成测试（setupTestDb + 临时 SQLite + migrate deploy + 验 5 表/unique/cascade/自引用约束）
 - [x] **D10** notes/vpnLoginUrl 长度上限 —— ✅ shared 加 validateNotes(≤2000)+validateVpnLoginUrl(≤500)，connectionService 调用
-- [ ] **待办（spec 修订阶段）**：把 D1–D10 + F1–F5 + 第三轮修正订正进 `2026-07-17-v2-followup-design.md`（见下方「spec 修订清单」）
-- [ ] **待办**：design §308 字面矛盾在 spec 加反向标注（以代码为准，SSH→VPN 依赖需 requiredVpnId 非 null）
+- [x] ~~spec 修订~~ ✅ 已完成（commit `bf38a82`：D1–D10 + F1–F6 订正进 spec，含 §308 反向标注）
+- [ ] **前端迁移悬空（2026-07-18 meta-review）**：前端迁移详细 spec/plan 不存在（spec §5 仅范围规划），是 phase2 §19 硬前置。phase2 §19 启动前必须立项前端迁移（brainstorming→spec→plan）。spec §5 / v2-master / Plan B 已加显式悬空声明 + 触发条件。
 
 ---
 
@@ -42,6 +42,12 @@
 - **[反面·seed.ts]** D5 第 6 条没读 seed.ts 就编「导出 runSeed()+加守卫」，被用户抓到。读真实文件发现三个没预见的问题（顶层 process.exit 地雷、new PrismaClient 无 adapter、esbuild cjs vs tsc esm interop）。修正为抽 `seedAdmin`。**原则：没看到事实不要妄下定论。** 见 memory [[evidence-before-conclusion]]。
 - **[正例·D7]** 原预设「spec §1.4 漏 libstdc++ 要补」，查 better-sqlite3 v12 musl prebuild + node:20-alpine 自带 libstdc++ 后**反转为不补**。先查再下。
 - **[正例·第三轮 D1]** grill 自己的结论——复查 D1 清单时发现上一轮只 grep `.min/max/length`、没读 connectionService import + shared validators，误报「Connection 全缺/12 字段」。读 shared validators 发现校验逻辑完整、Connection 双路径已接好。**主动还了 evidence 的债**（没等用户抓）。同时避免了一个误报：第三轮初差点把「migrations 不存在」当新发现，多跑一个 grep 发现审计 §68-72 早记为 BLOCKER-1——**根因是没读审计附录 A**。
+
+### Meta-review（2026-07-18）：前端迁移推锅修正
+
+grill plan 时发现"留给前端迁移子项目"类引用（spec §5、Plan B frontend 前置）挂在**未立项**的子项目上——前端迁移详细 spec/plan 不存在，只有 spec §5 范围规划。是 plan 体系的悬空依赖（前端迁移是 phase2 §19 硬前置）。
+
+**修正**（选项 1，用户拍板）：spec §5 + v2-master + Plan B 三处加显式悬空声明 + 触发条件（phase2 §19 启动前必须立项前端迁移）。不强行现在做前端迁移（避免 scope creep；spec §5 本就声明"实施另立项"），但把推锅暴露成显式 Open Question，不再藏在"留给子项目"话术里。选项 2（补前端迁移 spec）作为触发时的执行路径预留。
 
 ### Tradeoffs
 
