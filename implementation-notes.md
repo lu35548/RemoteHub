@@ -26,7 +26,13 @@
 ### 待办闭环状态
 - ✅ **Plan B Step5**（push 触发 CI 验证）：本 session 完成。
 - ✅ **D7**（musl/libstdc++）：早前查证反转闭环（node:20-alpine 自带，OQ 清单已 [x]）。
-- ⏳ **Plan A Task8**（docker build 验证）：唯一遗留，本环境 `docker: command not found`，需 Docker 环境实测。
+- ⏳ **Plan A Task8**（docker build 验证）：唯一遗留 BLOCKER，本环境 `docker: command not found`，需 Docker 环境实测。
+
+### 优先级清单核验（P0–P3，同日 evidence 坐实）
+- **P0**：docker build 唯一遗留 BLOCKER（~~Plan B Step5 push CI~~ ✅ 本 session 闭环，run 29813066646 全绿）。
+- **P1 OpenSpec 治理债**（3 项坐实）：`openspec/changes/integrate-backend-api`（tasks **49[x]/24[ ]**，已取代但**未 archive**）/ `openspec/TEMPORARY_OPERATIONS.md`（残留）/ `openspec/changes/integrate-backend-api/proposal.updated.md`（废弃副本）。
+- **P1 废弃代码**（数字厘清，git tracked 技术债）：`backend/` v1 TypeORM **118 源码文件**（106 .ts / 57 TypeORM / 7 文件含 TODO，**git tracked 非 ignored**）/ `RemoteHub/` v1 前端 **53 tracked**（find 含 node_modules 的 7457 是虚高）。删除前提：RemoteHub/ 待前端迁移完成、backend/ 待 phase2 移植参考完。
+- **P2/P3**：准确（前端迁移 spec §5 悬空是 phase2 §19 硬前置 / phase2 被 v2 收尾硬阻塞）。
 
 ---
 
