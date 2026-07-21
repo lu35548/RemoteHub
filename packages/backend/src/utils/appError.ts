@@ -61,6 +61,24 @@ export function createAppError(code: string, details?: Array<{ field: string; me
   return new AppError(code, ERROR_CODES[code] || 500, ERROR_MESSAGES[code] || code, details);
 }
 
+/** 带错误码的错误形状（Prisma 已知错误 / AppError 共有 code 字段） */
+export type ErrorWithCode = { code?: string };
+
+/** 判断捕获的错误是否为指定 Prisma/业务错误码（统一收口 `as { code?: string }` 散落断言） */
+export function hasErrorCode(error: unknown, code: string): boolean {
+  return error instanceof Error && (error as ErrorWithCode).code === code;
+}
+
+/**
+ * refresh 端点是否应清除 refreshToken cookie：错误带 clearCookie 标记，
+ * 或为 AUTH_004（无效/已消耗）/AUTH_002（过期）。属性判定，不依赖 instanceof（兼容 mock）。
+ */
+export function shouldClearRefreshCookie(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const e = error as Error & { clearCookie?: boolean };
+  return e.clearCookie === true || hasErrorCode(error, 'AUTH_004') || hasErrorCode(error, 'AUTH_002');
+}
+
 /**
  * 将 Prisma P2002 唯一约束冲突映射为业务错误码 §11.2
  */

@@ -11,7 +11,7 @@ const BACKEND_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 const PRISMA_BIN = process.platform === 'win32' ? 'prisma.CMD' : 'prisma';
 const PRISMA_CLI = path.join(BACKEND_ROOT, 'node_modules', '.bin', PRISMA_BIN);
 
-let counter = 0;
+let dbInstanceCounter = 0;
 
 /**
  * 建临时 SQLite file + migrate deploy，返回带 adapter 的 prisma 实例。
@@ -21,8 +21,8 @@ let counter = 0;
  * 嵌套 `pnpm exec` 造成的竞态（曾导致偶发「表不存在」失败）。
  */
 export async function setupTestDb(): Promise<{ prisma: PrismaClient; cleanUp: () => Promise<void> }> {
-  counter += 1;
-  const dbPath = path.join(os.tmpdir(), `remotehub-test-${process.pid}-${counter}-${Date.now()}.db`);
+  dbInstanceCounter += 1;
+  const dbPath = path.join(os.tmpdir(), `remotehub-test-${process.pid}-${dbInstanceCounter}-${Date.now()}.db`);
   const url = `file:${dbPath}`;
 
   execSync(`"${PRISMA_CLI}" migrate deploy --schema prisma/schema.prisma`, {

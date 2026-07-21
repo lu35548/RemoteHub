@@ -1,6 +1,6 @@
 // packages/backend/src/services/memberService.ts
 import { prisma } from '../utils/prisma.js';
-import { createAppError, handlePrismaUniqueViolation } from '../utils/appError.js';
+import { createAppError, handlePrismaUniqueViolation, hasErrorCode } from '../utils/appError.js';
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, validateMemberRole } from '@remotehub/shared';
 
 /** 成员列表 §4 */
@@ -49,7 +49,7 @@ export async function addMember(projectId: string, userId: string, role: string)
 
     return { id: member.id, userId, role, addedAt: member.addedAt.toISOString() };
   } catch (error) {
-    if ((error as { code?: string }).code === 'MEMBER_001') throw error;
+    if (hasErrorCode(error, 'MEMBER_001')) throw error;
     await handlePrismaUniqueViolation(error);
     throw error;
   }

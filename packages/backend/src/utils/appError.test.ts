@@ -16,7 +16,7 @@ vi.mock('@prisma/client', () => ({
   Prisma: { PrismaClientKnownRequestError: FakeKnownError },
 }));
 
-import { handlePrismaUniqueViolation, createAppError } from './appError.js';
+import { handlePrismaUniqueViolation, createAppError, ERROR_CODES } from './appError.js';
 
 describe('handlePrismaUniqueViolation - P2002 映射 §11.2', () => {
   const cases: Array<[string, string]> = [
@@ -60,5 +60,17 @@ describe('createAppError', () => {
   it('未知 code 回退 500', () => {
     const e = createAppError('NOPE' as string);
     expect(e.statusCode).toBe(500);
+  });
+});
+
+describe('ERROR_CODES', () => {
+  it('VAL_001 映射 422', () => {
+    expect(ERROR_CODES.VAL_001).toBe(422);
+  });
+  it('PROJ_001 映射 409', () => {
+    expect(ERROR_CODES.PROJ_001).toBe(409);
+  });
+  it('USER_002 映射 404', () => {
+    expect(ERROR_CODES.USER_002).toBe(404);
   });
 });

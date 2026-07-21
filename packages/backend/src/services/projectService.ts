@@ -1,6 +1,6 @@
 // packages/backend/src/services/projectService.ts
 import { prisma } from '../utils/prisma.js';
-import { createAppError, handlePrismaUniqueViolation } from '../utils/appError.js';
+import { createAppError, handlePrismaUniqueViolation, hasErrorCode } from '../utils/appError.js';
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, validateProjectName, validateDescription, validateIcon } from '@remotehub/shared';
 
 // ─── 用户关联解析 ───
@@ -63,16 +63,25 @@ export async function listProjects(userId: string, userRole: string, page: numbe
   return { data, pagination: { page, pageSize, total } };
 }
 
-/** 创建项目（事务：项目 + owner）§4.2, §5.1 */
-export async function createProject(userId: string, data: { name: string; description?: string; icon?: string }) {
-  const v = validateProjectName(data.name);
-  if (!v.valid) throw createAppError('VAL_001', [{ field: 'name', message: v.message }]);
-  const vd = validateDescription(data.description ?? '');
-  if (!vd.valid) throw createAppError('VAL_001', [{ field: 'description', message: vd.message }]);
+/** 校验项目字段（name/description/icon；undefined 跳过，createProject 传必填 name）§4 */
+function validateProjectFields(data: { name?: string; description?: string; icon?: string }) {
+  if (data.name !== undefined) {
+    const v = validateProjectName(data.name);
+    if (!v.valid) throw createAppError('VAL_001', [{ field: 'name', message: v.message }]);
+  }
+  if (data.description !== undefined) {
+    const vd = validateDescription(data.description);
+    if (!vd.valid) throw createAppError('VAL_001', [{ field: 'description', message: vd.message }]);
+  }
   if (data.icon !== undefined) {
     const vi = validateIcon(data.icon);
     if (!vi.valid) throw createAppError('VAL_001', [{ field: 'icon', message: vi.message }]);
   }
+}
+
+/** 创建项目（事务：项目 + owner）§4.2, §5.1 */
+export async function createProject(userId: string, data: { name: string; description?: string; icon?: string }) {
+  validateProjectFields({ name: data.name, description: data.description, icon: data.icon });
 
   try {
     const project = await prisma.$transaction(async (tx) => {
@@ -111,18 +120,7 @@ export async function getProject(projectId: string) {
 
 /** 更新项目 §4 */
 export async function updateProject(userId: string, projectId: string, data: { name?: string; description?: string; icon?: string }) {
-  if (data.name !== undefined) {
-    const v = validateProjectName(data.name);
-    if (!v.valid) throw createAppError('VAL_001', [{ field: 'name', message: v.message }]);
-  }
-  if (data.description !== undefined) {
-    const vd = validateDescription(data.description ?? '');
-    if (!vd.valid) throw createAppError('VAL_001', [{ field: 'description', message: vd.message }]);
-  }
-  if (data.icon !== undefined) {
-    const vi = validateIcon(data.icon);
-    if (!vi.valid) throw createAppError('VAL_001', [{ field: 'icon', message: vi.message }]);
-  }
+  validateProjectFields(data);
 
   try {
     const project = await prisma.project.update({
@@ -137,7 +135,7 @@ export async function updateProject(userId: string, projectId: string, data: { n
     const userMap = await resolveUserRefs([project.createdBy, project.updatedBy]);
     return toProjectDetail(project, userMap);
   } catch (error) {
-    if (error instanceof Error && (error as { code?: string }).code === 'P2025') {
+    if (hasErrorCode(error, 'P2025')) {
       throw createAppError('PROJ_002');
     }
     await handlePrismaUniqueViolation(error);
@@ -151,7 +149,7 @@ export async function deleteProject(projectId: string) {
     await prisma.project.delete({ where: { id: projectId } });
     return { id: projectId };
   } catch (error) {
-    if (error instanceof Error && (error as { code?: string }).code === 'P2025') {
+    if (hasErrorCode(error, 'P2025')) {
       throw createAppError('PROJ_002');
     }
     throw error;

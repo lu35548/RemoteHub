@@ -12,19 +12,23 @@ vi.mock('../utils/encryption.js', () => ({
   decrypt: vi.fn((p: string) => p.replace('encrypted:', '')),
 }));
 
-vi.mock('../utils/appError.js', () => ({
-  createAppError: vi.fn((code: string, details?: Array<{ field: string; message: string }>) => {
-    const error: any = new Error(`AppError:${code}`);
-    error.code = code;
-    error.statusCode = 422;
-    error.details = details;
-    error.name = 'AppError';
-    return error;
-  }),
-  handlePrismaUniqueViolation: vi.fn((_error: unknown) => {
-    throw _error;
-  }),
-}));
+vi.mock('../utils/appError.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../utils/appError.js')>();
+  return {
+    ...actual,
+    createAppError: vi.fn((code: string, details?: Array<{ field: string; message: string }>) => {
+      const error: any = new Error(`AppError:${code}`);
+      error.code = code;
+      error.statusCode = 422;
+      error.details = details;
+      error.name = 'AppError';
+      return error;
+    }),
+    handlePrismaUniqueViolation: vi.fn((_error: unknown) => {
+      throw _error;
+    }),
+  };
+});
 
 // ── 导入（在 mock 声明之后）──
 

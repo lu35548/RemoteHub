@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { Prisma } from '@prisma/client';
 
 vi.mock('../utils/prisma.js', async () => {
   const { createPrismaMock } = await import('../test/helpers/prismaMock.js');
@@ -27,6 +28,16 @@ describe('createProject - owner 自动插入事务', () => {
     const r = await createProject('u1', { name: 'proj' });
     expect(prisma.$transaction).toHaveBeenCalled();
     expect(r).toMatchObject({ name: 'proj' });
+  });
+
+  it('P2002 name 冲突抛 PROJ_001', async () => {
+    const p2002 = new Prisma.PrismaClientKnownRequestError('unique constraint failed', {
+      code: 'P2002',
+      clientVersion: '6.19.3',
+      meta: { target: ['name'] },
+    });
+    prisma.project.create.mockRejectedValue(p2002);
+    await expect(createProject('u1', { name: 'dup' })).rejects.toMatchObject({ code: 'PROJ_001' });
   });
 });
 

@@ -1,7 +1,7 @@
 // packages/backend/src/services/connectionService.ts
 import { prisma } from '../utils/prisma.js';
 import type { Prisma } from '@prisma/client';
-import { createAppError, handlePrismaUniqueViolation } from '../utils/appError.js';
+import { createAppError, handlePrismaUniqueViolation, hasErrorCode } from '../utils/appError.js';
 import { encrypt, decrypt } from '../utils/encryption.js';
 import {
   validateConnectionName, validateHost, validatePort,
@@ -260,7 +260,7 @@ export async function updateConnection(userId: string, connectionId: string, dat
     const userMap = await resolveUserRefs([connection.createdBy, connection.updatedBy]);
     return toDetail(connection, false, userMap);
   } catch (error) {
-    if (error instanceof Error && (error as unknown as { code: string }).code === 'P2025') {
+    if (hasErrorCode(error, 'P2025')) {
       throw createAppError('CONN_002');
     }
     await handlePrismaUniqueViolation(error);

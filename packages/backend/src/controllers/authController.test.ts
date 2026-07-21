@@ -24,26 +24,19 @@ vi.mock('../utils/jwt.js', () => ({
   hashRefreshToken: vi.fn().mockReturnValue('hashed-token'),
 }));
 
-vi.mock('../utils/appError.js', () => ({
-  createAppError: vi.fn((code: string, details?: Array<{ field: string; message: string }>) => {
-    const error = new Error(`AppError: ${code}`);
-    (error as any).code = code;
-    (error as any).statusCode = code === 'AUTH_001' ? 401 : code === 'VAL_001' ? 422 : 500;
-    (error as any).details = details;
-    return error;
-  }),
-  AppError: class AppError extends Error {
-    code: string;
-    statusCode: number;
-    details?: Array<{ field: string; message: string }>;
-    constructor(code: string, statusCode: number, message: string, details?: Array<{ field: string; message: string }>) {
-      super(message);
-      this.code = code;
-      this.statusCode = statusCode;
-      this.details = details;
-    }
-  },
-}));
+vi.mock('../utils/appError.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../utils/appError.js')>();
+  return {
+    ...actual,
+    createAppError: vi.fn((code: string, details?: Array<{ field: string; message: string }>) => {
+      const error = new Error(`AppError: ${code}`);
+      (error as any).code = code;
+      (error as any).statusCode = code === 'AUTH_001' ? 401 : code === 'VAL_001' ? 422 : 500;
+      (error as any).details = details;
+      return error;
+    }),
+  };
+});
 
 import * as authController from './authController.js';
 import * as authService from '../services/authService.js';

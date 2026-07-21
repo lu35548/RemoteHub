@@ -1,7 +1,7 @@
 // packages/backend/src/controllers/authController.ts
 import type { Request, Response, NextFunction } from 'express';
 import * as authService from '../services/authService.js';
-import { createAppError } from '../utils/appError.js';
+import { createAppError, shouldClearRefreshCookie } from '../utils/appError.js';
 import { hashRefreshToken } from '../utils/jwt.js';
 import { prisma } from '../utils/prisma.js';
 
@@ -72,8 +72,7 @@ export async function refresh(req: Request, res: Response, next: NextFunction) {
 
     res.json({ success: true, data: { accessToken: result.accessToken } });
   } catch (err) {
-    const e = err as { clearCookie?: boolean; code?: string };
-    if (e.clearCookie || e.code === 'AUTH_004' || e.code === 'AUTH_002') {
+    if (shouldClearRefreshCookie(err)) {
       res.cookie('refreshToken', '', CLEAR_COOKIE_OPTIONS);
     }
     next(err);
