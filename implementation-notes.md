@@ -12,6 +12,24 @@
 
 ---
 
+## [2026-07-21] V2 推送远端 + CI 验证闭环
+
+### Design decisions
+- **force-push feat/v2-refactor → main**：远端 main（4 commits 旧前端）与 feat/v2-refactor（72 commits V2）`entirely different commit histories`，GitHub PR 表单不出现。核验 V2 的 `RemoteHub/` 子目录（53 文件）是远端 main 前端（24 文件）的**超集演进版**（ConnectionCard diff 1 行、App.tsx 22 行、auth.service.ts 137 行 V2 更全含 heartbeat）→ 零损失覆盖 main（`0777aad → a60119f → eaa69b7`，`--force-with-lease`，TUN 代理绕 GFW 阻断）。
+- **不走 merge --allow-unrelated-histories**：会把远端 24 个扁平前端文件塞进 monorepo 根目录，污染结构。force-push 最干净，且 `push: main` 直接触发 CI（无需 PR，绕过 PR 表单缺失）。
+
+### CI 验证结果（Plan B Step5 闭环 ✅）
+- **首跑**（run 29811728180 @ a60119f）tsc step **27 错全红** → 诊断 prisma generate 遗漏（详见下 section）→ 修复 `eaa69b7`。
+- **重跑**（run 29813066646 @ eaa69b7）**11 步全 success**：prisma generate ✅ / tsc ✅（27 错清零）/ backend test **204 全过**（unit 200 + integration 4，15 files）。Plan A/B/C 首次真实 CI 验证（ubuntu + 全新 install）。
+- **本地实测**：lint 0 / tsc exit 0 / test **204 passed**。handoff 写的 200（unit 196）是 a60119f「补测试」前的旧数，现 204。
+
+### 待办闭环状态
+- ✅ **Plan B Step5**（push 触发 CI 验证）：本 session 完成。
+- ✅ **D7**（musl/libstdc++）：早前查证反转闭环（node:20-alpine 自带，OQ 清单已 [x]）。
+- ⏳ **Plan A Task8**（docker build 验证）：唯一遗留，本环境 `docker: command not found`，需 Docker 环境实测。
+
+---
+
 ## [2026-07-21] CI prisma generate 遗漏修复（Plan B 实施后首次 CI 暴露）
 
 ### 触发
