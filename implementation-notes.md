@@ -8,6 +8,25 @@
 - [x] **D10** notes/vpnLoginUrl 长度上限 —— ✅ shared 加 validateNotes(≤2000)+validateVpnLoginUrl(≤500)，connectionService 调用
 - [x] ~~spec 修订~~ ✅ 已完成（commit `bf38a82`：D1–D10 + F1–F6 订正进 spec，含 §308 反向标注）
 - [ ] **前端迁移悬空（2026-07-18 meta-review）**：前端迁移详细 spec/plan 不存在（spec §5 仅范围规划），是 phase2 §19 硬前置。phase2 §19 启动前必须立项前端迁移（brainstorming→spec→plan）。spec §5 / v2-master / Plan B 已加显式悬空声明 + 触发条件。
+- [x] **Plan B CI prisma generate 遗漏**（2026-07-21 首次 CI 暴露）：tsc 步骤 27 错全红，根因 `@prisma/client` postinstall 找不到自定义路径 schema（`packages/backend/prisma/schema.prisma`）→ client 未生成 → 类型全缺。ci.yml install 后加 `pnpm --filter @remotehub/backend exec prisma generate` 修复。见下 [2026-07-21] section。
+
+---
+
+## [2026-07-21] CI prisma generate 遗漏修复（Plan B 实施后首次 CI 暴露）
+
+### 触发
+force-push feat/v2-refactor → main 触发首次 CI（run 29811728180），tsc 步骤（step 9）27 错全红，test（step 10）skipped。本地同款 `pnpm --filter @remotehub/backend exec tsc --noEmit` EXIT 0 全绿 → 排除代码问题，锁 CI 环境。
+
+### Design decisions
+- **根因**（CI 日志 L184 铁证）：`@prisma/client` postinstall `prisma:warn We could not find your Prisma schema in the default locations`。schema 在 `packages/backend/prisma/schema.prisma`（非默认位置），postinstall 找不到 → client 未生成 → `.prisma/client/default` 空壳 → tsc 找不到 `ConnectionUncheckedCreateInput` / `PrismaClientKnownRequestError` 等 → 27 错（TS7006 回调推断失败 + TS2694/TS2339 命名空间缺失）**同源于此**。
+- **修复**：ci.yml install 后加 `pnpm --filter @remotehub/backend exec prisma generate`（在 backend 包目录跑，prisma 找到 `prisma/schema.prisma`）。本地同款命令验证 ✔ 生成 v6.19.3。
+
+### Deviations / 教训
+- **Plan B self-review 漏网**：设计 CI 时没考虑 prisma client 生成；pnpm postinstall 找不到非默认路径 schema 是 Prisma 已知行为。**可复用结论：CI 凡含 prisma 项目，install 后必须显式 `prisma generate`，不能依赖 postinstall**（自定义 schema 路径下必失效）。→ 萃取进 memory。
+- **evidence-first 自纠**：初疑 `onlyBuiltDependencies` 放错位置（`"pnpm"` 字段外），查证发现配置正确在 `"pnpm": {}` 下，自纠为 postinstall schema 查找根因。见 [[evidence-before-conclusion]]。
+
+### Tradeoffs
+- prisma generate 位置：install 后、shared build 前（generate 独立于 shared，tsc/test 依赖它，最早放最稳）。
 
 ---
 
@@ -80,3 +99,41 @@ D1–D10 全部拍板；剩余见顶部「待办」。
 - VPN 校验代码（connectionService §127-129/§212-226/§351-362）**符合 handoff 实际意图**（非 VPN requiredVpnId 保留），design §308 字面错、代码对。
 - `appError.handlePrismaUniqueViolation` 存在且 P2002 映射齐全（§67-78）→ §4 B-6 appError.test 是补测试非写实现。留 B-6 验证项：切 SQLite 后 P2002 `meta.target` 格式是否一致。
 - raw SQL 仅 `healthRoutes.ts:8 SELECT 1`（跨 provider 兼容）。
+
+---
+
+## [2026-07-18] Plan A/B/C 实施（TDD，15 Task + 修复提交）
+
+按 executing-plans + TDD 技能执行 `docs/superpowers/plans/2026-07-18-*` 三份 plan。本地 `lint 0 / tsc 0 / test 200`（unit 196 + integration 4）全绿。
+
+### Plan A：SQLite 切换链路（8 Task，commit c21617e…9804dc4）
+- Task1 shared 加 4 validator（TDD RED 10 fail → GREEN 28 pass）。
+- Task2 4 service 校验接线（connectionService notes/vpnLoginUrl 先 RED 再接线）。
+- Task3 schema `provider=mysql→sqlite` + 移 12 处 `@db.VarChar`（prisma validate 需临时 `file:` URL）。
+- Task4 prisma.ts driver adapter（`@prisma/adapter-better-sqlite3@6.19.3`，pin 6.x；根 package.json 加 better-sqlite3 到 onlyBuiltDependencies）。
+- Task5 seed 链路重组（抽 `seedAdmin`、删 `seedCheck`、`seed.js` 出库）。
+- Task6 server.ts async bootstrap（WAL→seed→cleaner→listen，fail-fast）。
+- Task7 migration init + 集成测试（D9，vitest unit/integration projects 分离）。
+- Task8 Docker 简化（删 mysql 容器、加 build tools、CMD 简化为 migrate deploy + server）。
+
+### Plan B：CI（commit c08a72b、8187665）
+- `.github/workflows/ci.yml`（shared build/test + backend lint/tsc/test）+ 根 package.json 补 `packageManager` pin。
+- 修预存在 50 个 lint 错：源码 6 处（`(error as any)`→类型收窄、删未用 import、删失效 eslint-disable）；eslint 测试文件范围豁免 `no-explicit-any`（mock 范式所需，生产代码仍严格）。
+
+### Plan C：B-6 service 单测（6 Task，commit 77fd85b…d1be7d8）
+- `createPrismaMock` helper（model 方法超集）+ 迁移 auth/connection test。
+- 新增 userService(12)/projectService(6)/memberService(13)/connectionService getConnection B-4(5)/appError P2002(10)。
+
+### Deviations（evidence-based，偏离 plan 字面）
+- **adapter 导出名是 `PrismaBetterSQLite3`（大写 SQL）**，plan 字面 `PrismaBetterSqlite3` 错；以真实包导出为准。
+- **`write_to_file` 偶发写空文件**：seedAdmin.ts 首次写 0 字节（Task5 提交后 Task6 tsc 才暴露，因 tsconfig 仅含 src 不覆盖 prisma/seed.ts）。教训：写入后核验文件 Length。
+- **dev.db 分裂**：driver adapter 按进程 CWD 解析 `file:./dev.db`，prisma CLI 按 schema 目录解析 → migrate 写 `prisma/dev.db` 而 server/seed 写 `packages/backend/dev.db`。新增 `src/utils/resolveSqliteUrl`（TDD）锚定 prisma/ 目录统一。**plan 未预见，实施时发现并修复。**
+- **.env ENCRYPTION_KEY 原值解码 35 字节**（违反 env.ts 32 字节校验，本地未跟踪文件，pre-existing），改为合法 32 字节 base64。
+- **prisma generate 漏跑**：切 provider 后需 `prisma generate` 重生成客户端，否则 runtime 报 adapter/provider 不兼容（tsc 不暴露，types 不变）。
+- **集成测试 flaky**：testDb 原用 `execSync(pnpm --filter ... migrate deploy)` 在 vitest projects 并发时偶发「表不存在」。改用本地 prisma 二进制直调（`--schema` + cwd）+ vitest `fileParallelism:false` 串行 projects。
+- **tsc 强转**：vi.mock 运行期替换但 TS 按真实 PrismaClient 类型检查，新 test 文件 `const prisma = _prisma as any`（eslint 测试文件已豁免 any），connectionService 块用现有 `as MockFn` 范式。
+
+### 未完成的验证项（待办）
+- Plan B Step5 `git push` 触发 CI（待用户在有远端的仓库执行）。
+- Plan A Task8 docker build/load 验证（本环境无 Docker 守护进程）—— D7 plan 验证项未实际执行。
+- D7 终验依赖 docker build。
