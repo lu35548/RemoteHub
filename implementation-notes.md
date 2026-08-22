@@ -12,6 +12,29 @@
 
 ---
 
+## [2026-08-22] Plan A Task8 docker 验证闭环（P0 BLOCKER 清零）
+
+### 验证结果（全部实测）
+- **Step 3 build** ✅ 镜像 595MB（历经 3 修复，见下）
+- **Step 4 native（D7 终验）** ✅ adapter 实例化 → `better-sqlite3 native OK`（musl + libstdc++ base 自带坐实；且镜像是 **gyp 源码编译产物**——`prebuild-install socket hang up` → build tools fallback 实战触发，Plan A 预判坐实）
+- **Step 5 compose 起栈** ✅ 日志逐项：`SQLite WAL 已启用` / `Seeded admin user` / `Session cleaner scheduled` / `Server running on port 3001`（Task 6 启动序列吻合）+ 容器 `Up (healthy)` + health `{"status":"ok"}`
+- **P0 唯一 BLOCKER 清零**，v2 收尾部署链全通。
+
+### Task 8 纸面 Dockerfile 首跑暴露的 3 个修复
+1. **apk 换阿里源**：`sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories`——官方 CDN 11/29 包用 793s，阿里源 20.7s（38 倍）。
+2. **builder 加 `prisma generate`**（install 后、shared build 前）：CI 同款教训**第二实例**（[[ci-prisma-generate-required]]——不止 CI，**任何全新 install 环境都缺 `.prisma/client`**，tsc 必挂 TS7006/TS2339）。
+3. **pnpm v10 `deploy --legacy` + `prisma` 移入 dependencies**：v10 deploy 默认要求 `inject-workspace-packages=true`（`ERR_PNPM_DEPLOY_NONINJECTED_WORKSPACE`）；且 `--prod deploy` 不含 devDeps，而 CMD `npx prisma migrate deploy` 运行时需要 CLI → 移 prod deps（语义正确：migrate deploy 是运行时职责）。
+
+### Plan 勘误（Step 4 验证命令）
+- plan 字面 `require('better-sqlite3')` 在 pnpm 严格模式下**必失败**：它是 `@prisma/adapter-better-sqlite3` 的传递依赖，不提升到顶层 node_modules（.pnpm 隔离）。修正为 adapter 实例化验证（真触发 native .node 加载 + libstdc++ 链路）。
+
+### 环境适配（本机，不进库）
+- `~/.docker/daemon.json` 加 `registry-mirrors: [docker.m.daocloud.io, docker.1ms.run]`（Docker Hub 直连被拒）；DNS 间歇抖动重试即过。
+- 根目录 `.env`（从 packages/backend/.env 拷贝，compose `env_file` 需要；`DATABASE_URL` 被 compose override `file:/data/prod.db`；gitignore 已排）。
+- Docker Desktop 装在 `AppData\Local\Programs\DockerDesktop`（非 Program Files），daemon 崩过一次重启即恢复。
+
+---
+
 ## [2026-07-21] V2 推送远端 + CI 验证闭环
 
 ### Design decisions

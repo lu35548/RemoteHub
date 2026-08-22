@@ -1,0 +1,16 @@
+# 构建上下文只需：pnpm-workspace.yaml / pnpm-lock.yaml / 根 package.json / packages/{shared,backend}
+# Task 8 验证时新增（2026-08-20）：无此文件 build context 会传 26k+ 文件（node_modules/.git 大头）
+**/node_modules
+.git
+.github
+backend
+RemoteHub
+docs
+openspec
+.codebuddy
+.serena
+.claude
+.env
+.env.*
+*.html
+implementation-notes.md

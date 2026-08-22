@@ -3,14 +3,15 @@ RUN corepack enable
 
 FROM base AS builder
 WORKDIR /app
-RUN apk add --no-cache python3 make g++
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories && apk add --no-cache python3 make g++
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
 COPY packages/shared/ packages/shared/
 COPY packages/backend/ packages/backend/
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
+RUN pnpm --filter @remotehub/backend exec prisma generate
 RUN pnpm --filter @remotehub/shared build
 RUN pnpm --filter @remotehub/backend build
-RUN pnpm --filter @remotehub/backend --prod deploy /prod/backend
+RUN pnpm --filter @remotehub/backend --prod deploy --legacy /prod/backend
 RUN cp -r packages/backend/dist /prod/backend/dist
 RUN cp -r packages/backend/prisma /prod/backend/prisma
 
