@@ -30,3 +30,17 @@
   - 国际化键名（如 i18n keys）
 
 <!-- OPENSPEC:END -->
+
+## Agent skills
+
+### Issue tracker
+
+Issue 跟踪在本仓库的 GitHub Issues（`lu35548/RemoteHub`），用 `gh` CLI 操作。见 `docs/agents/issue-tracker.md`。
+
+### Triage labels
+
+五个 triage 角色标签用默认值（`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`）。见 `docs/agents/triage-labels.md`。
+
+### Domain docs
+
+Single-context 布局：根目录一个 `CONTEXT.md` + `docs/adr/`，按需惰性创建。见 `docs/agents/domain.md`。
