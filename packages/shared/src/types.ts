@@ -61,7 +61,7 @@ export interface UserPublic {
   createdAt: string;
 }
 
-export interface UserListItem extends UserPublic {}
+export type UserListItem = UserPublic;
 
 export interface AdminUpdateUserRequest {
   nickname?: string;

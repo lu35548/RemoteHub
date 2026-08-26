@@ -118,3 +118,40 @@ describe('validateVpnLoginUrl', () => {
     expect(validateVpnLoginUrl('https://vpn.example.com').valid).toBe(true);
   });
 });
+
+describe('validateNickname', () => {
+  it('拒绝空值', () => {
+    expect(validateNickname('').valid).toBe(false);
+  });
+  it('拒绝超长', () => {
+    expect(validateNickname('a'.repeat(200)).valid).toBe(false);
+  });
+  it('接受正常昵称', () => {
+    expect(validateNickname('测试用户').valid).toBe(true);
+  });
+});
+
+describe('validateConnectionName', () => {
+  it('拒绝空值', () => {
+    expect(validateConnectionName('').valid).toBe(false);
+  });
+  it('拒绝超长', () => {
+    expect(validateConnectionName('a'.repeat(300)).valid).toBe(false);
+  });
+  it('接受正常名称', () => {
+    expect(validateConnectionName('生产数据库').valid).toBe(true);
+  });
+});
+
+describe('validateTags', () => {
+  it('接受 null/undefined（可选字段）', () => {
+    expect(validateTags(null).valid).toBe(true);
+    expect(validateTags(undefined).valid).toBe(true);
+  });
+  it('拒绝超长', () => {
+    expect(validateTags('a'.repeat(501)).valid).toBe(false);
+  });
+  it('接受上限内', () => {
+    expect(validateTags('生产,核心').valid).toBe(true);
+  });
+});
