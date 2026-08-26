@@ -68,7 +68,7 @@ v2 后端已全闭环（SQLite + WAL、CI 11 步、docker 部署验证、145+ �
 10. **UI 基座照搬自绘**：UIComponents/Icons/ProjectIcons/LoadingStates 原样迁移（10 组件清单），不引组件库；客户端状态照搬 v1 的 Context + useState（UIProvider/useUI），服务端状态归 TanStack Query。
 
 **backend 扩展（本项目 scope 内）**
-11. **+2 端点**：`POST /api/v1/auth/heartbeat`（刷新 session lastActivity）+ 在线查询端点（按 lastActivity 阈值返回在线用户），支撑 story 13；数据基础（session 表）已在。
+11. **+2 端点**：`POST /api/v1/auth/heartbeat`（刷新活跃时间）+ 在线查询端点（按活跃阈值返回在线用户），支撑 story 13。数据基础实为 `User.lastActiveAt`（非 Session 表，spec 初稿措辞勘误），无需 migration；行为规格照 v1：10 秒节流写、5 分钟在线阈值、最近活跃倒序。
 
 **工程体系**
 12. **lint+test 体系是第一张票**：eslint flat config 极简对齐 backend 哲学（`@typescript-eslint` 严格规则 + react-hooks 必要规则）；vitest + @testing-library/react 已装、0 测试文件。
