@@ -7,8 +7,33 @@
 - [x] **D9** 集成测试 —— ✅ 把 spec §2 BLOCKER-1 验收做成集成测试（setupTestDb + 临时 SQLite + migrate deploy + 验 5 表/unique/cascade/自引用约束）
 - [x] **D10** notes/vpnLoginUrl 长度上限 —— ✅ shared 加 validateNotes(≤2000)+validateVpnLoginUrl(≤500)，connectionService 调用
 - [x] ~~spec 修订~~ ✅ 已完成（commit `bf38a82`：D1–D10 + F1–F6 订正进 spec，含 §308 反向标注）
-- [ ] **前端迁移悬空（2026-07-18 meta-review）**：前端迁移详细 spec/plan 不存在（spec §5 仅范围规划），是 phase2 §19 硬前置。phase2 §19 启动前必须立项前端迁移（brainstorming→spec→plan）。spec §5 / v2-master / Plan B 已加显式悬空声明 + 触发条件。
+- [ ] **前端迁移悬空（2026-07-18 meta-review）**：→ 已立项（2026-08-25）：grill 7 问 + services 15 文件逐审 + ADR-0001 + spec 定稿（`docs/superpowers/specs/2026-08-25-frontend-migration.md`，issue #1），待用户终审后转 to-tickets。实施完成前本条不关。
 - [x] **Plan B CI prisma generate 遗漏**（2026-07-21 首次 CI 暴露）：tsc 步骤 27 错全红，根因 `@prisma/client` postinstall 找不到自定义路径 schema（`packages/backend/prisma/schema.prisma`）→ client 未生成 → 类型全缺。ci.yml install 后加 `pnpm --filter @remotehub/backend exec prisma generate` 修复。见下 [2026-07-21] section。
+
+---
+
+## [2026-08-25] 前端迁移立项（grill-with-docs → spec）
+
+### Design decisions（一行一条）
+- 决策：等价迁移（ADR-0001）。理由：反 scope creep + 验收机械可判（v1 运行态基准）。备选：借机改良（拒，归 phase2）。
+- 决策：auth 契约以 v2 为准（双 token：内存 access + httpOnly cookie refresh）。理由：后端 145 测试已定契约。备选：照搬 v1 行为（拒，客户端 hash 是 LS 时代遗产）。
+- 决策：services 处置用户否了「import 闭包」一刀切、选逐文件评审；结论迁 2（auth/data）→ 参考 1（api.adapter）→ 退役 11（含 remoteConnection.service 标 phase2 金矿）。
+- 决策：heartbeat/online backend +2 端点进本项目 scope。理由：v1 活行为 + session lastActivity 数据基础已在。
+- 决策：分页适配取大 pageSize（200）拉全。理由：等价 UI 零改动；分页 UI 归 phase2。
+- 决策：路由最小骨架 /login + / + 守卫（Data Mode + loader redirect，研究笔记）；UI 基座照搬自绘；compose 加 frontend 服务（nginx 反代；查证：dev/prod 均 /api 同源，cookie 行为一致）。
+- [2026-08-25] 决策：拆票 12 张（T1–T12 → GitHub #2–#13，native issue dependencies 建边 14 条，抽验 blocked_by 计数全符）；frontier = T1（lint+test）∥ T2（backend 2 端点）。票体在 issue，spec 为权威正文，#1 为父票。
+
+### Deviations
+- to-spec 模板要求 spec 全文发 issue；实际正文落 `docs/superpowers/specs/`（repo 惯例、版本管理），issue #1 只放摘要+指针，防双份漂移。
+- 用户补充验收：Chrome DevTools MCP 浏览器五路径全流程 + console/network 清零（超出模板默认）。
+
+### 事实修正（影响后续计划）
+- frontend 骨架「仅骨架」说法过时：client.ts（单飞 refresh）+ queries.ts（24 hooks）已约 80% 就位；工作量重心在组件层/接线/backend 2 端点/工程体系。
+- v1 UserManagementModal 真实调用集 = 列表/创建/删除/改自己密码（无编辑他人、无 admin 重置）——初稿 story 12 脑补被自审抓出修正。
+- ConnectionCard 有显示/复制明文密码行为 → decrypt-password 端点 UI 消费坐实（v2 等价 = 按需解密）。
+
+### Open questions
+- 无（grill 7 问 + 决策点①A + 分页 A 全拍板）；spec 待用户终审。
 
 ---
 
