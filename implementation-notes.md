@@ -45,6 +45,12 @@
 - T3：样式体系构建化——v1 的 CDN tailwind + Google Fonts 在内网系统不可接受，迁移 Tailwind v4 CSS-first（@theme）+ @fontsource 本地字体 + lucide-react + tw-animate-css；UIComponents 因 toast 依赖前置迁移（T4 复用）。
 - T3 微偏离 v1：刪 600ms 假网络延迟（真 API 自带）；input name/autocomplete 的 a11y issue 照 v1 原样留 phase2。
 - T3 路由：react-router-dom v7 顶层导出（pnpm 严格模式下 'react-router/dom' 子导出需显式依赖 react-router 包，未声明）；loader 对称守卫（requireAuth/requireUnauth）。
+- T4：枚举形态断裂——v1 enum 值即中文文案 vs shared 短码（库存短码），建 constants.ts 显示映射层（PROTOCOL_LABELS）；vpnType 语义变化（v1 登录方式 → v2 协议类型）T5 按 shared 语义另行处理。
+- T4 教训①【高危】：分页解构 bug——后端 body 扁平 {success, data[], pagination}，queries 旧代码 api.get（剥壳返 data）+ PaginatedResponse 类型断言 = 类型谎言（tsc 绿的假象），App.test mock 伪造形状掩盖真相。修：api.getRaw 返完整 body；真链路 curl 验形状坐实。**教训：mock 必须按真实运行时形状造，不能用「期待中的形状」**。
+- T4 教训②：client 401-refresh 按 /auth/ 前缀一刀切排除误伤 me（token 过期恰恰最需 refresh）→ NO_REFRESH_PATHS 精确端点清单 + App isError 兜底 setAccessToken(null)。
+- T4 死代码链清除（v1 从未跑过 lint）：导出/导入整链（Sidebar 无按钮死 prop + App 死 handler）、isLoadingData 死状态；LoadingStates 两处 render 期 Math.random 改 useState 惰性初始化（纯度）。
+- T4：pageSize 200→100（后端 MAX_PAGE_SIZE=100 静默截断，spec 决策 3 勘误）；useConnections 补 pageSize 参数。
+- 端口转机：防火墙是**段拦截**非白名单（实测 5173/5188/5199/7777/8888 被拦，3000/4173/8080/9000 可听），vite.config 5173→3000，日常 dev 欠账闭环无需用户放行。
 
 ### Deviations / 隐藏债修复（T1-T3 顺带）
 - T1：frontend tsconfig 缺 noEmit（tsc 向 src 误 emit .js，骨架从未跑过 build 未暴露）；shared lint script 从未装 eslint 依赖；仓库根误落 numbers.txt（相对路径重定向）。

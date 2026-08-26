@@ -58,7 +58,7 @@ export function useLogout() {
 export function useProjects(page = 1, pageSize = 20) {
   return useQuery({
     queryKey: ['projects', page, pageSize],
-    queryFn: () => api.get<PaginatedResponse<ProjectListItem>>(`/projects?page=${page}&pageSize=${pageSize}`),
+    queryFn: () => api.getRaw<PaginatedResponse<ProjectListItem>>(`/projects?page=${page}&pageSize=${pageSize}`),
   });
 }
 
@@ -97,12 +97,12 @@ export function useDeleteProject() {
 
 // ─── Connections ───
 
-export function useConnections(projectId?: string, page = 1) {
-  const params = new URLSearchParams({ page: String(page) });
+export function useConnections(projectId?: string, page = 1, pageSize = 100) {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
   if (projectId) params.set('projectId', projectId);
   return useQuery({
     queryKey: ['connections', projectId, page],
-    queryFn: () => api.get<PaginatedResponse<ConnectionListItem>>(`/connections?${params}`),
+    queryFn: () => api.getRaw<PaginatedResponse<ConnectionListItem>>(`/connections?${params}`),
   });
 }
 
@@ -150,7 +150,7 @@ export function useDecryptPassword() {
 export function useMembers(projectId: string, page = 1) {
   return useQuery({
     queryKey: ['members', projectId, page],
-    queryFn: () => api.get<PaginatedResponse<MemberListItem>>(`/projects/${projectId}/members?page=${page}`),
+    queryFn: () => api.getRaw<PaginatedResponse<MemberListItem>>(`/projects/${projectId}/members?page=${page}`),
     enabled: !!projectId,
   });
 }
@@ -187,7 +187,7 @@ export function useRemoveMember() {
 export function useUsers(page = 1) {
   return useQuery({
     queryKey: ['users', page],
-    queryFn: () => api.get<PaginatedResponse<UserListItem>>(`/users?page=${page}`),
+    queryFn: () => api.getRaw<PaginatedResponse<UserListItem>>(`/users?page=${page}`),
   });
 }
 

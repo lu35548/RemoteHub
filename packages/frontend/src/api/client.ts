@@ -1,5 +1,9 @@
 import type { ApiResponse, ApiErrorResponse } from '@remotehub/shared';
 
+// 401 时不应触发 refresh 的端点（仅认证入口自身；me/change-password 等过期恰恰需要 refresh，
+// 不能按 /auth/ 前缀一刀切排除——否则 token 过期时 me 401 直接报错，App 侧还得兜底清 token）
+const NO_REFRESH_PATHS = ['/auth/login', '/auth/refresh', '/auth/logout', '/auth/register'];
+
 let accessToken: string | null = null;
 let refreshPromise: Promise<string | null> | null = null;
 
@@ -55,7 +59,7 @@ export async function apiRequest<T>(
     credentials: 'include',
   });
 
-  if (res.status === 401 && !path.startsWith('/auth/')) {
+  if (res.status === 401 && !NO_REFRESH_PATHS.includes(path)) {
     const newToken = await ensureRefreshed();
     if (newToken) {
       headers['Authorization'] = `Bearer ${newToken}`;
@@ -84,8 +88,38 @@ export async function apiRequest<T>(
   return resBody.data;
 }
 
+/** 分页端点专用：返回完整响应体（含 pagination），不剥 data——分页 hooks 需要 total */
+async function apiRequestRaw<T>(path: string): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
+
+  const res = await fetch(`/api/v1${path}`, {
+    method: 'GET',
+    headers,
+    credentials: 'include',
+  });
+
+  if (res.status === 401) {
+    const newToken = await ensureRefreshed();
+    if (newToken) {
+      return apiRequestRaw<T>(path);
+    }
+    setAccessToken(null);
+    window.location.href = '/login';
+    throw new Error('Session expired');
+  }
+
+  if (!res.ok) {
+    const err: ApiErrorResponse = await res.json();
+    throw err;
+  }
+
+  return (await res.json()) as T;
+}
+
 export const api = {
   get: <T>(path: string) => apiRequest<T>('GET', path),
+  getRaw: <T>(path: string) => apiRequestRaw<T>(path),
   post: <T>(path: string, body?: unknown) => apiRequest<T>('POST', path, body),
   patch: <T>(path: string, body?: unknown) => apiRequest<T>('PATCH', path, body),
   delete: <T>(path: string) => apiRequest<T>('DELETE', path),

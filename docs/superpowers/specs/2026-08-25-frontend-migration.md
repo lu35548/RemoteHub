@@ -52,7 +52,7 @@ v2 后端已全闭环（SQLite + WAL、CI 11 步、docker 部署验证、145+ �
 **迁移哲学与契约**
 1. **等价迁移**：用户可见行为 1:1 照 v1 运行态；一切改良（交互/视觉/结构）推迟 phase2（ADR-0001）。
 2. **auth 契约以 v2 为准**：双 token——内存 access token（Bearer header）+ httpOnly cookie refresh；页面刷新经 bootstrap refresh 恢复会话。v1 的客户端 `hashPassword`/`initialize` 职责已在后端（bcrypt + seedAdmin），不复刻。
-3. **分页适配取 A**：v2 API 分页设计（`PaginatedResponse`），前端以大 pageSize（200）一次拉全，UI 保持 v1 无分页形态；分页 UI 归 phase2。
+3. **分页适配取 A**：v2 API 分页设计（`PaginatedResponse`），前端以大 pageSize 一次拉全（后端 MAX_PAGE_SIZE=100 上限，初稿「200」勘误），UI 保持 v1 无分页形态；分页 UI 归 phase2。
 
 **services 层处置（15 文件逐行评审结论）**
 4. **迁移 2**：`auth.service` → auth client 交互（登录态/心跳接线）；`data.service` → `queries.ts` hooks（**已基本就位**）。

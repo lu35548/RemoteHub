@@ -36,6 +36,15 @@ export default defineConfig([
     },
   },
   {
+    // ProjectIcons：组件 + ALL_ICONS 常量导出（数组非原始类型，不满足 allowConstantExport）；
+    // ProjectModal：set-state-in-effect 为 v1 原样的表单回填模式（editingProject 变化时填充）
+    files: ['src/components/ProjectIcons.tsx', 'src/components/ProjectModal.tsx'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+      'react-hooks/set-state-in-effect': 'off',
+    },
+  },
+  {
     // 测试文件：mock 工厂/断言天然使用 any（与 backend 范围豁免一致）
     files: ['src/**/*.test.{ts,tsx}', 'src/test/**/*.ts'],
     rules: {

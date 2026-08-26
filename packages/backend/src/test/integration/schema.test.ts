@@ -1,5 +1,8 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { setupTestDb } from '../helpers/testDb.js';
+
+// 真实 SQLite migration 在并行满载（如 root pnpm -r test）下可能超过默认 5s，放宽到 15s
+vi.setConfig({ testTimeout: 15_000 });
 
 const instances: Array<() => Promise<void>> = [];
 
