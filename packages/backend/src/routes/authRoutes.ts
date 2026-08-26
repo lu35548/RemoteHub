@@ -15,3 +15,5 @@ authRoutes.post('/logout', authMiddleware, authController.logout);
 authRoutes.get('/me', authMiddleware, authController.me);
 authRoutes.post('/change-password', authMiddleware, authController.changePassword);
 authRoutes.patch('/profile', authMiddleware, authController.updateProfile);
+authRoutes.post('/heartbeat', authMiddleware, authController.heartbeat);
+authRoutes.get('/online', authMiddleware, authController.getOnlineUsers);

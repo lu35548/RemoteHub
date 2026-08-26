@@ -8,6 +8,8 @@ vi.mock('../services/authService.js', () => ({
   refresh: vi.fn(),
   logout: vi.fn(),
   getMe: vi.fn(),
+  heartbeat: vi.fn(),
+  getOnlineUsers: vi.fn(),
   changePassword: vi.fn(),
   updateProfile: vi.fn(),
 }));
@@ -301,5 +303,32 @@ describe('authController', () => {
       expect(next).toHaveBeenCalled();
       expect(authService.updateProfile).not.toHaveBeenCalled();
     });
+  });
+});
+
+// ─── heartbeat（T2）───
+describe('heartbeat', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('以 req.user.id 调用 service 并返回 success + data:null', async () => {
+    (authService.heartbeat as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    const { req, res, next } = mockReqRes(undefined, undefined, { id: 'u1', role: 'user' });
+    await authController.heartbeat(req, res, next);
+    expect(authService.heartbeat).toHaveBeenCalledWith('u1');
+    expect(res.json).toHaveBeenCalledWith({ success: true, data: null });
+  });
+});
+
+// ─── getOnlineUsers（T2）───
+describe('getOnlineUsers', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('透传 service 结果', async () => {
+    const online = { users: [{ id: 'u1', username: 'admin', nickname: '管理员', role: 'admin', isActive: true, lastActiveAt: new Date().toISOString(), createdAt: '2026-01-01T00:00:00.000Z' }], count: 1 };
+    (authService.getOnlineUsers as ReturnType<typeof vi.fn>).mockResolvedValue(online);
+    const { req, res, next } = mockReqRes(undefined, undefined, { id: 'u1', role: 'user' });
+    await authController.getOnlineUsers(req, res, next);
+    expect(authService.getOnlineUsers).toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith({ success: true, data: online });
   });
 });

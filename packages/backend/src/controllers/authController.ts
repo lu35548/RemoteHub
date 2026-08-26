@@ -122,3 +122,19 @@ export async function updateProfile(req: Request, res: Response, next: NextFunct
     res.json({ success: true, data: user });
   } catch (err) { next(err); }
 }
+
+/** POST /auth/heartbeat —— 刷新当前用户活跃时间（T2） */
+export async function heartbeat(req: Request, res: Response, next: NextFunction) {
+  try {
+    await authService.heartbeat(req.user.id);
+    res.json({ success: true, data: null });
+  } catch (err) { next(err); }
+}
+
+/** GET /auth/online —— 在线用户列表（T2） */
+export async function getOnlineUsers(_req: Request, res: Response, next: NextFunction) {
+  try {
+    const data = await authService.getOnlineUsers();
+    res.json({ success: true, data });
+  } catch (err) { next(err); }
+}

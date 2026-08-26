@@ -214,3 +214,27 @@ export async function updateProfile(userId: string, nickname: string): Promise<U
   });
   return toUserPublic(user);
 }
+
+// ─── 在线状态（T2：行为对齐 v1 AuthService.heartbeat / getOnlineUsers） ───
+
+/** 心跳写入节流窗口：10 秒内重复心跳不写库（v1 行为） */
+const HEARTBEAT_THROTTLE_MS = 10_000;
+/** 在线判定窗口：最后活跃在 5 分钟内视为在线（v1 行为） */
+const ONLINE_WINDOW_MS = 5 * 60_000;
+
+/** POST /auth/heartbeat —— 刷新当前用户活跃时间 */
+export async function heartbeat(userId: string): Promise<void> {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) return;
+  if (user.lastActiveAt && Date.now() - user.lastActiveAt.getTime() <= HEARTBEAT_THROTTLE_MS) return;
+  await prisma.user.update({ where: { id: userId }, data: { lastActiveAt: new Date() } });
+}
+
+/** GET /auth/online —— 在线用户列表（5 分钟窗口、仅启用、最近活跃倒序） */
+export async function getOnlineUsers(): Promise<{ users: UserPublic[]; count: number }> {
+  const users = await prisma.user.findMany({
+    where: { lastActiveAt: { gte: new Date(Date.now() - ONLINE_WINDOW_MS) }, isActive: true },
+    orderBy: { lastActiveAt: 'desc' },
+  });
+  return { users: users.map(toUserPublic), count: users.length };
+}

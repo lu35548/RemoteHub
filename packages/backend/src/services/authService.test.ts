@@ -28,7 +28,7 @@ vi.mock('../utils/appError.js', () => ({
 }));
 
 // ── Imports (after mocks) ──────────────────────────────────────────────
-import { login, register, refresh, logout, changePassword, getMe, updateProfile } from './authService.js';
+import { login, register, refresh, logout, changePassword, getMe, updateProfile, heartbeat, getOnlineUsers } from './authService.js';
 import { prisma } from '../utils/prisma.js';
 import { verifyPassword } from '../utils/password.js';
 import { hashRefreshToken } from '../utils/jwt.js';
@@ -355,5 +355,67 @@ describe('authService', () => {
       // 空昵称触发验证失败
       await expect(updateProfile('user-1', '')).rejects.toThrow('AppError:VAL_001');
     });
+  });
+});
+
+describe('heartbeat（T2）', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('距上次活跃超过 10 秒 → 刷新 lastActiveAt', async () => {
+    (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(
+      mockUser({ lastActiveAt: new Date(Date.now() - 60_000) }),
+    );
+    await heartbeat('user-1');
+    expect(prisma.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'user-1' },
+        data: { lastActiveAt: expect.any(Date) },
+      }),
+    );
+  });
+
+  it('10 秒内重复心跳 → 节流不写库（v1 行为）', async () => {
+    (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(
+      mockUser({ lastActiveAt: new Date(Date.now() - 3_000) }),
+    );
+    await heartbeat('user-1');
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('lastActiveAt 为 null（从未活跃）→ 直接写入', async () => {
+    (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(
+      mockUser({ lastActiveAt: null }),
+    );
+    await heartbeat('user-1');
+    expect(prisma.user.update).toHaveBeenCalled();
+  });
+
+  it('用户不存在 → 静默返回不写库', async () => {
+    (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    await expect(heartbeat('nouser')).resolves.toBeUndefined();
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('getOnlineUsers（T2）', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('返回 5 分钟内活跃且启用的用户（倒序）+ count', async () => {
+    const online = [
+      mockUser({ id: 'u1', lastActiveAt: new Date(Date.now() - 30_000) }),
+      mockUser({ id: 'u2', username: 'other', lastActiveAt: new Date(Date.now() - 3 * 60_000) }),
+    ];
+    (prisma.user.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(online);
+    const result = await getOnlineUsers();
+    expect(result.count).toBe(2);
+    expect(result.users[0]).toEqual(expect.objectContaining({ id: 'u1' }));
+    expect(result.users[0]).not.toHaveProperty('passwordHash');
+    expect(prisma.user.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        lastActiveAt: { gte: expect.any(Date) },
+        isActive: true,
+      },
+      orderBy: { lastActiveAt: 'desc' },
+    }));
   });
 });
