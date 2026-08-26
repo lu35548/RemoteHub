@@ -11,7 +11,8 @@ export function getAccessToken() {
   return accessToken;
 }
 
-async function refreshAccessToken(): Promise<string | null> {
+// 导出供 main.tsx bootstrap 复用（避免与此处重复实现 refresh fetch）
+export async function refreshAccessToken(): Promise<string | null> {
   try {
     const res = await fetch('/api/v1/auth/refresh', {
       method: 'POST',

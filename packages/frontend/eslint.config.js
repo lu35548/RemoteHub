@@ -26,6 +26,16 @@ export default defineConfig([
     extends: [reactRefresh.configs.vite()],
   },
   {
+    // UIComponents 是组件库聚合文件（UIProvider/useUI/Modal/Tooltip 同文件导出），
+    // 非纯组件文件，豁免 react-refresh 导出限制；set-state-in-effect 为 v1 原样迁移的
+    // Modal 进出场动画时序模式（rAF 驱动），非副作用滥用
+    files: ['src/components/UIComponents.tsx'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+      'react-hooks/set-state-in-effect': 'off',
+    },
+  },
+  {
     // 测试文件：mock 工厂/断言天然使用 any（与 backend 范围豁免一致）
     files: ['src/**/*.test.{ts,tsx}', 'src/test/**/*.ts'],
     rules: {

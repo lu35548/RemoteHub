@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from './client.js';
+import { api, setAccessToken } from './client.js';
 import type {
   LoginRequest, LoginResponse, UserPublic,
   ProjectListItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
@@ -15,6 +15,8 @@ export function useLogin() {
   return useMutation({
     mutationFn: async (data: LoginRequest): Promise<LoginResponse> => {
       const result = await api.post<LoginResponse>('/auth/login', data);
+      // 登录成功即持有内存 access token（refresh 由 httpOnly cookie 承载）
+      if (result.accessToken) setAccessToken(result.accessToken);
       return result;
     },
   });

@@ -37,6 +37,30 @@
 
 ---
 
+## [2026-08-26] 顺序开工 T1–T3（implement 流程：TDD + 双轴 review + commit）
+
+### Design decisions（一行一条）
+- T1：frontend lint+test 体系 = eslint flat（defineConfig 新形态，非 backend 旧式手写）+ vitest jsdom + 手动 afterEach(cleanup)（auto-cleanup 在 globals:false 下失效，研究笔记 §4）。shared 同步补齐（AC 必需）。
+- T2：在线数据基础实为 User.lastActiveAt（非 Session，spec 已勘误）；10s 节流/5min 窗口/倒序照 v1；isActive 过滤 = authMiddleware 403 之外的禁用后 5min 过渡期防御。
+- T3：样式体系构建化——v1 的 CDN tailwind + Google Fonts 在内网系统不可接受，迁移 Tailwind v4 CSS-first（@theme）+ @fontsource 本地字体 + lucide-react + tw-animate-css；UIComponents 因 toast 依赖前置迁移（T4 复用）。
+- T3 微偏离 v1：刪 600ms 假网络延迟（真 API 自带）；input name/autocomplete 的 a11y issue 照 v1 原样留 phase2。
+- T3 路由：react-router-dom v7 顶层导出（pnpm 严格模式下 'react-router/dom' 子导出需显式依赖 react-router 包，未声明）；loader 对称守卫（requireAuth/requireUnauth）。
+
+### Deviations / 隐藏债修复（T1-T3 顺带）
+- T1：frontend tsconfig 缺 noEmit（tsc 向 src 误 emit .js，骨架从未跑过 build 未暴露）；shared lint script 从未装 eslint 依赖；仓库根误落 numbers.txt（相对路径重定向）。
+- T2：真实链路验证采用 dev 栈 curl（无 jq 环境 → node 一行解析 JSON）。
+- T3：UIComponents 豁免 react-refresh/only-export-components（聚合文件）与 set-state-in-effect（v1 动画时序）。
+
+### 环境发现（影响后续票）
+- **防火墙按端口放行**：3001 通（backend 时代放行），5173/5199/7777 全 EACCES → **日常 `pnpm dev`（vite 5173）会崩，需用户放行**（欠账）；T3 浏览器验证用 vite --port 3001 绕过，但 proxy target 也 3001 会自环（/api 打回 vite 自己）→ 全栈浏览器验证（T11）前必须解决双端口。
+- Chrome DevTools MCP：首次 snapshot 可能抓在 bootstrap await 点（显示旧 innerHTML），重拍即真实状态。
+
+### Open questions
+- 端口放行方案待用户拍板（5173 或指定段）。
+- GitHub 网络欠账：close issue #2/#3 + 限流核实评论 + push（TUN 代理恢复后）。
+
+---
+
 ## [2026-08-22] Plan A Task8 docker 验证闭环（P0 BLOCKER 清零）
 
 ### 验证结果（全部实测）

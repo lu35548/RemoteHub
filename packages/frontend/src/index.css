@@ -1,0 +1,76 @@
+/* RemoteHub 前端全局样式 —— v1 内联主题（index.html CDN 版）构建化迁移，Tailwind v4 CSS-first
+   有意省略（v1 死配置）：bg-glass-gradient/shine 背景图（无组件引用）、darkMode class（无 dark: 前缀使用）；
+   fade-in-up 类在 v1 即为 no-op 死类，等价保留 */
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/jetbrains-mono';
+
+@theme {
+  /* 字体（v1: Inter / JetBrains Mono，本地化替代 Google Fonts CDN） */
+  --font-sans: 'Inter Variable', 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', monospace;
+
+  /* slate 扩展色阶（v1 config extend.colors）——900/950 为 Tailwind 内置同值 */
+  --color-slate-750: #2d3748;
+  --color-slate-850: #1a202c;
+  --color-slate-925: #0a0f1e;
+
+  /* 缓动（v1: Apple-like snappy ease / Spring bounce） */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* 动画（v1 config extend.animation + keyframes） */
+  --animate-fade-in-up: fadeInUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --animate-pulse-slow: pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+
+  @keyframes fadeInUp {
+    0% { opacity: 0; transform: translateY(15px) scale(0.98); }
+    100% { opacity: 1; transform: translateY(0) scale(1); }
+  }
+}
+
+/* v1 自定义 CSS 原样迁移 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(71, 85, 105, 0.3);
+  border-radius: 10px;
+  transition: background 0.2s;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(71, 85, 105, 0.6);
+}
+
+/* Input Auto-fill fix for dark mode */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 30px #0f172a inset !important;
+  -webkit-text-fill-color: white !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+.glass-panel {
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* v1 body 类转 CSS（bg-slate-950 / text-slate-100 / antialiased / overflow-hidden / 径向渐变 / selection 色） */
+@layer base {
+  body {
+    @apply bg-slate-950 text-slate-100 antialiased overflow-hidden;
+    background-image: radial-gradient(ellipse 80% 80% at 50% -20%, rgba(120, 119, 198, 0.15), rgba(255, 255, 255, 0));
+  }
+  ::selection {
+    @apply bg-blue-500/30 text-blue-100;
+  }
+}
