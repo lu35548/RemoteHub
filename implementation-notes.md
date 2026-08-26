@@ -52,6 +52,14 @@
 - T4：pageSize 200→100（后端 MAX_PAGE_SIZE=100 静默截断，spec 决策 3 勘误）；useConnections 补 pageSize 参数。
 - 端口转机：防火墙是**段拦截**非白名单（实测 5173/5188/5199/7777/8888 被拦，3000/4173/8080/9000 可听），vite.config 5173→3000，日常 dev 欠账闭环无需用户放行。
 
+#### T5 开工准备（已完成的读源分析，新 session 接力）
+- **spec 盲区补录**：v1 ConnectionCard 含整套连接动作系统（RDP 一键直连 rh-rdp:// + 注册表文件生成 + 支持检测、SSH 唤起、开网页、VPN 跳转）——grill 时未读卡片全文致 spec story 漏项，已补 story 8a 归 T6。
+- **vpnType 语义映射**：v1（登录方式：网页/客户端/OpenVPN/WireGuard/L2TP）vs v2 VPN_TYPES（协议：SSL_VPN/IPSEC/WIREGUARD/OPENVPN/OTHER）。无存量数据，表单选项直接按 v2 枚举展示（文案自拟贴近 v1 风格），WEB 的 vpnLoginUrl 自动补 URL 逻辑保留（v2 字段在）。
+- **快速创建 VPN 流程改造**：v1 靠预生成 id 回填 requiredVpnId → v2 改为 onSave 返回 saved detail 后回填（App 层 handleSaveConnection 需返回 ConnectionDetail）。
+- **tags 形态**：v1 数组 vs v2 字符串（Create/Update tags: string|null）——表单内保持数组交互，提交 join(',')，编辑回填 split(',')。
+- **getProtocolColor**（v1 utils）：case 文案值改短码，拟挪 constants.ts 与 PROTOCOL_LABELS 同层。
+- **T5/T6 卡片分工**：T5 卡片渲染完整结构但操作按钮（连接/复制/眼睛）disabled 占位；T6 接 decrypt-password + 连接动作 + 复制系。ConnectionDetail 无 password 字段（加密不返回）。
+
 ### Deviations / 隐藏债修复（T1-T3 顺带）
 - T1：frontend tsconfig 缺 noEmit（tsc 向 src 误 emit .js，骨架从未跑过 build 未暴露）；shared lint script 从未装 eslint 依赖；仓库根误落 numbers.txt（相对路径重定向）。
 - T2：真实链路验证采用 dev 栈 curl（无 jq 环境 → node 一行解析 JSON）。
