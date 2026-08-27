@@ -129,7 +129,7 @@
 - 修复后质量门：lint 0 / tsc 0 / test 286 全绿；浏览器复验缓存复用 + 复制 toast 通过。
 
 ### Open questions
-- gh/git 网络中断（TUN 代理未开）：push + close issue #7 挂起，恢复后执行。
+- ~~gh/git 网络中断~~ ✅ TUN 恢复后已补完：push 双分支（8b89b46..61ebcd6）+ issue #7 关票（Closes #7 随 main push 自动触发，证据评论补发）+ CI 全绿（33045219826 ok；交接遗留的 255e929/8b89b46 两跑亦 ok）。
 
 ---
 
