@@ -423,6 +423,9 @@ function mapToListItem(c: {
   name: string;
   host: string;
   port: number | null;
+  username: string | null;
+  encryptedPass: string | null;
+  requiredVpnId: string | null;
   protocol: string;
   vpnType: string | null;
   tags: string | null;
@@ -440,6 +443,9 @@ function mapToListItem(c: {
     name: c.name,
     host: c.host,
     port: c.port,
+    username: c.username,
+    requiredVpnId: c.requiredVpnId,
+    hasPassword: c.encryptedPass != null,
     protocol: c.protocol,
     vpnType: c.vpnType,
     tags: c.tags,

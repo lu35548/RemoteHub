@@ -37,8 +37,9 @@ export default defineConfig([
   },
   {
     // ProjectIcons：组件 + ALL_ICONS 常量导出（数组非原始类型，不满足 allowConstantExport）；
-    // ProjectModal：set-state-in-effect 为 v1 原样的表单回填模式（editingProject 变化时填充）
-    files: ['src/components/ProjectIcons.tsx', 'src/components/ProjectModal.tsx'],
+    // ProjectModal/ConnectionModal：set-state-in-effect 为 v1 原样的表单回填模式
+    // （editing 变化/打开时填充表单，v1 ConnectionModal 双 Tab 结构）
+    files: ['src/components/ProjectIcons.tsx', 'src/components/ProjectModal.tsx', 'src/components/ConnectionModal.tsx'],
     rules: {
       'react-refresh/only-export-components': 'off',
       'react-hooks/set-state-in-effect': 'off',

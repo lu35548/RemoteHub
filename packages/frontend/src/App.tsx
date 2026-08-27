@@ -2,10 +2,12 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Search, Plus, Layout, Network, Server } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import type { ProjectListItem, ProjectDetail, UserPublic } from '@remotehub/shared';
+import type { ConnectionDetail, ConnectionListItem, CreateConnectionRequest, ProjectListItem, ProjectDetail, UserPublic } from '@remotehub/shared';
 import { api, setAccessToken } from './api/client';
-import { useMe, useLogout, useProjects, useConnections, useCreateProject, useUpdateProject, useDeleteProject } from './api/queries';
+import { useMe, useLogout, useProjects, useConnections, useCreateProject, useUpdateProject, useDeleteProject, useCreateConnection, useUpdateConnection, useDeleteConnection } from './api/queries';
 import Sidebar from './components/Sidebar';
+import ConnectionCard from './components/ConnectionCard';
+import ConnectionModal from './components/ConnectionModal';
 import ProjectModal, { type ProjectFormInput } from './components/ProjectModal';
 import { useUI } from './components/UIComponents';
 
@@ -35,6 +37,9 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
   const createProjectMutation = useCreateProject();
   const updateProjectMutation = useUpdateProject();
   const deleteProjectMutation = useDeleteProject();
+  const createConnectionMutation = useCreateConnection();
+  const updateConnectionMutation = useUpdateConnection();
+  const deleteConnectionMutation = useDeleteConnection();
 
   // 大 pageSize 一次拉全（后端 MAX_PAGE_SIZE=100 上限，spec 决策 3 的「200」勘误为上限值；个人项目量级足够）
   const { data: projectsPage } = useProjects(1, 100);
@@ -50,23 +55,33 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
 
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<ProjectDetail | null>(null);
+  const [isConnectionModalOpen, setIsConnectionModalOpen] = useState(false);
+  const [editingConnection, setEditingConnection] = useState<ConnectionDetail | null>(null);
 
-  // 项目过滤 + 搜索（vpn/host 分组与 ConnectionCard 渲染在 T5 接线）
-  const relevantConnections = useMemo(() => {
+  // 过滤 + 分组（v1 行为：项目视图显示项目全部；全局视图 vpn/all 互斥过滤；搜索覆盖 username/tags）
+  const { hosts, vpns } = useMemo(() => {
     let list = connections;
     if (activeProjectId) {
       list = list.filter(c => c.projectId === activeProjectId);
+    } else if (viewMode === 'vpn') {
+      list = list.filter(c => c.protocol === 'VPN');
+    } else {
+      list = list.filter(c => c.protocol !== 'VPN');
     }
     if (searchQuery) {
       const searchLower = searchQuery.toLowerCase();
       list = list.filter(conn =>
         conn.name.toLowerCase().includes(searchLower) ||
         conn.host.toLowerCase().includes(searchLower) ||
+        (conn.username ?? '').toLowerCase().includes(searchLower) ||
         (conn.tags ?? '').toLowerCase().includes(searchLower)
       );
     }
-    return list;
-  }, [connections, activeProjectId, searchQuery]);
+    return {
+      hosts: list.filter(c => c.protocol !== 'VPN'),
+      vpns: list.filter(c => c.protocol === 'VPN'),
+    };
+  }, [connections, activeProjectId, searchQuery, viewMode]);
 
   const handleSaveProject = async (input: ProjectFormInput) => {
     try {
@@ -117,6 +132,50 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
     });
   };
 
+  const handleSaveConnection = async (data: CreateConnectionRequest, editingId?: string) => {
+    try {
+      const saved = editingId
+        ? await updateConnectionMutation.mutateAsync({ id: editingId, data })
+        : await createConnectionMutation.mutateAsync(data);
+      toast('success', '保存成功', `资源 "${saved.name}" 已更新`);
+      return saved;
+    } catch (e) {
+      toast('error', '保存失败', '无法写入连接数据');
+      throw e; // 重新抛出供 Modal 处理（快速建 VPN 流程依赖返回值回填 id）
+    }
+  };
+
+  const handleEditConnection = async (conn: ConnectionListItem) => {
+    try {
+      // 列表项无 notes/vpnLoginUrl 等字段，编辑前拉详情补全（与 handleEditProject 同惯例）
+      const detail = await queryClient.fetchQuery({
+        queryKey: ['connections', conn.id],
+        queryFn: () => api.get<ConnectionDetail>(`/connections/${conn.id}`),
+      });
+      setEditingConnection(detail);
+      setIsConnectionModalOpen(true);
+    } catch {
+      toast('error', '加载失败', '无法获取连接详情');
+    }
+  };
+
+  const handleDeleteConnection = (id: string) => {
+    confirm({
+      title: '删除确认',
+      message: '确定要删除此连接资源吗？此操作不可恢复。',
+      variant: 'danger',
+      confirmText: '删除',
+      onConfirm: async () => {
+        try {
+          await deleteConnectionMutation.mutateAsync(id);
+          toast('info', '已删除', '资源连接已移除');
+        } catch {
+          toast('error', '删除失败', '无法执行删除操作');
+        }
+      },
+    });
+  };
+
   // 注：v1 的导出/导入是死功能链（Sidebar 从无导出按钮，Download/Upload 为死 import），等价迁移时整链移除
 
   const handleLogout = async () => {
@@ -162,7 +221,7 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
                {getHeaderTitle()}
              </h2>
              <span className="text-xs bg-slate-900 border border-slate-800 text-slate-400 px-2.5 py-0.5 rounded-full">
-               {relevantConnections.length}
+               {hosts.length + vpns.length}
              </span>
           </div>
 
@@ -221,7 +280,7 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
               />
             </div>
             <button
-              onClick={() => toast('info', '新建资源', '连接管理将在后续版本开放')}
+              onClick={() => { setEditingConnection(null); setIsConnectionModalOpen(true); }}
               className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all shadow-lg shadow-blue-900/20 hover:shadow-blue-900/40 active:scale-95"
             >
               <Plus size={16} />
@@ -231,7 +290,7 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
         </header>
 
         <div className="flex-1 overflow-y-auto p-8 custom-scrollbar scroll-smooth">
-          {relevantConnections.length === 0 && (
+          {hosts.length === 0 && vpns.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-slate-500 pb-20 animate-in zoom-in-95 duration-500">
               <div className="w-24 h-24 bg-slate-900/50 border border-slate-800 rounded-full flex items-center justify-center mb-6">
                 {viewMode === 'vpn' ? <Network size={40} className="opacity-30" /> : <Layout size={40} className="opacity-30" />}
@@ -242,7 +301,52 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
               <p className="text-sm opacity-60 mt-2">点击右上角新建按钮开始添加</p>
             </div>
           )}
-          {/* 连接卡片区（ConnectionCard/ConnectionModal）在 T5 迁移接线 */}
+          <div className="max-w-[1920px] mx-auto space-y-10">
+            {vpns.length > 0 && (
+              <section className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                {activeProjectId && (
+                  <div className="flex items-center gap-2 mb-4 text-slate-400 border-b border-slate-800/50 pb-2">
+                    <Network size={16} className="text-indigo-400" />
+                    <h3 className="text-sm font-bold uppercase tracking-wider">VPN 网络节点</h3>
+                    <span className="text-xs bg-slate-800 px-2 py-0.5 rounded-full text-slate-500">{vpns.length}</span>
+                  </div>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-6">
+                  {vpns.map(conn => (
+                    <ConnectionCard
+                      key={conn.id}
+                      connection={conn}
+                      onEdit={handleEditConnection}
+                      onDelete={handleDeleteConnection}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {hosts.length > 0 && (
+              <section className="animate-in fade-in slide-in-from-bottom-4 duration-500 delay-100">
+                {activeProjectId && vpns.length > 0 && (
+                  <div className="flex items-center gap-2 mb-4 text-slate-400 border-b border-slate-800/50 pb-2">
+                    <Server size={16} className="text-blue-400" />
+                    <h3 className="text-sm font-bold uppercase tracking-wider">远程主机 / 服务</h3>
+                    <span className="text-xs bg-slate-800 px-2 py-0.5 rounded-full text-slate-500">{hosts.length}</span>
+                  </div>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-6">
+                  {hosts.map(conn => (
+                    <ConnectionCard
+                      key={conn.id}
+                      connection={conn}
+                      vpnDependency={connections.find(c => c.id === conn.requiredVpnId) ?? undefined}
+                      onEdit={handleEditConnection}
+                      onDelete={handleDeleteConnection}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+          </div>
         </div>
       </main>
 
@@ -251,6 +355,17 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
         onClose={() => setIsProjectModalOpen(false)}
         onSave={handleSaveProject}
         editingProject={editingProject}
+      />
+
+      <ConnectionModal
+        isOpen={isConnectionModalOpen}
+        onClose={() => setIsConnectionModalOpen(false)}
+        onSave={handleSaveConnection}
+        projects={projects}
+        connections={connections}
+        editingConnection={editingConnection}
+        activeProjectId={activeProjectId}
+        onAddProjectRequest={() => { setEditingProject(null); setIsProjectModalOpen(true); }}
       />
     </div>
   );

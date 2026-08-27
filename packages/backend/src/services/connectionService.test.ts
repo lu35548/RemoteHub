@@ -593,6 +593,21 @@ describe('connectionService', () => {
       );
       expect(result.pagination).toEqual({ page: 3, pageSize: 10, total: 50 });
     });
+
+    it('T5：list item 含 username/requiredVpnId/hasPassword（v1 卡片渲染等价字段）', async () => {
+      (prisma.connection.findMany as MockFn).mockResolvedValue([
+        { ...mockConnection, requiredVpnId: 'vpn-1' },
+      ]);
+      (prisma.connection.count as MockFn).mockResolvedValue(1);
+
+      const result = await listConnections('admin-1', 'admin');
+
+      expect(result.data[0]).toMatchObject({
+        username: 'root',
+        requiredVpnId: 'vpn-1',
+        hasPassword: true,
+      });
+    });
   });
 });
 

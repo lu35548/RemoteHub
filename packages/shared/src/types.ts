@@ -134,13 +134,16 @@ export interface ConnectionListItem {
   name: string;
   host: string;
   port: number | null;
+  username: string | null;
   protocol: Protocol;
   vpnType: VpnType | null;
   requiredVpnId: string | null;
+  hasPassword: boolean;
   tags: string | null;
   lastAccessed: string | null;
   createdBy: { id: string; nickname: string };
   updatedBy: { id: string; nickname: string };
+  createdAt: string;
   updatedAt: string;
 }
 

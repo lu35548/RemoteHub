@@ -60,6 +60,27 @@
 - **getProtocolColor**（v1 utils）：case 文案值改短码，拟挪 constants.ts 与 PROTOCOL_LABELS 同层。
 - **T5/T6 卡片分工**：T5 卡片渲染完整结构但操作按钮（连接/复制/眼睛）disabled 占位；T6 接 decrypt-password + 连接动作 + 复制系。ConnectionDetail 无 password 字段（加密不返回）。
 
+#### T5 实施（2026-08-26 夜，issue #6）
+- **backend 补 list 字段（读源新发现）**：mapToListItem 运行时丢弃 username/requiredVpnId，而 shared ConnectionListItem 类型已声明 requiredVpnId——类型与运行时不一致的又一实例（同 T4 教训）。补 `username`/`requiredVpnId`/`hasPassword`（hasPassword=encryptedPass!=null，PASS 行占位渲染需要）+ 类型补 `username`/`hasPassword`/`createdAt`（mapToListItem 实际返回但类型漏声明，类型诚实化）。findMany 本就无 select 全字段返回，零查询成本。
+- **VPN_TYPE_OPTIONS 顺序**：按 v1 VPN_TYPES 顺序重排（OTHER 客户端第一=默认项，对齐 v1 默认 CLIENT 无 URL 魔法；SSL_VPN 第二）。文案自拟：其他客户端/SSL VPN（网页认证）/OpenVPN/WireGuard/IPsec / L2TP。VPN_TYPE_LABELS 进 constants.ts。
+- **onSave 双参契约**：`(data: CreateConnectionRequest, editingId?: string) => Promise<ConnectionDetail>`。editingId 让 App 层统一 create/update 分流；返回 detail 供快速建 VPN 回填 id。v1「编辑 host 时 VPN tab 回填已关联 VPN」的联动保留，vpnEditingId 单独记（该分支提交走 update linkedVpn.id）。
+- **编辑密码语义（已知偏离 v1）**：v2 无明文可回填，密码留空 = 不提交 password 字段（提交 null 会误清空——backend updateConnection 对 null/'' 都清密码）。placeholder 编辑态改「留空保持不变」。v1「编辑时删光密码再提交=清空密码」能力暂失（清空需 T6/phase2 交互），记 Deviation。
+- **savedVpnName 兜底**：快速建 VPN 后「已关联: xx」行优先用 saved.name（v1 依赖父层 refreshData 刷新 connections 才显示，有时序空窗）。行为等价 + 消除时序依赖。
+- **VPN 视图过滤归 T5**（读 v1 App 坐实）：T4 注释「vpn/host 分组与 ConnectionCard 渲染在 T5 接线」——relevantConnections 重构为 {hosts, vpns}（v1 过滤逻辑：项目视图显示全部双分组；全局视图 vpn/all 互斥；搜索补 username 命中）。搜索 tags 从数组 some 改字符串 includes（v2 形态）。
+- **Card T6 占位**：复制按钮（HOST/USER/PASS）+ 眼睛 + Via 行跳转 + 主操作按钮全部 disabled（title「T6 开放」）；isCopied/copyTarget/剪贴板逻辑不搬（T6 连同动作系统从 v1 源恢复）；RDP Zap 顶栏按钮/launching/setup 弹窗/菜单 RDP 项归 T6。a11y：菜单按钮补 aria-label「更多操作」。
+- **eslint 豁免并入**：ConnectionModal 的 set-state-in-effect 豁免并入 ProjectModal 先例条目（v1 表单回填模式，配置文件级）。
+- **测试 15 个新增**：backend 1（list 字段）+ Modal 5 + Card 5 + App 4（渲染/Via/VPN 过滤/新建按钮/删除确认流）。mock 全按 mapToListItem 运行时形状造。
+- 真实链路（dev 栈 + Chrome DevTools）：登录→卡片渲染→快速建 VPN（URL 补全+id 回填+已关联）→创建 HOST（tags/Via/中文）→编辑（回填+改名 update）→VPN 视图→删除确认；console 无 error/warn（仅 v1 遗留 a11y issue=T3 已定 phase2）；network 全 2xx（唯一 401 为未登录首访 refresh，T3 预期行为）。
+
+#### T5 双轴 review 修复（Standards 2 硬伤 + Spec 3 等价性缺口）
+- **Spec-S1（高）编辑换项目静默假成功**：backend updateConnection 白名单不含 projectId（UpdateConnectionRequest 亦无）——v2 项目=权限边界（projectRole 链），跨项目移动是架构敏感操作，backend 有意不支持。修：编辑态锁定项目下拉（disabled + title「v2 暂不支持移动项目（规划中）」）。**Deviation**：v1 可换项目，v2 编辑不可（phase2 需专门权限设计：目标项目写权校验 + requiredVpnId 跨项目依赖处理）。
+- **Spec-S2（中）host 联动编辑 VPN 会清空其 notes**：联动回填来自 ConnectionListItem（无 notes），提交 notes:null 直接入库。修：isLinkedVpnEdit（vpnEditingId≠editingConnection.id）时 notes 空=不提交字段保留原值；直接编辑（detail 回填）空=清空语义不变。vpnLoginUrl 同隐患 → 表单字段删除（SSL_VPN 时由 host 推导，无独立输入路径——顺修 Standards 的 Speculative Generality）。
+- **Spec-S3（低）VPN 直编密码提示缺失**：placeholder 条件 editingConnection&&HOST → isEditingExisting（editingConnection || vpnEditingId）。
+- **Standards-1 注释语言**：v1 逐字复制带入的 11 处英文注释中文化（Card 10 + Modal 1 + App 1）——等价迁移不豁免注释语言规范。
+- **Standards-2 内部代号泄漏 UI**：title「T6 开放」→「即将开放」（5 处）。
+- **Standards-3/4 smell 修复**：PROPRIETARY/WEB 收拢 constants（PROPRIETARY_PROTOCOLS/WEB_PROTOCOLS）；PROTOCOL_LABELS.split(' ')[0] 脆弱截取 → 显式 PROTOCOL_SHORT_LABELS 表（3 处）。Repeated Switches（协议分叉 4 处）review 建议留 T6 合并（届时接动作系统一并收敛）。
+- 修复后质量门：lint 0 / tsc 0 / **test 275**（+1 联动编辑用例）；浏览器复验编辑态锁项目 + 「即将开放」title 生效 + console 清零。
+
 ### Deviations / 隐藏债修复（T1-T3 顺带）
 - T1：frontend tsconfig 缺 noEmit（tsc 向 src 误 emit .js，骨架从未跑过 build 未暴露）；shared lint script 从未装 eslint 依赖；仓库根误落 numbers.txt（相对路径重定向）。
 - T2：真实链路验证采用 dev 栈 curl（无 jq 环境 → node 一行解析 JSON）。
