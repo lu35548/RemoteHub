@@ -87,6 +87,7 @@
 - T3：UIComponents 豁免 react-refresh/only-export-components（聚合文件）与 set-state-in-effect（v1 动画时序）。
 
 ### 环境发现（影响后续票）
+- **git bash 下 curl -d 中文必坏**（T5 实证）：Windows 终端 codepage GBK，curl.exe 把 argv 转 GBK 字节发 body，backend 按 UTF-8 解析 → 中文入库即 U+FFFD（T5 验证项目乱码案例，API 码点坐实后改名修复）。**中文造数据一律走 node fetch**（进程传参 UTF-16 → node 内部 UTF-8 无损，T5 实证可用）或浏览器。
 - **防火墙按端口放行**：3001 通（backend 时代放行），5173/5199/7777 全 EACCES → **日常 `pnpm dev`（vite 5173）会崩，需用户放行**（欠账）；T3 浏览器验证用 vite --port 3001 绕过，但 proxy target 也 3001 会自环（/api 打回 vite 自己）→ 全栈浏览器验证（T11）前必须解决双端口。
 - Chrome DevTools MCP：首次 snapshot 可能抓在 bootstrap await 点（显示旧 innerHTML），重拍即真实状态。
 
