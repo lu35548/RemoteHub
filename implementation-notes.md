@@ -97,6 +97,42 @@
 
 ---
 
+## [2026-08-27] T6 连接动作系统（issue #7，story 8a）
+
+### Design decisions（一行一条）
+- **T5 占位全解除**：复制系（HOST/USER/PASS）+ 密码眼睛 + Via 跳转 + 主操作按钮。密码无本地明文（v2 契约），眼睛/复制时 `useDecryptPassword(id)` 按需解密；已解密（showPassword 态）复制复用缓存不重复请求。
+- **协议分叉合并**（T5 review 遗留）：constants.ts 新增 `PROTOCOL_ACTION_META`（actionLabel/neutralAction/color 三元组，`Record<Protocol, …>` 全枚举显式），getActionLabel/主按钮样式/ExternalLink 显示条件/getProtocolColor 全部表驱动；`neutralAction` 表化 v1 的 `isProprietary || VPN` 中性底色判断。Modal 的 HOST_PROTOCOLS 不动（表单清单顺序/文案是 UI 数据非逻辑分叉）。
+- **v1→v2 映射**（沿用 T5 定型）：`VpnType.WEB` ↔ `vpnType==='SSL_VPN'`；跳转 URL v1 `vpnLoginUrl||host` → v2 恒 host（ConnectionListItem 无 vpnLoginUrl，SSL_VPN 语义 host 即登录 URL）；https 前缀补全保留。
+- **RDP utils 等价迁移**：src/utils.ts 四函数 + `RDP_CONFIG_KEY='rh_rdp_configured'`（key 逐字照 v1，升级用户配置保留）；downloadRdpFile 参数 `Pick<ConnectionListItem,'name'|'host'|'port'|'username'>`。
+- **isRdpReady 惰性初始化**（`useState(() => isRdpConfigured())`）替代 v1 的 effect 内 setState：行为等价（localStorage 值 mount 前后不变）且消除 react-hooks/set-state-in-effect lint 错——不新增豁免先例。
+- **VNC 无动作**：v1 handleConnect 无 VNC case（文案「连接」点击无反应）——等价保留，表内显式注释。
+
+### Deviations
+- v1 setup Modal 底部按钮文案「暂不配置，仅下载 .rdp 文件」实际行为仅关闭弹窗（文案与行为不符）——照 v1 运行态迁移，文案怪癖归 phase2。
+- v1 getActionLabel 的 RDP isDetecting 分支（'正在呼叫...'）是死代码（按钮渲染层 isDetecting 时走独立分支显示'呼叫中...'）——迁移时未保留死分支。
+- 解密失败 toast（'解密失败，无法获取密码明文'）为 v2 新增路径（v1 无网络失败可能），属 spec story 16 API 错误中文提示的落点。
+
+### 测试与环境发现
+- **userEvent 对 opacity-0 hover 才显示的按钮 hit-testing 不稳定**（点击静默无 handler 调用，无报错）：复制系按钮用 `fireEvent.click` 直派（T6 实证；最小重现证明点击机制本身正常）。
+- **Modal 退出动画 × fake timers**：UIComponents Modal 关闭后 300ms 才卸载 DOM（v1 等价动画），断言「弹窗消失」需两段推进：先 500ms 收起（act flush 让 Modal 注册退出 timer）再 350ms 卸载——一次 advanceTimersByTimeAsync(900) 不够（React scheduler 走 MessageChannel 非 fake timer，单次推进内来不及注册新 timer）。mock-real-runtime-shape 的又一实例。
+- **程序化 click 无 user activation**：Chrome 拒绝协议启动（console error "user gesture is required"）→ 无 blur → launching Modal 走 5s 超时；CDP 真实输入事件则 blur 即收起。浏览器验证需区分伪影。
+- jsdom 对 `window.location.href='ssh://…'` 与 rh-rdp:// `<a>.click()` 打 not-implemented console 错——测试 spy 压制；dev 栈 3000/3001 存活时 vite HMR 即时生效（T6 全部改动未重启栈）。
+- App.test 的 queries mock 需补 `useDecryptPassword`（Card 渲染期调用，vi.mock 缺导出直接报错）。
+- 新增 11 测试（Card 10：翻转占位/眼睛/复制系/密码复制/分派/Via/RDP×4；utils 1），质量门 lint 0 / tsc 0 / **test 286**（37+37+212）。
+
+### 双轴 review 修复（2026-08-27 夜）
+- **【硬·双轴交叉】reg 文件丢 cmd 命令两侧转义引号**：v1 模板 `C \\"set…!url!\\""`（reg 值含 `\"` 转义引号）被我迁成裸串——字节级非等价，导入后处理器命令行为改变。修：逐字恢复，`diff` 两源码行 IDENTICAL 坐实。**教训：模板字符串迁移不能信「看过去一样」，转义层级（JSON→TS 源码→reg 文本）三层解码极易漏一层。**
+- **【Spec】主按钮 disabled 样式缩水**：重写 className 丢 `disabled:opacity-60`（v1 有），补回。
+- **【Spec】解密缓存复用**：fetchPlainText 缓存 plainPassword，显/隐/复制多动作只请求一次（浏览器复验 3 动作 1 请求）；卡片以 key=connection.id 挂载，缓存不跨连接。
+- **【Standards 采纳】SSL_VPN 开页逻辑抽 openVpnPortal**（handleConnect/handleVpnConnect 两处重复）。
+- **不采纳（判断级）**：RDP JSX 条件 4 处聚合进 meta（`protocol==='RDP'` 已是最直白表达，加布尔位过度设计）；PROPRIETARY_PROTOCOLS 从 meta 派生（与 neutralAction 不同义，VPN 交集造成脆弱耦合，双源保留）；copyTarget 魔法串（v1 逐字继承，phase2）。
+- 修复后质量门：lint 0 / tsc 0 / test 286 全绿；浏览器复验缓存复用 + 复制 toast 通过。
+
+### Open questions
+- gh/git 网络中断（TUN 代理未开）：push + close issue #7 挂起，恢复后执行。
+
+---
+
 ## [2026-08-22] Plan A Task8 docker 验证闭环（P0 BLOCKER 清零）
 
 ### 验证结果（全部实测）

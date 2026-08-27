@@ -28,6 +28,8 @@ vi.mock('./api/queries', () => ({
   useUpdateConnection: vi.fn(() => ({ mutateAsync: connMutations.updateAsync })),
   useDeleteConnection: vi.fn(() => ({ mutateAsync: connMutations.deleteAsync })),
   useLogout: vi.fn(() => ({ mutateAsync: vi.fn(), mutate: vi.fn() })),
+  // T6：ConnectionCard 渲染期调用（App 用例不触发解密，给空实现即可）
+  useDecryptPassword: vi.fn(() => ({ mutateAsync: vi.fn() })),
 }));
 
 const user = { id: 'u1', nickname: '管理员' };
