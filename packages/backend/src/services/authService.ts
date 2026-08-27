@@ -183,8 +183,10 @@ export async function changePassword(userId: string, oldPassword: string, newPas
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) throw createAppError('AUTH_001');
 
+  // 旧密码错误是业务校验失败（400），不能复用 AUTH_001/401——client 对 401 走 refresh+重放，
+  // 二次 401 会误判会话失效强制登出（T7 浏览器验证暴露）
   const valid = await verifyPassword(oldPassword, user.passwordHash);
-  if (!valid) throw createAppError('AUTH_001');
+  if (!valid) throw createAppError('AUTH_006');
 
   const p = validatePwd(newPassword);
   if (!p.valid) throw createAppError('VAL_001', [{ field: 'newPassword', message: p.message }]);

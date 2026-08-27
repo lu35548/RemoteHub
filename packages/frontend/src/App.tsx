@@ -9,6 +9,7 @@ import Sidebar from './components/Sidebar';
 import ConnectionCard from './components/ConnectionCard';
 import ConnectionModal from './components/ConnectionModal';
 import ProjectModal, { type ProjectFormInput } from './components/ProjectModal';
+import UserManagementModal from './components/UserManagementModal';
 import { useUI } from './components/UIComponents';
 
 // Helper for consistent avatar colors based on User ID（v1 原样）
@@ -56,6 +57,7 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<ProjectDetail | null>(null);
   const [isConnectionModalOpen, setIsConnectionModalOpen] = useState(false);
+  const [isUserModalOpen, setIsUserModalOpen] = useState(false);
   const [editingConnection, setEditingConnection] = useState<ConnectionDetail | null>(null);
 
   // 过滤 + 分组（v1 行为：项目视图显示项目全部；全局视图 vpn/all 互斥过滤；搜索覆盖 username/tags）
@@ -210,7 +212,7 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
         onDeleteProject={handleDeleteProject}
         onLogout={handleLogout}
         currentUser={currentUser}
-        onOpenUserModal={() => toast('info', '用户管理', '该功能将在后续版本开放')}
+        onOpenUserModal={() => setIsUserModalOpen(true)}
       />
 
       <main className="flex-1 flex flex-col h-full overflow-hidden relative bg-slate-950">
@@ -366,6 +368,12 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
         editingConnection={editingConnection}
         activeProjectId={activeProjectId}
         onAddProjectRequest={() => { setEditingProject(null); setIsProjectModalOpen(true); }}
+      />
+
+      <UserManagementModal
+        isOpen={isUserModalOpen}
+        onClose={() => setIsUserModalOpen(false)}
+        currentUser={currentUser}
       />
     </div>
   );

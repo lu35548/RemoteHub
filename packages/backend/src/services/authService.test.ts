@@ -281,8 +281,9 @@ describe('authService', () => {
       (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mockUser());
       (verifyPassword as ReturnType<typeof vi.fn>).mockResolvedValue(false);
 
+      // T7：旧密码错误改 AUTH_006/400（原 AUTH_001/401 被 client 的 401-refresh 逻辑误判为会话失效强制登出）
       await expect(changePassword('user-1', 'wrong', 'NewPassword1')).rejects.toThrow(
-        'AppError:AUTH_001',
+        'AppError:AUTH_006',
       );
     });
 

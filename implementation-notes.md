@@ -133,6 +133,41 @@
 
 ---
 
+## [2026-08-27] T7 用户管理（issue #8，story 12）
+
+> 交接文档勘误：交接写「T7=归组浏览(#8/story 11)」——实际 #8 是用户管理（story 12）；「归组过滤」在 #7 票面内且 T5 已做掉（relevantConnections 双分组）。gh issue list 核实。
+
+### Design decisions（一行一条）
+- **入口与挂载**：v2 Sidebar footer 头像按钮 T4 已迁（onClick=onOpenUserModal），App 层当时是占位 toast——本票换成 isUserModalOpen state + 真实挂载（挂载顺序照 v1：ProjectModal → ConnectionModal → UserManagementModal）。
+- **v1 假重置按钮逐字保留**：toast('info','重置密码','请通知该员工：密码已重置为 "123456"') 不发任何请求（v1 无重置 API，文案怪癖归 phase2）；重置/删除按钮仅他人行渲染（u.id!==currentUser.id，v1 同）。
+- **createUser 的 v2 端点**：backend 无 POST /users，admin 建用户走 POST /auth/register（仅 admin、role 默认 user）——queries.ts 新增 useCreateUser（RegisterRequest + invalidate ['users']），组件传 role:'user' 对齐 v1 固定 UserRole.USER。
+- **useUsers 补 pageSize=100 + enabled**：spec 决策 3 一次拉全（同 useConnections 先例）；第二参 enabled 供弹窗按需加载（isOpen && admin），enabled false→true（staleTime 0）每次打开自动重取，等价 v1「每次 open 都 loadUsers」。
+- **错误提示动态化**：errMsg() 提取 ApiErrorResponse.error.message（App 现有惯例是固定文案，但 v1 此组件是 err.message 动态——等价优先），fallback 固定中文。
+- **lastActiveAt 显示**：v2 string|null，null →「从未」（v1 number 无 null 态，数据形态适配点，同 savedVpnName 先例）。
+- **UserRole 判断**：v1 enum 'ADMIN' → v2 字面 'admin'（shared UserRole 小写 union）；显示仍 role.toUpperCase()（'ADMIN'/'USER' 等价）。
+
+### Deviations
+- **【契约修复】旧密码错误 AUTH_001/401 → AUTH_006/400「旧密码错误」**（backend）：浏览器验证暴露——client.ts 对 401 一律 refresh+重放，旧密码错误的业务 401 二次重放后误判会话失效强制登出跳 /login。change-password 端点本票首次有 UI 消费，零破坏窗口内修契约（业务校验失败 ≠ 认证失败，400 语义正确 + v1「旧密码错误」文案等价）。前端零改动（400 不入 refresh 分支，errMsg 直接显示）。
+- 改密三输入补 aria-label（当前密码/新密码/确认新密码）——T5 a11y 先例（「更多操作」），v1 无。
+- 列表排序 v2 按 updatedAt desc（backend listUsers），v1 是 localStorage 数组顺序——非 v1 显式行为契约，接受。
+
+### 测试与环境发现
+- 新增 9 测试（Modal 8：渲染双 tab/非 admin 无 tab/列表渲染含「从未」/创建契约/删除确认流/假重置不改状态/改密不一致/改密成功；App 1：footer 按钮→弹窗打开）。质量门 lint 0 / tsc 0 / **test 295**（frontend 46 + shared 37 + backend 212，T6 基线 286+9）。
+- **MCP evaluate 的 textContent 与 a11y 树大小写差异**：Sidebar footer 按钮显示 'ADMIN' 是 CSS text-transform:uppercase 的渲染效果，textContent 是原始 'admin'——按 textContent 匹配按钮时勿信 a11y 树大小写（本次匹配 'ADMIN' 找不到按钮）。
+- **CDP click uid 漂移再现**：确认弹窗「取消」按钮 CDP click 返回 success 但未生效，evaluate 程序化 click 稳定（T6 知识第二实例）。
+- toast 4s 存续期常在 MCP 调用间隔内错过——wait_for 抓不到不代表没弹；用 evaluate 点击+300ms 后读 DOM 验证 toast 文本。
+- 浏览器全链路验证：admin 弹窗结构/改密错误（不登出）/改密成功（新密码 API 登录验证后改回）/创建 wangwu 中文昵称/假重置 toast/删除确认+取消双路径/王五登录无人员管理 tab + 权限边界（无项目无连接）/console 0 错误 + network 全 2xx（唯一 401 未登录首访 refresh，T3 预期）。
+
+### 双轴 review 修复（两 sub-agent 并行）
+- **Standards 无硬违规**，4 judgement call：采纳 2——①双导出（named+default）偏离 default-only 范式，删 named export；②errMsg 兜底语义倒挂（instanceof Error 直透英文 message 上 toast），反转为 ApiErrorResponse.error.message 优先、其余一律中文 fallback。不采纳 2——头像首字母三处重复（reviewer 自评留待第四处）；pageSize=100 不入 queryKey（与 useConnections 先例同款，一致性优先，出现可变 pageSize 需求时一并改）。
+- **Spec 等价迁移成立**（JSX/文案/表单/假重置/admin 门控逐字对照通过；AUTH_006 修复认可「更贴 v1 行为」）。Finding：pageSize=100 vs v1 无上限——spec 决策 3 既定权衡（同 projects/connections），**backlog：超 100 用户静默截断**（分页 UI 归 phase2 时一并解）。
+- 修复后质量门：lint 0 / tsc 0 / frontend 46 全绿（errMsg 对 ApiErrorResponse 取值不变，浏览器不重走）。
+
+### Open questions
+- 无
+
+---
+
 ## [2026-08-22] Plan A Task8 docker 验证闭环（P0 BLOCKER 清零）
 
 ### 验证结果（全部实测）

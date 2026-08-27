@@ -30,6 +30,11 @@ vi.mock('./api/queries', () => ({
   useLogout: vi.fn(() => ({ mutateAsync: vi.fn(), mutate: vi.fn() })),
   // T6：ConnectionCard 渲染期调用（App 用例不触发解密，给空实现即可）
   useDecryptPassword: vi.fn(() => ({ mutateAsync: vi.fn() })),
+  // T7：UserManagementModal 挂载即调用（isOpen false 时组件 hooks 仍执行）
+  useUsers: vi.fn(() => ({ data: undefined })),
+  useCreateUser: vi.fn(() => ({ mutateAsync: vi.fn() })),
+  useDeleteUser: vi.fn(() => ({ mutateAsync: vi.fn() })),
+  useChangePassword: vi.fn(() => ({ mutateAsync: vi.fn() })),
 }));
 
 const user = { id: 'u1', nickname: '管理员' };
@@ -123,5 +128,15 @@ describe('连接卡片区接线（T5）', () => {
 
     await events.click(screen.getByRole('button', { name: '删除' }));
     await waitFor(() => expect(connMutations.deleteAsync).toHaveBeenCalledWith('c1'));
+  });
+
+  it('用户管理：侧栏 footer 头像按钮 → 打开账号管理弹窗', async () => {
+    const events = userEvent.setup();
+    renderApp();
+
+    await events.click(screen.getByText('管理员'));
+    expect(screen.getByText('账号管理')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '个人中心' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '人员管理 (Admin)' })).toBeInTheDocument();
   });
 });

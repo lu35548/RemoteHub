@@ -5,7 +5,7 @@ import type {
   ProjectListItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
   ConnectionListItem, ConnectionDetail, CreateConnectionRequest, UpdateConnectionRequest,
   MemberListItem, AddMemberRequest, UpdateMemberRoleRequest,
-  UserListItem, AdminUpdateUserRequest, UserSearchResult,
+  UserListItem, AdminUpdateUserRequest, UserSearchResult, RegisterRequest,
   PaginatedResponse,
 } from '@remotehub/shared';
 
@@ -184,10 +184,21 @@ export function useRemoveMember() {
 
 // ─── Users (Admin) ───
 
-export function useUsers(page = 1) {
+// pageSize=100 一次拉全（v1 全量列表等价，spec 决策 3）；enabled 供弹窗按需加载（打开且 admin 才请求）
+export function useUsers(page = 1, enabled = true) {
   return useQuery({
     queryKey: ['users', page],
-    queryFn: () => api.getRaw<PaginatedResponse<UserListItem>>(`/users?page=${page}`),
+    queryFn: () => api.getRaw<PaginatedResponse<UserListItem>>(`/users?page=${page}&pageSize=100`),
+    enabled,
+  });
+}
+
+// v1 createUser 的 v2 等价端点：backend 无 POST /users，admin 建用户走 /auth/register（仅 admin，role 默认 user）
+export function useCreateUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: RegisterRequest) => api.post('/auth/register', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
   });
 }
 
