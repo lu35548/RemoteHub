@@ -24,15 +24,18 @@ async function requireUnauth() {
   return null;
 }
 
-const router = createBrowserRouter([
-  { path: '/', loader: requireAuth, element: <App /> },
-  { path: '/login', loader: requireUnauth, element: <LoginPage /> },
-]);
-
 async function bootstrap() {
   // 页面刷新：先尝试 refresh 恢复会话（httpOnly cookie → 内存 access token）
   // 复用 client 的单飞 refresh，避免重复实现
   await refreshAccessToken();
+
+  // router 必须在 refresh 之后创建：createBrowserRouter 创建即 initialize 并同步执行
+  // 初始 loader（react-router 7 源码行为）——顶层创建会在 token 恢复前跑守卫，
+  // 已登录用户整页刷新会被误判未登录踢回 /login（曾潜伏至 T10 才暴露）
+  const router = createBrowserRouter([
+    { path: '/', loader: requireAuth, element: <App /> },
+    { path: '/login', loader: requireUnauth, element: <LoginPage /> },
+  ]);
 
   const root = document.getElementById('root')!;
   createRoot(root).render(
