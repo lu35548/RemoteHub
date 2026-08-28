@@ -9,7 +9,7 @@
 - [x] ~~spec 修订~~ ✅ 已完成（commit `bf38a82`：D1–D10 + F1–F6 订正进 spec，含 §308 反向标注）
 - [ ] **前端迁移悬空（2026-07-18 meta-review）**：→ 已立项（2026-08-25）：grill 7 问 + services 15 文件逐审 + ADR-0001 + spec 定稿（`docs/superpowers/specs/2026-08-25-frontend-migration.md`，issue #1），待用户终审后转 to-tickets。实施完成前本条不关。
 - [x] **Plan B CI prisma generate 遗漏**（2026-07-21 首次 CI 暴露）：tsc 步骤 27 错全红，根因 `@prisma/client` postinstall 找不到自定义路径 schema（`packages/backend/prisma/schema.prisma`）→ client 未生成 → 类型全缺。ci.yml install 后加 `pnpm --filter @remotehub/backend exec prisma generate` 修复。见下 [2026-07-21] section。
-- [ ] **怪文件清理待拍板（2026-08-28 T11 发现）**：`C：ProjectsRemoteHubbackend.env.example`（全角冒号+无路径分隔符，0 字节）从 initial commit `9bd1c7c` 起被 git 跟踪，磁盘上已不存在（stat 缓存刷新后 D 显形）。删除该跟踪是合理清理，待用户确认后 commit。
+- [x] **怪文件清理待拍板（2026-08-28 T11 发现）**——✅ 用户拍板提交（`921f9a6`）：`C：ProjectsRemoteHubbackend.env.example`（文件名实为私用区字符 U+F03A 非全角冒号，git 转义 `C\357\200\272`；0 字节路径转义事故产物）从 initial commit `9bd1c7c` 起被跟踪，磁盘早已不存在，`git add -u` 记录删除（顺带坐实 client.ts 的 M 为 stat 假象，add 后消失）。
 
 ---
 
