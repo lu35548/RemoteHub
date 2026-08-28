@@ -63,7 +63,12 @@ const generalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, error: { code: 'RATE_LIMIT', message: '请求过于频繁，请稍后重试' } },
-  skip: (req) => req.path === '/api/v1/health',
+  // heartbeat/online 白名单（T8 核实 spec Further Notes）：限流按 IP 计，内网 NAT 多用户共享出口 IP
+  // 约 8 人即耗尽 200/min 配额，429 被前端静默跳过 → 心跳断写 → 5 分钟窗口后全员被误判离线。
+  // 两端点均有 authMiddleware 保护且客户端 5s 固定节奏轮询，无限流滥用敞口。
+  // 注意 req.path 相对于挂载点 app.use('/api/v1/')（前缀已剥），全路径匹配恒 false——
+  // 原代码 '/api/v1/health' 写法从未生效（预存在 bug 一并修正）
+  skip: (req) => ['/health', '/auth/heartbeat', '/auth/online'].includes(req.path),
 });
 
 // 5. CORS

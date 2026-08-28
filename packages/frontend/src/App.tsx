@@ -5,6 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { ConnectionDetail, ConnectionListItem, CreateConnectionRequest, ProjectListItem, ProjectDetail, UserPublic } from '@remotehub/shared';
 import { api, setAccessToken } from './api/client';
 import { useMe, useLogout, useProjects, useConnections, useCreateProject, useUpdateProject, useDeleteProject, useCreateConnection, useUpdateConnection, useDeleteConnection } from './api/queries';
+import { useOnlineStatus } from './hooks/useOnlineStatus';
 import Sidebar from './components/Sidebar';
 import ConnectionCard from './components/ConnectionCard';
 import ConnectionModal from './components/ConnectionModal';
@@ -51,8 +52,8 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'all' | 'vpn'>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  // T8（在线状态票）将接线心跳填充；T4 中间态为空列表（UI 显示 0 人在线）
-  const onlineUsers: UserPublic[] = [];
+  // 在线状态：每 5s 一轮「心跳 → 在线列表」轮询（v1 updateOnlineUsers 等价，登出卸载即停）
+  const onlineUsers = useOnlineStatus();
 
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<ProjectDetail | null>(null);
@@ -228,7 +229,7 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
           </div>
 
           <div className="flex items-center gap-6">
-             {/* Online Users Avatar Stack - Dynamic Spacing & Gradient（心跳接线在 T8；当前空列表中间态） */}
+             {/* Online Users Avatar Stack - Dynamic Spacing & Gradient */}
              <div className="flex items-center gap-4 animate-in fade-in duration-500">
                 <div className="flex items-center h-8 pl-2">
                   {onlineUsers.slice(0, 10).map((u, i) => {

@@ -9,6 +9,7 @@ import App from './App';
 // mock 可变状态（vi.hoisted 供 vi.mock 工厂在提升作用域引用）
 const state = vi.hoisted(() => ({
   connections: [] as Array<Record<string, unknown>>,
+  onlineUsers: [] as Array<Record<string, unknown>>,
 }));
 const connMutations = vi.hoisted(() => ({
   createAsync: vi.fn(),
@@ -35,6 +36,11 @@ vi.mock('./api/queries', () => ({
   useCreateUser: vi.fn(() => ({ mutateAsync: vi.fn() })),
   useDeleteUser: vi.fn(() => ({ mutateAsync: vi.fn() })),
   useChangePassword: vi.fn(() => ({ mutateAsync: vi.fn() })),
+}));
+
+// T8：App 挂载即启动心跳轮询（真定时器/真请求会污染测试环境），mock 成可变状态
+vi.mock('./hooks/useOnlineStatus', () => ({
+  useOnlineStatus: vi.fn(() => state.onlineUsers),
 }));
 
 const user = { id: 'u1', nickname: '管理员' };
@@ -65,12 +71,14 @@ const renderApp = () =>
     </UIProvider>,
   );
 
-describe('App 冒烟（T4）', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    state.connections = [];
-  });
+// 三个 describe 共用的重置逻辑（原各自 beforeEach 完全相同，提升至此）
+beforeEach(() => {
+  vi.clearAllMocks();
+  state.connections = [];
+  state.onlineUsers = [];
+});
 
+describe('App 冒烟（T4）', () => {
   it('渲染主界面壳：侧栏 + 视图切换 + 当前用户', () => {
     renderApp();
     expect(screen.getAllByText('RemoteHub').length).toBeGreaterThan(0);
@@ -82,11 +90,6 @@ describe('App 冒烟（T4）', () => {
 });
 
 describe('连接卡片区接线（T5）', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    state.connections = [];
-  });
-
   it('全局 all 视图渲染 host 卡（v1 行为：VPN 归 vpn 视图/项目视图），host 卡带 Via 依赖行', () => {
     state.connections = [hostConn, vpnConn];
     renderApp();
@@ -138,5 +141,21 @@ describe('连接卡片区接线（T5）', () => {
     expect(screen.getByText('账号管理')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '个人中心' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '人员管理 (Admin)' })).toBeInTheDocument();
+  });
+});
+
+describe('在线状态显示（T8）', () => {
+  it('在线用户头像堆叠 + 计数徽章（v1 形态：首字母/title/(在线)/N 人在线）', () => {
+    state.onlineUsers = [
+      { id: 'u1', nickname: '管理员' },
+      { id: 'u2', nickname: '张三' },
+    ];
+    renderApp();
+
+    expect(screen.getByTitle('管理员 (在线)')).toBeInTheDocument();
+    expect(screen.getByTitle('张三 (在线)')).toBeInTheDocument();
+    expect(screen.getByText('张')).toBeInTheDocument(); // 头像首字母（「管」与 Sidebar footer 头像重复，不单独断言）
+    // 「{n} 人在线」横跨 span + 文本节点，按徽章容器整体 textContent 匹配
+    expect(screen.getByText((_, el) => el?.classList.contains('rounded-full') === true && el.textContent === '2 人在线')).toBeInTheDocument();
   });
 });
