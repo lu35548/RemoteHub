@@ -219,6 +219,36 @@
 
 ---
 
+## [2026-08-28] T10 compose frontend 服务（issue #11，story 18/决策 14）
+
+### Design decisions（一行一条）
+- **结构替换而非并存**：票面/spec 决策 14 定 nginx:alpine 常驻服务 → `frontend-init`（构建容器拷 dist 进 volume）+ `caddy`（TLS 反代）整体退役，`docker/caddy/` 删除（git 可恢复）。caddy 的 gzip/安全头等价物收进 nginx.conf；HSTS 属 https 语义纯 http 不加、X-XSS-Protection 已废弃不搬。
+- **frontend Dockerfile 多阶段**：node:20-alpine builder（阿里源 + shared build 前置，同 CI/旧 frontend-init 先例）→ nginx:alpine（dist + nginx.conf），镜像 94.7MB。
+- **nginx.conf 按研究笔记 §6 标准写法**：try_files SPA fallback + /api 反代四 proxy_set_header；/assets/ 哈希资源长缓存。
+- **healthcheck 用 127.0.0.1**：容器内 localhost 解析 ::1 而 nginx 默认仅监听 IPv4 → localhost 探测恒 refused（实测 FailingStreak 20），外部 IPv4 反而正常——很隐蔽。
+- **nginx 层不加安全头**：helmet 已全套下发，双层 add 拼接重复头（实测 `x-frame-options: SAMEORIGIN, DENY`，Chrome 对重复值整头丢弃）。
+
+### 顺带修复【高危 bug，T3 起潜伏】
+- **整页刷新丢会话**（`31f689e`）：compose 首验 reload 被踢 /login → 双栈复现定位为通用 bug。根因（读 react-router 7 源码坐实）：`createBrowserRouter` 创建即 `.initialize()` **同步执行初始 loader**——main.tsx 顶层创建 router 时 token 尚未恢复（bootstrap 的 refresh 还没跑），守卫判 NULL → redirect；之后 refresh 完成也救不回。修复 = router 创建移入 bootstrap 的 await refresh 之后。T3–T8 未暴露：登录是 in-page 导航（token 已在内存），从未整页 reload；spec story 2「刷新保持登录」漏测至今。**教训：入口胶水层（main.tsx）零测试覆盖 + 从未测过整页 reload 的行为组合 = 最深潜伏区。**
+- 排查方法沉淀：五层探针递进（网络详情→bootstrap 时间戳→loader 时间戳→模块实例 ID→框架源码），`requireUnauth @183ms` 早于 `bootstrap start @184ms` 的时间戳铁证定位「创建即跑」。
+
+### 测试与环境发现
+- **双栈 localhost cookie 串扰**：cookie 不分端口，dev（3000）与 compose（8080）共享 jar——在 dev 登录/refresh 会把 compose 的 refresh cookie 轮换成 dev 签发版本（对 compose backend 401）。跨栈验证前必须目标栈重登录；此串扰是「compose reload 踢 /login」的第一干扰项（先排除串扰才看到真 bug）。
+- **backend 容器重建 = 旧 refresh cookie 全失效**（疑 JWT secret 非持久，未深究——记观察）。部署连续性 phase2 评估。
+- **corepack/TUN build 失败**：COPY 层缓存被源码改动打破后，RUN corepack 需重新下载 pnpm——TUN 断时容器内 registry.npmjs.org TLS 失败。等 TUN 窗口重试即过（本机 npmmirror 反而不通，方向与直觉相反）。
+- **compose 栈起服务要 build 全体**：backend 镜像 6 天前不含 T2 端点 → heartbeat 404 刷屏（前端其余功能全正常，T8 静默吞错掩盖了 404）。compose up --build 或显式 build backend 是「栈=当前 HEAD」的前提。
+- compose 栈实测全过：双容器 healthy；SPA fallback/登录/reload 保持/CRUD（中文项目+连接卡片）/心跳串行对（200→200/304）/「1 人在线」；network 全 2xx/304；console 仅 v1 遗留 a11y issue。CI run 33145890266 全绿，#11 关票 + 证据评论。
+
+### phase2 改进项（本票不做的）
+- index.html 无显式 no-cache 头（浏览器启发式缓存可能延迟拿到新版本入口）。
+- nginx `proxy_pass http://backend:3001` 直连服务名：DNS 仅启动时解析，backend 容器重建换 IP 需 restart frontend 或 resolver + variable 方案。
+- **Deviation 说明**：v1 无 compose/nginx 部署形态（vite dev 即全部），本票是 v2 收尾 spec §部署 形态的补全，无 1:1 等价对象；8080 端口选择是防火墙可听清单（3000/4173/8080/9000）内的实证约束。
+
+### Open questions
+- 无
+
+---
+
 
 ### 验证结果（全部实测）
 - **Step 3 build** ✅ 镜像 595MB（历经 3 修复，见下）
