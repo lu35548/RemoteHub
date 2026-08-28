@@ -9,6 +9,7 @@
 - [x] ~~spec 修订~~ ✅ 已完成（commit `bf38a82`：D1–D10 + F1–F6 订正进 spec，含 §308 反向标注）
 - [ ] **前端迁移悬空（2026-07-18 meta-review）**：→ 已立项（2026-08-25）：grill 7 问 + services 15 文件逐审 + ADR-0001 + spec 定稿（`docs/superpowers/specs/2026-08-25-frontend-migration.md`，issue #1），待用户终审后转 to-tickets。实施完成前本条不关。
 - [x] **Plan B CI prisma generate 遗漏**（2026-07-21 首次 CI 暴露）：tsc 步骤 27 错全红，根因 `@prisma/client` postinstall 找不到自定义路径 schema（`packages/backend/prisma/schema.prisma`）→ client 未生成 → 类型全缺。ci.yml install 后加 `pnpm --filter @remotehub/backend exec prisma generate` 修复。见下 [2026-07-21] section。
+- [ ] **怪文件清理待拍板（2026-08-28 T11 发现）**：`C：ProjectsRemoteHubbackend.env.example`（全角冒号+无路径分隔符，0 字节）从 initial commit `9bd1c7c` 起被 git 跟踪，磁盘上已不存在（stat 缓存刷新后 D 显形）。删除该跟踪是合理清理，待用户确认后 commit。
 
 ---
 
@@ -246,6 +247,32 @@
 
 ### Open questions
 - 无
+
+---
+
+## [2026-08-28] T11 浏览器级总验收（issue #12，五路径）
+
+### 执行结论：五路径全过，零阻塞项，纯验证票无代码改动
+- 路径一 登录：错误密码 401 直报错无 refresh 重放（T4 修复回归）/ 登录进工作台 / **整页 reload 保持会话（T10 高危 bug 回归通过）** / 登出回 /login。
+- 路径二 项目：创建（自动选中）→ 三点菜单改名（侧栏+主区同步）→ 删除确认弹窗 → 主区回退全局视图。专用「T11 删除测试」项目走完即删。
+- 路径三 连接：HOST 创建（RDP/tags/中文）→ SSL_VPN 创建（`vpn.t11.test` 自动补全 `https://` 前缀，卡片显示坐实）→ 编辑回填+改名 → 复制用户名 toast → 密码眼睛显/隐 → **解密缓存复用：全程 4 次显/隐/复制动作仅 1 次 decrypt-password 请求（network 铁证）** → 删除确认取消+确认双路径。
+- 路径四 用户：双 tab Modal / 列表「从未」空态 / 创建 zhaoliu / **假重置 toast 逐字等价 v1** / 改密错误旧密码 AUTH_006 不登出 / 改密成功+改回 / 删除确认。
+- 路径五 在线：isolatedContext 隔离 tab 登录 t11user → 双头像堆叠+「2 人在线」双端一致（倒序=最近活跃在前）/ user 角色无人员管理 tab / heartbeat→online 严格成对串行（network 全程） / 退登零心跳 / 收缩=5min 窗口语义（设计行为，v1 等价，不干等）。
+
+### Design decisions / 记账（全部非阻塞）
+- **改密成功后强制登出是 v2 安全契约非 bug**：`authService.ts:197` 事务内 `session.deleteMany({userId})` 有意撤销全部 session → 改密 200 后下一次 heartbeat/refresh 双 401 → 前端正确踢 /login。与 v1「改密后留页」有可感知差异（v2 auth 契约为准的立项决策）。phase2 打磨项：toast 可加「请重新登录」预告。
+- favicon.ico 404（v1 等价，v1/v2 均无 public 目录，已查证）→ phase2 加 `public/favicon.ico` 即可清零。
+- console 全部 error 均为浏览器对 4xx 资源的自动日志（refresh 401 首访/改密撤销/登录错密/register 409 重复用户名），**零 JS 运行时错误**；a11y issue 为 v1 遗留（T3 已定 phase2）。
+- register 409 = USER_001「用户名已存在」中文文案，前端 errMsg 动态显示——正确业务语义（实测时间线：首次 register 实际 201 成功，第二次重复提交 409，验证时序误判曾遮蔽首次成功）。
+
+### MCP 浏览器验证方法论沉淀（本会话实证，附属于 mcp-dom-match-pitfalls）
+- **toast 验证必须单脚本内 click+轮询**：跨 MCP 工具往返普遍 > toast 4s 存续期，「点击→下个工具查 toast」恒 miss，勿据此误判功能缺失。
+- **icon+aria-label 按钮 textContent 为空**：a11y 树显示名（snapshot 可见）≠ DOM 文本。querySelector 按文本过滤恒 miss，须按 aria-label/title 属性匹配。
+- **双用户双 tab 必须 isolatedContext**：同 profile 共享 cookie jar，第二 tab 复用第一用户会话；`new_page(isolatedContext: 'name')` 才能隔离登录第二用户。
+- React 受控输入程序化赋值后立即读取可能读到旧值（stat/批处理时序），逐步 setV+100ms 间隔稳定。
+
+### Open questions
+- 怪文件 `C：ProjectsRemoteHubbackend.env.example` 清理待用户拍板（已挂顶部 OQ 清单）。
 
 ---
 
