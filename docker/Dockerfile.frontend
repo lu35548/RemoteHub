@@ -1,12 +1,15 @@
+# 多阶段构建：node 编译（tsc -b && vite build）→ nginx:alpine 托管静态产物（研究笔记 §6 标准形态）
 FROM node:20-alpine AS builder
 WORKDIR /app
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
 COPY packages/shared/ packages/shared/
 COPY packages/frontend/ packages/frontend/
 RUN corepack enable && pnpm install --frozen-lockfile
+# shared 先 build：frontend 类型 import 自 dist（与 CI frontend job 同款前置）
 RUN pnpm --filter @remotehub/shared build
 RUN pnpm --filter @remotehub/frontend build
 
-FROM alpine:latest
-COPY --from=builder /app/packages/frontend/dist /tmp/dist
-CMD ["sh", "-c", "rm -rf /output/* && cp -r /tmp/dist/. /output/"]
+FROM nginx:alpine
+COPY --from=builder /app/packages/frontend/dist /usr/share/nginx/html
+COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
