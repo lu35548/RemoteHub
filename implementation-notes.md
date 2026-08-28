@@ -201,6 +201,24 @@
 
 ---
 
+## [2026-08-28] T9 CI frontend job（issue #10）
+
+### Design decisions（一行一条）
+- **job 更名 `test` → `backend`**：票面明言「与既有 backend job 并列守卫」（既有 job 实质就是 backend 链，名实不符）；无 branch protection/required checks 引用 job 名，改名零风险。备选：保留 `test` 名新增 `frontend`（拒——名字与内容不符留歧义）。
+- **frontend job 步骤**：install → shared build → lint / `exec tsc --noEmit` / test。shared build 前置是编排关键（frontend 类型 import 自 `@remotehub/shared` dist，全新环境无 build 必挂 tsc——T1 本地一直有 dist 残留掩盖此依赖）。tsc 用 `exec` 形式对齐 backend job（frontend package.json 无独立 tsc script）。
+- **frontend 不需要 prisma generate**：无 prisma 依赖（ci-prisma-generate-required 适用范围 = 含 prisma 的包）。
+- 本地预跑用与 CI 同款 `--filter` 命令形态（lint 0 / tsc 0 / test 53 绿）再 push——命令形态本身就是验证对象。
+
+### 结果与遗留
+- run 33142606903 backend: success ∥ frontend: success 全绿；#10 自动关票 + 证据评论补发。
+- **phase2 维护项**：run annotation「Node.js 20 is deprecated」（actions v4 被强制跑 Node 24）——升 checkout/setup-node/action-setup v5 归 phase2，不影响守卫语义。
+- 网络抖动插曲：会话开局 TUN 断（api/git 双 EOF），恢复后开工；中途又抖一次，sleep 重试即过。
+
+### Open questions
+- 无
+
+---
+
 
 ### 验证结果（全部实测）
 - **Step 3 build** ✅ 镜像 595MB（历经 3 修复，见下）
