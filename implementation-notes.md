@@ -168,7 +168,39 @@
 
 ---
 
-## [2026-08-22] Plan A Task8 docker 验证闭环（P0 BLOCKER 清零）
+## [2026-08-28] T8 在线状态（issue #9，story 13）
+
+### Design decisions（一行一条）
+- **手动循环 hook 逐字等价 v1**：`useOnlineStatus`（src/hooks/ 首文件）= useState + 立即执行 + setInterval(5000) + clearInterval，每轮**串行** heartbeat→online→setState。不走 TanStack refetchInterval——首轮 heartbeat/online 并发会导致首帧丢自己（v1 严格 heartbeat 先行），可观察差异不做。
+- **queries.ts 不加 hooks**：heartbeat 是发信号（无 invalidation 需求）、online 由循环内串行拉取（顺序契约所在），经 TanStack 反而引入顺序不定性。hook 直用 api client。
+- **失败静默 try/catch**：心跳失败跳过本轮（v1「本轮无更新」等价；下一轮自动恢复）+ 消化错误避免 unhandled rejection 污染 console。
+- **`data.users ?? []` 契约防御**：backend 契约破坏时兜底空数组，防 `undefined.slice` 白屏（v1 运行态恒数组，兜底更贴 v1）。
+- **限流白名单（spec Further Notes 落实）**：generalLimiter 200/min 按 IP 计，NAT 同出口 IP 约 8 人即触 429 → 心跳静默断写 → 5min 后全员误判离线。skip 白名单加 heartbeat/online（authMiddleware 保护 + 客户端 5s 固定节奏，无滥用敞口）。
+
+### Deviations
+- **backend server.ts 修改**（票面是前端接线）：spec Further Notes 明文「实施时核实限流白名单」，核实出 NAT 风险票内修（同 T7 AUTH_006 先例）。
+- **顺修预存在 bug**：原 `req.path === '/api/v1/health'` 在 `app.use('/api/v1/')` 挂载点内恒 false（express 挂载剥前缀，req.path='/health'）——health skip 从未生效过，白名单改相对路径数组一并修正。实证：白名单 250+230 次零 429；非白名单 /projects 210 次 199×401+11×429（保护仍在）。
+- try/catch 静默吞错是 v2 网络层必要适配（v1 localStorage 无失败路径），非 1:1——review 双轴均认可。
+
+### 测试与环境发现
+- **unhandledRejection vitest 不报**：无 try/catch 时 rejection 实际发生（process.on('unhandledRejection') 抓到 Error: network）但 vitest 全绿——静默契约需显式监听断言（RED 实证驱动实现，非臆测）。
+- **「N 人在线」横跨 span+文本节点**：getByText 精确匹配不到，需容器 textContent 函数匹配（classList 锚定徽章 div）。
+- **用例间 mock 计数残留**：beforeEach 必须 vi.clearAllMocks()（首跑 3≠2 的根因是上一用例调用残留非定时器泄漏）。
+- **dev 栈冷启动**：`pnpm dev` 的 backend 崩——tsx watch 不加载 .env（DATABASE_URL 缺失 fail-fast）。冷启动须 `npx tsx watch --env-file=.env src/server.ts`（backend 目录）；上会话栈是存活态沿用，冷启动方式此前无记录。
+- **TaskStop 杀不干净 concurrently 子进程**：vite 遗孤占 3000 → 新 vite fallback 错位 3001（IPv6 ::1 与 backend IPv4 可共存不冲突报错，更隐蔽）。需按 PID 清遗孤再起。
+- 测试 +7：hook 6（挂载首轮+串行顺序/5s 周期/unmount 停/失败静默+无 unhandled/掉线收缩/契约防御）+ App 1（头像堆叠+计数徽章）。质量门 lint 0 / tsc 0 / **test 302**（37+53+212）。
+- 浏览器双 tab 真链路：双用户头像+「2 人在线」双端一致（倒序=最近活跃在前）、heartbeat→online 串行成对、退登后零心跳、console 0 错误；UI 创建 testuser 顺带回归 T7 全流程。
+
+### 双轴 review 修复（两 sub-agent 并行）
+- **Standards**：`// Initial fetch` 英文注释中文化（T5 先例：等价迁移不豁免注释语言规范）；App.test 三 describe 的 beforeEach 完全相同 → 提升文件顶层。classList 匹配耦合不采纳（横跨节点文本无更优方案）。
+- **Spec**：【真发现】NAT 同 IP 限流风险（上述白名单修复）；补掉线收缩用例 + 契约防御用例；`?.` 存量写法（T4 改动非本票）与 try/catch 静默（已记 Deviation）不另行处理。
+- 修复后质量门：lint 0 / tsc 0（frontend+backend）/ test 302 全绿；限流白名单 node 连打实证；浏览器回归（5 对串行心跳 + console 清零）。
+
+### Open questions
+- 无
+
+---
+
 
 ### 验证结果（全部实测）
 - **Step 3 build** ✅ 镜像 595MB（历经 3 修复，见下）
