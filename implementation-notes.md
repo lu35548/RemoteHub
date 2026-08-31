@@ -318,6 +318,23 @@
 
 ---
 
+## [2026-08-31] JWT secret 持久性查证（backlog「开工前查证」首项，结论：非 bug）
+
+### 结论与证据链（静态三证 + 动态一锤定音）
+- **非 bug**。refresh token 非 JWT：`authService.ts:34` 随机 token，DB 存 `tokenHash`，校验走 session 表（`:143-144`）——refresh 链路不经过 JWT_SECRET（secret 只签短命 access token，失效由 refresh 换新，设计内）。
+- JWT_SECRET 无随机 fallback（`env.ts:11` requireEnv fail-fast，缺了容器崩而非静默换）；两处 .env 值 hash 一致（`4d30a750…`，比对用 md5 不回显明文）。
+- DB 持久：`docker-compose.yml:28-29` named volume `sqlite-data:/data`。
+- 动态 loop（red-capable）：登录拿**未消费** refreshToken（避开轮换语义干扰）→ `--force-recreate` backend → health 200 → refresh **200** 换出新 accessToken。对照组（不重建）login→refresh 200 先行验证链路。
+
+### Design decisions
+- loop 单次消费设计：refresh 是轮换语义（成功即撤销旧 token），「重建前先 refresh 验证再重建后 refresh」会把轮换失效误判为重建失效——必须用未消费的新登录 token 判定。
+- T10 观察归因（推断级）：双栈 cookie 串扰伪影（notes T10 相邻行即串扰记录——dev 栈 refresh 把 compose cookie 轮换成 dev 版后对 compose 401），非 secret/持久性问题。
+
+### Deviations / Open questions
+- 无。compose 栈已 `down`（volume 保留），TEMP 验证脚本与 cookie 文件已删。
+
+---
+
 ## [2026-08-31] phase2 backlog 收编（T12 收官后审计，用户拍板方案 a）
 
 ### Design decisions（一行一条）

@@ -6,7 +6,7 @@
 
 ## 开工前查证（P0 之前，半小时级）
 
-- [ ] **JWT secret 持久性**（T10 观察）：backend 容器重建 = 旧 refresh cookie 全失效，疑 secret 非持久化 → 若坐实，每次部署全员被登出。查 secret 生成逻辑 + compose env 注入路径。这是唯一「可能是 bug 而非改进」的悬置项。
+- [x] ~~**JWT secret 持久性**（T10 观察）~~ ✅ 已查证**非 bug**（2026-08-31，diagnosing-bugs 流程）：refresh token 非 JWT（随机 token + hash 查 session 表，`authService.ts:34,143-144`），refresh 链路不经过 JWT_SECRET；两处 `.env` secret hash 一致且 `requireEnv` fail-fast 无随机 fallback；DB named volume 持久。动态判定：登录拿未消费 token → `--force-recreate` backend → health 恢复后 refresh **200**。T10 观察系双栈 cookie 串扰伪影（refresh 轮换撤销旧 token 被误记为重建失效，notes T10 上一行即串扰记录）。
 
 ## 按承接位置归类（13 项）
 
