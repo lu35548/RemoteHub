@@ -9,13 +9,15 @@
 
 | 文档 | 角色 | 状态 |
 |------|------|------|
-| `2026-04-23-remotehub-v2-refactor-design.md` | **一期重构设计**（历史权威） | ⚠️ DB 部分（§2.4/§9.2/§6）被 v2 收尾 spec 切 SQLite 覆盖；其余（认证/权限/CRUD/中间件/错误码/部署架构）仍有效 |
-| `2026-04-23-remotehub-v2-phase2-design.md` | **phase2 功能设计**（审计/监控/安全/备份/WS/2FA 等 11 模块） | R3 审查完成（v2.1-draft），待 v2 收尾后实施；§0 前置依赖已声明 |
-| `2026-04-30-remotehub-v2-phase2.md` | **phase2 实施 plan** | P0-BLOCKER 批次（前置）已加 + 修订说明 |
-| `2026-06-24-remotehub-audit.md` | **项目审计报告**（含附录 A 代码审查 6 BLOCKER） | 完成，驱动一期全修 |
-| `2026-07-17-v2-followup-design.md` | **v2 收尾设计**（持久化切换 + BLOCKER + 测试 + 前端迁移） | ✅ spec 定稿（两轮 grill：D1–D10 拍板 + F1–F6 订正 + 5 OQ 关闭/保留），Plan A/B/C 已全部实施（2026-07-21） |
-| `2026-08-25-frontend-migration.md` | **前端迁移 spec**（等价迁移，ADR-0001；T1–T12 → #2–#13，父票 #1） | ✅ 全部实施完成（2026-08-31 T12 收官，v1 参照目录已删） |
-| `phase2-backlog.md` | **phase2 开工输入**（前端迁移期悬置项集中收编：13 细项 + JWT secret 开工前查证） | 活跃维护（2026-08-31 建） |
+| `specs/2026-04-23-remotehub-v2-refactor-design.md` | **一期重构设计**（历史权威） | ⚠️ DB 部分（§2.4/§9.2/§6）被 v2 收尾 spec 切 SQLite 覆盖；其余（认证/权限/CRUD/中间件/错误码/部署架构）仍有效 |
+| `plans/2026-04-24-remotehub-v2-implementation.md` | **一期实施 plan** | ✅ 已实施完（历史存档） |
+| `specs/2026-04-23-remotehub-v2-phase2-design.md` | **phase2 功能设计**（审计/监控/安全/备份/WS/2FA 等 11 模块） | R3 审查完成（v2.1-draft），待 v2 收尾后实施；§0 前置依赖已声明 |
+| `plans/2026-04-30-remotehub-v2-phase2.md` | **phase2 实施 plan** | P0-BLOCKER 批次（前置）已加 + 修订说明；⚠️ 4 月定稿，立项时需 grill 刷新（部署 Caddy→nginx 等 5 个月漂移） |
+| `specs/2026-06-24-remotehub-audit.md` | **项目审计报告**（含附录 A 代码审查 6 BLOCKER） | 完成，驱动一期全修 |
+| `specs/2026-07-17-v2-followup-design.md` | **v2 收尾设计**（持久化切换 + BLOCKER + 测试 + 前端迁移） | ✅ spec 定稿（两轮 grill：D1–D10 拍板 + F1–F6 订正 + 5 OQ 关闭/保留），Plan A/B/C 已全部实施（2026-07-21） |
+| `plans/2026-07-18-remotehub-v2-plan-{a,b,c}-*.md` | **v2 收尾实施 plan A/B/C**（SQLite 切换 / CI / service 测试） | ✅ 已全部实施（2026-07-21） |
+| `specs/2026-08-25-frontend-migration.md` | **前端迁移 spec**（等价迁移，ADR-0001；T1–T12 → #2–#13，父票 #1） | ✅ 全部实施完成（2026-08-31 T12 收官，v1 参照目录已删） |
+| `specs/phase2-backlog.md` | **phase2 开工输入**（前端迁移期悬置项集中收编：13 细项） | 活跃维护（2026-08-31 建；JWT secret 持久性已查证非 bug） |
 
 ---
 
