@@ -318,6 +318,21 @@
 
 ---
 
+## [2026-08-31] phase2 backlog 收编（T12 收官后审计，用户拍板方案 a）
+
+### Design decisions（一行一条）
+- 决策：独立 backlog 文档 `docs/superpowers/specs/phase2-backlog.md`。理由：single-context 域文档惯例 + phase2 开工有权威入口。备选：gh issue 收编（拒，清单型内容文件比 issue 流耐久）/ 接受 notes 载体（拒，编年体散文 phase2 开工时不进视野）。
+- 审计结论（三源核对：notes 各票 section / spec Out of Scope / issue 评论零增量）：4 粗类已被 spec Out of Scope 承接；**13 细项此前仅存 notes 散文，全部收编**。JWT secret 疑点（T10 未深究观察）单列「开工前查证」——唯一可能是 bug 而非改进的悬置项。
+- 文档定位：导航型（粗类指向 spec/phase2 design 不重复）；归类是建议非承诺，phase2 立项时按实际模块边界重归并；处置纪律=完成划一项注 commit、新悬置入此不再散落 notes。
+
+### Deviations
+- 无。
+
+### Open questions
+- 无。
+
+---
+
 ## [2026-07-21] V2 推送远端 + CI 验证闭环
 
 ### Design decisions
