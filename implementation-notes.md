@@ -7,9 +7,10 @@
 - [x] **D9** 集成测试 —— ✅ 把 spec §2 BLOCKER-1 验收做成集成测试（setupTestDb + 临时 SQLite + migrate deploy + 验 5 表/unique/cascade/自引用约束）
 - [x] **D10** notes/vpnLoginUrl 长度上限 —— ✅ shared 加 validateNotes(≤2000)+validateVpnLoginUrl(≤500)，connectionService 调用
 - [x] ~~spec 修订~~ ✅ 已完成（commit `bf38a82`：D1–D10 + F1–F6 订正进 spec，含 §308 反向标注）
-- [ ] **前端迁移悬空（2026-07-18 meta-review）**：→ 已立项（2026-08-25）：grill 7 问 + services 15 文件逐审 + ADR-0001 + spec 定稿（`docs/superpowers/specs/2026-08-25-frontend-migration.md`，issue #1），待用户终审后转 to-tickets。实施完成前本条不关。
+- [x] **前端迁移悬空（2026-07-18 meta-review）**——✅ 关闭（2026-08-31 T12 收官）：2026-08-25 立项（grill 7 问 + services 15 文件逐审 + ADR-0001 + spec 定稿 `docs/superpowers/specs/2026-08-25-frontend-migration.md`，父票 #1），T1–T12（#2–#13）全部完成，T11 浏览器级总验收通过（issue #12），T12 删除 v1 参照目录 `RemoteHub/`（`862a3f5`，用户确认门评论为证）。phase2 §19 解锁。
 - [x] **Plan B CI prisma generate 遗漏**（2026-07-21 首次 CI 暴露）：tsc 步骤 27 错全红，根因 `@prisma/client` postinstall 找不到自定义路径 schema（`packages/backend/prisma/schema.prisma`）→ client 未生成 → 类型全缺。ci.yml install 后加 `pnpm --filter @remotehub/backend exec prisma generate` 修复。见下 [2026-07-21] section。
 - [x] **怪文件清理待拍板（2026-08-28 T11 发现）**——✅ 用户拍板提交（`921f9a6`）：`C：ProjectsRemoteHubbackend.env.example`（文件名实为私用区字符 U+F03A 非全角冒号，git 转义 `C\357\200\272`；0 字节路径转义事故产物）从 initial commit `9bd1c7c` 起被跟踪，磁盘早已不存在，`git add -u` 记录删除（顺带坐实 client.ts 的 M 为 stat 假象，add 后消失）。
+- [ ] **`RemoteHub/.env.local` 磁盘去留待拍板（2026-08-31 T12 发现）**：git rm 后磁盘残留的唯一未跟踪文件（352B，曾因 v1 `.gitignore` 层被 porcelain 隐藏），密钥模式 1 命中，未跟踪故删除不可恢复。不进 git（删除 commit `862a3f5` 仅含 53 tracked 文件），纯磁盘清理问题，待用户拍板。
 
 ---
 
@@ -295,6 +296,25 @@
 - `~/.docker/daemon.json` 加 `registry-mirrors: [docker.m.daocloud.io, docker.1ms.run]`（Docker Hub 直连被拒）；DNS 间歇抖动重试即过。
 - 根目录 `.env`（从 packages/backend/.env 拷贝，compose `env_file` 需要；`DATABASE_URL` 被 compose override `file:/data/prod.db`；gitignore 已排）。
 - Docker Desktop 装在 `AppData\Local\Programs\DockerDesktop`（非 Program Files），daemon 崩过一次重启即恢复。
+
+---
+
+## [2026-08-31] T12 收官：删除 RemoteHub/ + 关闭前端迁移悬空声明（issue #13）
+
+### Design decisions（一行一条）
+- 决策：确认门先行——用户会话确认后 issue #13 评论留证（issuecomment-5474444672）才动手删除。理由：票面 AC + 红线双重要求（破坏性操作显式确认）。
+- 决策：双 commit 拆分——删除单独 commit（`862a3f5`，Closes #13），文档收尾单独 docs commit。理由：票面「单独 commit」+ 11 票惯例（feat/chore 与 docs 分离）。
+- 决策：删除后质量门实测而非推演——RemoteHub/ 不在 pnpm workspace（只认 `packages/*`），预期零回归，仍按票面 AC 跑全量：build ✅（vite `✓ built in 10.48s`）/ lint ✅（3 包 0 错误）/ test ✅（37+212+53=**302**，与 T11 基线分毫不差）。
+
+### Deviations
+- 文档收尾超票面字面两处（同表一致性，避免误导）：v2-master 文档清单补 `2026-08-25-frontend-migration.md` 条目（导航入口缺这条）+ followup-design 行状态同步为「Plan A/B/C 已实施」（原「待转 writing-plans」过时）。
+
+### Tradeoffs
+- lint 首跑 `Command "eslint" not found`：rtk hook 改写层假故障，`rtk proxy pnpm lint` 原始输出 3 包全 Done 坐实，非真实回归。不为此改环境（单次干扰，proxy 验证即够）。
+- 备选：v2-master 状态表保持 2026-07-17 快照不动（拒：半新半旧比整体刷新更误导）。
+
+### Open questions
+- `RemoteHub/.env.local` 磁盘去留（见顶部清单）。
 
 ---
 
