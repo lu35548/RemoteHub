@@ -10,7 +10,7 @@
 - [x] **前端迁移悬空（2026-07-18 meta-review）**——✅ 关闭（2026-08-31 T12 收官）：2026-08-25 立项（grill 7 问 + services 15 文件逐审 + ADR-0001 + spec 定稿 `docs/superpowers/specs/2026-08-25-frontend-migration.md`，父票 #1），T1–T12（#2–#13）全部完成，T11 浏览器级总验收通过（issue #12），T12 删除 v1 参照目录 `RemoteHub/`（`862a3f5`，用户确认门评论为证）。phase2 §19 解锁。
 - [x] **Plan B CI prisma generate 遗漏**（2026-07-21 首次 CI 暴露）：tsc 步骤 27 错全红，根因 `@prisma/client` postinstall 找不到自定义路径 schema（`packages/backend/prisma/schema.prisma`）→ client 未生成 → 类型全缺。ci.yml install 后加 `pnpm --filter @remotehub/backend exec prisma generate` 修复。见下 [2026-07-21] section。
 - [x] **怪文件清理待拍板（2026-08-28 T11 发现）**——✅ 用户拍板提交（`921f9a6`）：`C：ProjectsRemoteHubbackend.env.example`（文件名实为私用区字符 U+F03A 非全角冒号，git 转义 `C\357\200\272`；0 字节路径转义事故产物）从 initial commit `9bd1c7c` 起被跟踪，磁盘早已不存在，`git add -u` 记录删除（顺带坐实 client.ts 的 M 为 stat 假象，add 后消失）。
-- [x] **`RemoteHub/.env.local` 磁盘去留（2026-08-31 T12 发现）**——✅ 用户拍板保留：git rm 后磁盘残留的唯一未跟踪文件（352B，曾因 v1 `.gitignore` 层被 porcelain 隐藏），密钥模式 1 命中。保留为未跟踪文件——v1 `.gitignore` 已随目录删除，此后 `git status` 显示 `?? RemoteHub/`（单文件目录）属预期，勿清理。
+- [x] **`RemoteHub/.env.local` 磁盘去留（2026-08-31 T12 发现）**——✅ 用户拍板保留：git rm 后磁盘残留的唯一未跟踪文件（352B，曾因 v1 `.gitignore` 层被 porcelain 隐藏），密钥模式 1 命中。保留为未跟踪文件——根 `.gitignore:4` 的 `.env.local` 规则覆盖之，`git status` 不显示（初判「会显示 `?? RemoteHub/`」系未验证预测，已自查纠正）。
 
 ---
 
@@ -314,7 +314,7 @@
 - 备选：v2-master 状态表保持 2026-07-17 快照不动（拒：半新半旧比整体刷新更误导）。
 
 ### Open questions
-- `RemoteHub/.env.local` → ✅ 用户拍板保留（未跟踪文件，`?? RemoteHub/` 属预期勿清理）。分支收官：feat/v2-refactor 删除（本地+远端，17076ec 已全在 main），phase2 届时新开分支。
+- `RemoteHub/.env.local` → ✅ 用户拍板保留（未跟踪，根 `.gitignore:4` 覆盖，status 无显示）。分支收官：feat/v2-refactor 已删（本地+远端，全部历史在 main），phase2 届时新开分支。
 
 ---
 
