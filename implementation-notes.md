@@ -11,11 +11,37 @@
 - [x] **Plan B CI prisma generate 遗漏**（2026-07-21 首次 CI 暴露）：tsc 步骤 27 错全红，根因 `@prisma/client` postinstall 找不到自定义路径 schema（`packages/backend/prisma/schema.prisma`）→ client 未生成 → 类型全缺。ci.yml install 后加 `pnpm --filter @remotehub/backend exec prisma generate` 修复。见下 [2026-07-21] section。
 - [x] **怪文件清理待拍板（2026-08-28 T11 发现）**——✅ 用户拍板提交（`921f9a6`）：`C：ProjectsRemoteHubbackend.env.example`（文件名实为私用区字符 U+F03A 非全角冒号，git 转义 `C\357\200\272`；0 字节路径转义事故产物）从 initial commit `9bd1c7c` 起被跟踪，磁盘早已不存在，`git add -u` 记录删除（顺带坐实 client.ts 的 M 为 stat 假象，add 后消失）。
 - [x] **`RemoteHub/.env.local` 磁盘去留（2026-08-31 T12 发现）**——✅ 用户拍板保留：git rm 后磁盘残留的唯一未跟踪文件（352B，曾因 v1 `.gitignore` 层被 porcelain 隐藏），密钥模式 1 命中。保留为未跟踪文件——根 `.gitignore:4` 的 `.env.local` 规则覆盖之，`git status` 不显示（初判「会显示 `?? RemoteHub/`」系未验证预测，已自查纠正）。
-- [ ] **shared `AuditLog` 接口与 Prisma model 同名不同形**（2026-09-04 票 #15 review 发现）：detail 解析对象 vs string、createdAt string vs Date——后端同文件导入两者有冲突风险，P0-2 实施时定夺（显式映射/命名空间导入/回改 spec+票面改名），勿只改代码。
+- [x] **shared `AuditLog` 接口与 Prisma model 同名不同形**（2026-09-04 票 #15 review 发现）——✅ 票 #16 裁决（见下 section）：**不改名、不强制映射**。约定 = 后端文件不同时裸名导入两侧；DB 行类型如需引用走 `Prisma.*` 命名空间（audit.ts 顶部注释固化）。P0-2 实际未出现同文件双导入（中间件只写库不读 DTO）；DTO 映射函数推迟到 P0-3 查询端点按需落地。
 - [ ] **frontend ConnectionModal「新建 HOST」/ ProjectModal「新建」userEvent 测试负载下间歇 5s 超时**（2026-09-04 全量门暴露）：stash 基线对照实证 main 既有、失败数 4→3→2 漂移、恢复后 53/53 绿——建议单开 issue 跟踪，不阻塞 P0。
 - [ ] **首个 SQLite 方言 migration vs project.md「MySQL 统一」约定**（Standards 轴提示）：v2 SQLite 切换 spec 修正表 #5 已自认，方言切换成本自此起算——迁移期结束统一处理或 ADR 明示豁免。
 
 ---
+
+## [2026-09-04] 票 #16（P0-2）：审计中间件 + 16 端点挂载 + supertest 集成层
+
+TDD 全程（unit 16 先红后绿 + integration 6 场景行为级 RED：目标断言失败而非 import error），双轴 review（Standards 0 硬违规 + Spec 无违背）+ 修复 1 项（params.uid 兜底收紧），质量门 **327** = 基线 304 + 新增 23（backend 237 含 unit 16 + integration 7；lint 0 / tsc 0 / 三包 build 过）。commit `50d84da`。
+
+### Design decisions
+- [2026-09-04] 决策：AUTH_LOGIN/AUTH_LOGOUT/AUTH_PASSWORD_CHANGE/AUTH_PROFILE_UPDATE 的 resource='security'（design §14.2 无权威映射表，四动作统一归安全域——login 失败是暴破检测核心数据源，P0-5 可疑 IP 会 join；register 记 USER_CREATE+resource='user'）。理由：resource 筛选的 admin 心智模型一致，避免认证动作碎片化跨 resource。
+- [2026-09-04] 决策：挂载顺序 authMiddleware → audit → role/projectRole。理由：req.user 要 auth 填充；403（权限拒绝）也记 failure——「谁试图做什么」语义。
+- [2026-09-04] 决策：resourceId 解析链 before.id → getResourceId 回调 → body.data.id → params.id（**不取 params.uid**）。理由：member 嵌套路由 params.id 是父 projectId、uid 是 userId，皆非 projectMember 行 id——真 id 只在 before 快照或响应体；review 抓出 uid 兜底在 before 降级时误记 userId，收紧。
+- [2026-09-04] 决策：**AuditLog 同名 OQ 裁决**（见顶部清单）——Prisma 类型一律 `Prisma.*` 命名空间引用，shared 裸名导入不冲突；audit.ts 顶部注释固化约定。
+- [2026-09-04] 决策：SENSITIVE_FIELDS 追加 `password` 键（票外安全修正）。理由：decrypt-password 响应 data={password:明文}，原 4 键清单不覆盖 → CONNECTION_ACCESS 的 detail.after 会把明文密码落审计表（场景 6 实证堵住）。spec L112 列举已回写。备选：CONNECTION_ACCESS 特判不记 after（拒——中间件按 action 特判是耦合）。
+- [2026-09-04] 决策：supertest 连真库时序 = env.ts 前置占位变量 → beforeAll setupTestDb → 覆盖 process.env.DATABASE_URL → `vi.resetModules()` + 清 globalThis.prisma → **动态 import server**。理由：config/env.ts 是 import 期快照，seedAdmin 静态 import 链会提前锁定占位 URL（首跑 RED 即暴露）；resetModules 保证 server 链重新构建 env 快照。备选：vi.mock prisma 模块 + Proxy 转发（拒——偏离真链路精神）。
+
+### Deviations
+- 票面文件清单外 2 文件：testDb.ts（setupTestDb 返回 url——动态 import server 指向临时库的必要配套）、shared/constants.ts（上述 password 键）。
+- integration 6 场景超票面 4 场景：+场景5（register/Member resourceId 语义）、+场景6（decrypt 脱敏端到端）——review 认可方向一致非有害。
+- NODE_ENV guard AC 为间接实证：supertest 动态 import server 全程不监听端口（若 bootstrap 跑了会 seed+listen+撞端口）——无显式断言但链路即证据。
+
+### Tradeoffs / 环境坑（可复用）
+- **vi.spyOn(PrismaClient delegate) + mockRestore 会破坏方法属性**：restore 后 `prisma.auditLog.create` 变 undefined（tinyspy × Prisma delegate 结构），殃及后续场景全挂 not a function。修：预先 bind 保存原函数，恢复用 `spy.mockImplementation(original)` 回落而非 restore。
+- **prisma migrate deploy 冷启动可达 47s**（user+sys 仅 1.3s，全 I/O 等待——Defender 首扫/磁盘忙；tmp 残留 18 个测试库加剧）：清 tmp 后 13s 仍超 hookTimeout 10s → beforeAll 显式 120_000 超时。CI 慢机同理需要。
+- flushAudit = setImmediate 一轮 + 50ms setTimeout（审计 setImmediate 异步落库 + prisma create 真 promise）：Standards review 建议轮询断言（vi.waitFor），暂维持实测稳定方案，CI 首跑见分晓。
+- `(globalThis).prisma = undefined` 耦合单例键名（Standards review）：导出 reset 钩子本身也是 smell，注释说明维持现状。
+
+### Open questions
+- 无新增。观察项：login 成功的 detail.after 含 accessToken（SENSITIVE_FIELDS 键名精确匹配不含 'accessToken'，15min 短命 JWT）——spec「after 取自响应体」无例外条款，忠实实现；P0-3 admin 展示层或后续票可裁定是否豁免。
 
 ## [2026-09-04] 票 #15（P0-1）：AuditLog schema + migration + shared 审计类型
 
