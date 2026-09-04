@@ -11,14 +11,14 @@ afterEach(async () => {
 });
 
 describe('schema 约束（真实 SQLite）', () => {
-  it('migrate deploy 建出 5 张表', async () => {
+  it('migrate deploy 建出 6 张表', async () => {
     const { prisma, cleanUp } = await setupTestDb();
     instances.push(cleanUp);
     const tables = await prisma.$queryRaw<Array<{ name: string }>>`
       SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_prisma_%'
     `;
     const names = tables.map((t) => t.name).sort();
-    expect(names).toEqual(['connections', 'project_members', 'projects', 'sessions', 'users']);
+    expect(names).toEqual(['audit_logs', 'connections', 'project_members', 'projects', 'sessions', 'users']);
   });
 
   it('@@unique([projectId, name]) 抛 P2002', async () => {
@@ -48,5 +48,29 @@ describe('schema 约束（真实 SQLite）', () => {
     await prisma.connection.delete({ where: { id: 'c1' } });
     const c2 = await prisma.connection.findUnique({ where: { id: 'c2' } });
     expect(c2?.requiredVpnId).toBeNull();
+  });
+
+  it('user→auditLog onDelete SetNull', async () => {
+    const { prisma, cleanUp } = await setupTestDb();
+    instances.push(cleanUp);
+    await prisma.user.create({ data: { id: 'u1', username: 'a', nickname: 'A', passwordHash: 'h', role: 'user' } });
+    await prisma.auditLog.create({ data: { userId: 'u1', action: 'AUTH_LOGIN', resource: 'user', resourceId: 'u1' } });
+    await prisma.user.delete({ where: { id: 'u1' } });
+    const log = await prisma.auditLog.findFirst();
+    expect(log?.userId).toBeNull();
+  });
+
+  it('audit_logs 带 4 个二级索引', async () => {
+    const { prisma, cleanUp } = await setupTestDb();
+    instances.push(cleanUp);
+    const indexes = await prisma.$queryRaw<Array<{ name: string }>>`
+      SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='audit_logs' AND name NOT LIKE 'sqlite_%'
+    `;
+    expect(indexes.map((i) => i.name).sort()).toEqual([
+      'audit_logs_action_idx',
+      'audit_logs_created_at_idx',
+      'audit_logs_resource_resource_id_idx',
+      'audit_logs_user_id_idx',
+    ]);
   });
 });

@@ -20,6 +20,7 @@ model User {
 
   projects ProjectMember[]
   sessions Session[]
+  auditLogs AuditLog[]
 
   @@index([role])
   @@map("users")
@@ -102,4 +103,25 @@ model Connection {
   @@index([projectId])
   @@index([requiredVpnId])
   @@map("connections")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?  @map("user_id")
+  action     String
+  resource   String
+  resourceId String?  @map("resource_id")
+  result     String   @default("success") // 'success' | 'failure'（独立列，spec 修正表 #15）
+  detail     String? // JSON 字符串：{ before?, after?, reason? }
+  ip         String?
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([resource, resourceId])
+  @@index([createdAt])
+  @@map("audit_logs")
 }

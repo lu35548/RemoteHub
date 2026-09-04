@@ -1,4 +1,4 @@
-import type { Protocol, VpnType, UserRole, MemberRole } from './enums.js';
+import type { Protocol, VpnType, UserRole, MemberRole, AuditAction, AuditResource, AuditResult } from './enums.js';
 
 export interface ApiResponse<T> {
   success: true;
@@ -199,4 +199,34 @@ export interface UpdateConnectionRequest {
 
 export interface DecryptedPasswordResponse {
   password: string;
+}
+
+export interface AuditLogDetail {
+  before?: Record<string, unknown>;
+  after?: Record<string, unknown>;
+  reason?: string;
+}
+
+export interface AuditLog {
+  id: string;
+  userId: string | null;
+  action: AuditAction;
+  resource: AuditResource;
+  resourceId: string | null;
+  result: AuditResult;
+  detail: AuditLogDetail | null;
+  ip: string | null;
+  userAgent: string | null;
+  createdAt: string;
+}
+
+export interface AuditLogQuery {
+  userId?: string;
+  action?: AuditAction;
+  resource?: AuditResource;
+  startDate?: string;
+  endDate?: string;
+  result?: AuditResult;
+  page?: number;
+  pageSize?: number;
 }
