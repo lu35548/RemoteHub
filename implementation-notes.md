@@ -31,6 +31,7 @@ TDD 全程（unit 16 先红后绿 + integration 6 场景行为级 RED：目标�
 
 ### Deviations
 - 票面文件清单外 2 文件：testDb.ts（setupTestDb 返回 url——动态 import server 指向临时库的必要配套）、shared/constants.ts（上述 password 键）。
+- **env.ts 位置 `src/test/integration/` → `src/test/helpers/`**（CI 首跑暴露）：unit 的 audit.test.ts 经 audit.ts 顶层 `import prisma` 拉起 config/env.ts 的 requireEnv——本地 vitest 自动加载 .env 注入 process.env 掩盖，CI 无 .env 直接崩（既有 service test 不炸是因 vi.mock 掉 prisma 模块）。移 helpers 供 unit/integration 共用，commit `a54b092`+`7a2f0c9`。**教训：本地 .env 掩盖 CI 环境差异的又一实例（[[ci-prisma-generate-required]] 同族）。**
 - integration 6 场景超票面 4 场景：+场景5（register/Member resourceId 语义）、+场景6（decrypt 脱敏端到端）——review 认可方向一致非有害。
 - NODE_ENV guard AC 为间接实证：supertest 动态 import server 全程不监听端口（若 bootstrap 跑了会 seed+listen+撞端口）——无显式断言但链路即证据。
 
