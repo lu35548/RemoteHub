@@ -18,9 +18,9 @@
 
 ---
 
-## [2026-09-04] 票 #18（P0-4）：输入净化中间件
+## [2026-09-04] 票 #18（P0-4）：输入净化中间件 ✅
 
-TDD 全程（unit 20 先红后绿 + integration 3 场景行为级 RED），双轴 review 见下补记。质量门 **374** = 基线 351 + 新增 23（backend 284；lint 0 / tsc 0 / 三包 build 过）。
+TDD 全程（unit 20 先红后绿 + integration 3 场景行为级 RED），双轴 review 无硬伤 + 修复 4 项。质量门 **377** = 基线 351 + 新增 26（backend 287：unit 21 + integration 23→含补的 query 2 场景；lint 0 / tsc 0 / 三包 build 过）。commit `ea6bdb9` 双 push 关票，CI 33852580210 全绿。
 
 ### Design decisions
 - [2026-09-04] 决策：拒绝行为形态 = sanitizeValue 抛 `createAppError('VAL_001')`，middleware try/catch → next(err)。理由：纯函数语义无副作用（输入→输出或异常）；AppError 走既有全局 error handler 落 422，middleware 不重复错误分类。备选：middleware 扫描检测（拒——递归逻辑重复两遍）。
