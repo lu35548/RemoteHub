@@ -1,5 +1,6 @@
-// 集成测试环境前置（vitest 不加载 .env）。必须以本目录任何测试文件的**第一个 import** 出现，
-// 先于 server 链上 config/env.ts 的 import 期快照构建。
+// 测试环境前置（vitest 不加载 .env；CI 无 .env 文件）。必须以测试文件的**第一个 import** 出现，
+// 先于任何会拉起 config/env.ts（import 期 requireEnv 快照）的模块链——unit 的 audit.test.ts
+// 经 audit.ts→prisma.ts 同样需要，故放 helpers 供 unit/integration 共用。
 // DATABASE_URL 在此为占位值：audit.middleware.test.ts 动态 import server 前会覆盖为
 // setupTestDb 的临时库 URL；此处仅保证 requireEnv/密钥校验不在 import 期崩。
 process.env.NODE_ENV ||= 'test';

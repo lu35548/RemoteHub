@@ -1,4 +1,4 @@
-import './env.js'; // 环境前置必须第一个 import（vitest 不加载 .env）
+import '../helpers/env.js'; // 环境前置必须第一个 import（vitest 不加载 .env）
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
