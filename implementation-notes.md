@@ -14,6 +14,34 @@
 
 ---
 
+## [2026-09-04] phase2-P0 立项（grill → spec → 拆票全链，phase2 解锁）
+
+### Design decisions（一行一条）
+- 决策：P0 三模块先行（审计/监控/安全一个 spec 闭环）；P1/P2 各自开工前再 grill。备选：12 模块一个 spec（拒——等价迁移先例不可复制，4 月 design 漂移已演示「一次写全」必过时）。
+- 决策：新开 spec（`2026-09-04-phase2-p0-audit-monitor-security-spec.md`），4 月 design/plan 原文不动（P1/P2 存量参照）。
+- 决策 3 原拍 B（spec→plan→tickets 三层），拆票前用户 ask-matt 质疑触发**翻案 A（直通）**——翻案窗口成本≈0，写 plan 的考证成果全部迁移进票面（接口契约/文件清单/AC 长在票上）。
+- 决策：审计成败都记；result **独立列**（拆票倒逼修正表 #15——藏 detail JSON 则 result 筛选与趋势 success-only 无法 Prisma where，[[queryable-fields-not-in-json]]）。
+- 决策：全栈交付（/admin 仪表盘 + 审计页）；在线口径 lastActiveAt 5min 与 T8 顶栏同源；perf 归 P1；活动流全显/趋势 success-only；IP 检测复用 T8 限流白名单（NAT 防误报）；拆票 10 张；分支 feat/phase2-p0。
+- 决策：backlog 归位——favicon + no-cache 归 P0，假重置 + 改密 toast 标 P1 轮次，8 项留 backlog。
+
+### Deviations
+- spec 自审抓出三处未考证断言（审计端点清单未对照真实路由 / V1 参照文件存在性未验 / Session 口径写「实测」实为推理）——全部补查证后修正，新增两项真发现：**POST /users 幻觉端点**（v2 建用户唯一入口是 /auth/register → 动作记 USER_CREATE，枚举 22→21 值）、**heartbeat 未排除**（T2 产物 4 月 design 不可见，NAT 下 ~360 条/min 将刷爆审计表）。
+- favicon 用 .svg + `<link rel="icon">`（非 .ico——二进制 AI 不可产，显式 link 后浏览器不再自动请求 /favicon.ico，等效清 404）。
+- requireAdmin 两段式守卫（loader 仅 requireAuth + 页面组件 useMe 判 role 重定向）——jwt.ts 签名 payload 仅 { userId } 无 role，不动一期契约。
+
+### Tradeoffs
+- supertest 挂既有 integration project（P0 唯一新增 seam）vs mock req/res 测中间件（拒——mock-real-runtime-shape 教训族）。
+- 趋势聚合 JS 分桶 vs $queryRaw date() 聚合（30 天量小，选 JS，provider 无关）。
+- ADR 不单开（决策 1/6 的理由已进 spec 修正表与决策记录节，spec 即载体，开 ADR 是重复文档）。
+
+### Open questions
+- 无。
+
+### 产出索引
+spec（15 条修正表 + 28 用户故事 + 四 seam 测试决策）· 父票 #14 · 子票 #15–#24（12 依赖边，抽验全符；frontier = #15 ∥ #18 ∥ #21）· `CONTEXT.md` 新建（5 术语：在线/活动流/活跃趋势/审计记录/可疑 IP）。
+
+---
+
 ## [2026-08-25] 前端迁移立项（grill-with-docs → spec）
 
 ### Design decisions（一行一条）
