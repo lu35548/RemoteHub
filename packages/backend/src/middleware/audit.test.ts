@@ -1,3 +1,4 @@
+import '../test/helpers/env.js'; // 第一个 import：audit.ts 顶层拉起 prisma.ts→config/env.ts（CI 无 .env，vitest 不加载）
 import type { Request } from 'express';
 import { describe, expect, it } from 'vitest';
 import { buildBeforeQuery, maskIp, redactDetail } from './audit.js';
