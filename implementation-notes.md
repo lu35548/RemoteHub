@@ -11,8 +11,30 @@
 - [x] **Plan B CI prisma generate 遗漏**（2026-07-21 首次 CI 暴露）：tsc 步骤 27 错全红，根因 `@prisma/client` postinstall 找不到自定义路径 schema（`packages/backend/prisma/schema.prisma`）→ client 未生成 → 类型全缺。ci.yml install 后加 `pnpm --filter @remotehub/backend exec prisma generate` 修复。见下 [2026-07-21] section。
 - [x] **怪文件清理待拍板（2026-08-28 T11 发现）**——✅ 用户拍板提交（`921f9a6`）：`C：ProjectsRemoteHubbackend.env.example`（文件名实为私用区字符 U+F03A 非全角冒号，git 转义 `C\357\200\272`；0 字节路径转义事故产物）从 initial commit `9bd1c7c` 起被跟踪，磁盘早已不存在，`git add -u` 记录删除（顺带坐实 client.ts 的 M 为 stat 假象，add 后消失）。
 - [x] **`RemoteHub/.env.local` 磁盘去留（2026-08-31 T12 发现）**——✅ 用户拍板保留：git rm 后磁盘残留的唯一未跟踪文件（352B，曾因 v1 `.gitignore` 层被 porcelain 隐藏），密钥模式 1 命中。保留为未跟踪文件——根 `.gitignore:4` 的 `.env.local` 规则覆盖之，`git status` 不显示（初判「会显示 `?? RemoteHub/`」系未验证预测，已自查纠正）。
+- [ ] **shared `AuditLog` 接口与 Prisma model 同名不同形**（2026-09-04 票 #15 review 发现）：detail 解析对象 vs string、createdAt string vs Date——后端同文件导入两者有冲突风险，P0-2 实施时定夺（显式映射/命名空间导入/回改 spec+票面改名），勿只改代码。
+- [ ] **frontend ConnectionModal「新建 HOST」/ ProjectModal「新建」userEvent 测试负载下间歇 5s 超时**（2026-09-04 全量门暴露）：stash 基线对照实证 main 既有、失败数 4→3→2 漂移、恢复后 53/53 绿——建议单开 issue 跟踪，不阻塞 P0。
+- [ ] **首个 SQLite 方言 migration vs project.md「MySQL 统一」约定**（Standards 轴提示）：v2 SQLite 切换 spec 修正表 #5 已自认，方言切换成本自此起算——迁移期结束统一处理或 ADR 明示豁免。
 
 ---
+
+## [2026-09-04] 票 #15（P0-1）：AuditLog schema + migration + shared 审计类型
+
+TDD 全程（schema.test.ts 三断言先红→migrate dev 后绿 6/6），双轴 review（Standards 0 硬违规 / Spec 0 缺陷）+ 修复 2 项，质量门 304 = 基线 302 + 新增 2（lint 0 / tsc 0 / 三包 build 过）。commit `c891007`，双 push（feat/phase2-p0 + FF main），票自动关闭，票评论记基线刷新。
+
+### Design decisions
+- [2026-09-04] 决策：`AUDIT_ACTIONS` 21 值 = design §14.2 全集（22 值）恰好移除 `AUTH_REGISTER`（spec 修正表 #13）。理由：票面只给计数未列值，spec L100 指回 design §14.2，逐值核对后落 enums.ts（不猜）。
+- [2026-09-04] 决策：接受 Standards 轴建议补 `AUDIT_RESULTS` 三件套，types.ts 两处 `result` 字面量改 `AuditResult`。理由：照 enums.ts 既有先例（as const + type + is* 谓词），P0-2 查询参数校验将直接消费 `isAuditResult`；票面签名是最低要求，枚举表达不偏离语义。
+- [2026-09-04] 决策：索引断言从 `toHaveLength(4)` 升级为四个索引名集合断言。理由：双轴 review 共同点名「数量断言抗误报弱」；名称自 migration.sql 实证后写死。
+
+### Deviations
+- 无。票面 5 文件 + migration 目录逐项落实，review 修复为增强非偏离。
+
+### Tradeoffs
+- `result` 列 String + `default("success")` 而非 Prisma enum：项目约定「DB 不用 JSON/Enum 类型」（project.md），值域守卫放 shared 层。备选：Prisma enum（违约定，弃）。
+- 保留票面钦定的 shared `AuditLog` 接口名（拒 review 改名 `AuditLogEntry` 建议）：票面是实施契约，P0-2/5/6 Consumes 引用该名；若要改名须回改 spec 修正表 + 下游票面。挂 Open Question 交裁决。
+
+### Open questions
+- 见顶部清单三条（AuditLog 同名 / frontend flaky / SQLite 方言）。
 
 ## [2026-09-04] phase2-P0 立项（grill → spec → 拆票全链，phase2 解锁）
 
