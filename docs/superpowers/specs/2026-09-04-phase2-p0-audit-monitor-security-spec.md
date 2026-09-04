@@ -150,7 +150,7 @@ model AuditLog {
 
 - 全局挂载：JSON 解析之后、**限流器之后**、路由注册之前——修正 design §18 的原排序（净化在限流前）：限流先挡高频流量，净化正则的 CPU 消耗处于限流保护之内。作用对象：`req.body` 与 `req.query`（v1 先例同范围；路由 params 由路径模式限定，无注入面）。
 - 防护：XSS 剥离（`<script>` 标签/事件处理器/`javascript:` 协议——剥离而非拒绝）；SQL 注入、NoSQL 注入（`$` 操作符）、路径遍历、命令注入模式 → 拒绝并返回 VAL_001（**422**，`appError.ts` 现值）中文错误。
-- 排除字段：`password`、`encryptedPass`、`notes` 不净化（notes 含合法技术命令内容）。
+- 排除字段：`password`、`encryptedPass`、`notes` 不净化（notes 含合法技术命令内容）；实施修正追加 `oldPassword`、`newPassword`（票 #18 review：change-password 端点键名不命中 password 精确匹配，密码合法含注入样字符——不豁免则改密 422 或剥离后入库致改密成功即无法登录）。
 - 误杀处理：正则按内网中文场景调优；实施中发现误杀用例时优先收窄模式而非加白。
 
 **IP 风险检测**（继承 §5.2 + grill 决策 9 的 NAT 修正）：
@@ -184,7 +184,7 @@ model AuditLog {
 | 层 | seam | 被测对象 | 先例 |
 |---|---|---|---|
 | backend unit | 既有（createPrismaMock） | auditService 查询/分页 clamp/CSV 序列化/清理 cutoff、monitoringService 聚合、净化纯函数 sanitizeValue、IP 计数纯逻辑、maskIp/脱敏纯函数 | backend 212 测试基线（Plan C service 单测体系） |
-| backend integration | 既有（真实临时 SQLite + migrate deploy）+ **新增 supertest HTTP 层** | 审计中间件横切行为（真实 res.json 拦截、成败记录、脱敏落库、before/after diff）、净化中间件拒绝/剥离（真实 400/200）、admin 门禁（403）、审计查询端到端 | schema.test.ts（约束断言扩展 AuditLog 表） |
+| backend integration | 既有（真实临时 SQLite + migrate deploy）+ **新增 supertest HTTP 层** | 审计中间件横切行为（真实 res.json 拦截、成败记录、脱敏落库、before/after diff）、净化中间件拒绝/剥离（真实 422/200）、admin 门禁（403）、审计查询端到端 | schema.test.ts（约束断言扩展 AuditLog 表） |
 | frontend unit | 既有（jsdom） | 仪表盘页/审计页组件、admin 守卫、DataTable、queries hooks | T1 落地的组件测试体系 |
 | 验收面 | 既有惯例（Chrome DevTools MCP） | 父票验收：admin 五路径浏览器级验证 + console/network 清零 | T11 五路径总验收 |
 

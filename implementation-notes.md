@@ -12,10 +12,41 @@
 - [x] **怪文件清理待拍板（2026-08-28 T11 发现）**——✅ 用户拍板提交（`921f9a6`）：`C：ProjectsRemoteHubbackend.env.example`（文件名实为私用区字符 U+F03A 非全角冒号，git 转义 `C\357\200\272`；0 字节路径转义事故产物）从 initial commit `9bd1c7c` 起被跟踪，磁盘早已不存在，`git add -u` 记录删除（顺带坐实 client.ts 的 M 为 stat 假象，add 后消失）。
 - [x] **`RemoteHub/.env.local` 磁盘去留（2026-08-31 T12 发现）**——✅ 用户拍板保留：git rm 后磁盘残留的唯一未跟踪文件（352B，曾因 v1 `.gitignore` 层被 porcelain 隐藏），密钥模式 1 命中。保留为未跟踪文件——根 `.gitignore:4` 的 `.env.local` 规则覆盖之，`git status` 不显示（初判「会显示 `?? RemoteHub/`」系未验证预测，已自查纠正）。
 - [x] **shared `AuditLog` 接口与 Prisma model 同名不同形**（2026-09-04 票 #15 review 发现）——✅ 票 #16 裁决（见下 section）：**不改名、不强制映射**。约定 = 后端文件不同时裸名导入两侧；DB 行类型如需引用走 `Prisma.*` 命名空间（audit.ts 顶部注释固化）。P0-2 实际未出现同文件双导入（中间件只写库不读 DTO）；DTO 映射函数推迟到 P0-3 查询端点按需落地。
-- [ ] **frontend ConnectionModal「新建 HOST」/ ProjectModal「新建」userEvent 测试负载下间歇 5s 超时**（2026-09-04 全量门暴露）：stash 基线对照实证 main 既有、失败数 4→3→2 漂移、恢复后 53/53 绿——建议单开 issue 跟踪，不阻塞 P0。
+- [ ] **frontend ConnectionModal「新建 HOST」/ ProjectModal「新建」userEvent 测试负载下间歇 5s 超时**（2026-09-04 全量门暴露）：stash 基线两条间歇超时（main 既有，非票引入）——建议单开 issue 跟踪，不阻塞 P0。
 - [ ] **首个 SQLite 方言 migration vs project.md「MySQL 统一」约定**（Standards 轴提示）：v2 SQLite 切换 spec 修正表 #5 已自认，方言切换成本自此起算——迁移期结束统一处理或 ADR 明示豁免。
+- [ ] **净化豁免清单未含 Project `description`**（2026-09-04 票 #18 Standards 轴 review）：Project 自由文本字段是 description 非 notes，含 `--`/`&&` 技术串会被 422——(a) spec 修订补豁免 或 (b) 接受误杀面明示，待用户裁决。
 
 ---
+
+## [2026-09-04] 票 #18（P0-4）：输入净化中间件
+
+TDD 全程（unit 20 先红后绿 + integration 3 场景行为级 RED），双轴 review 见下补记。质量门 **374** = 基线 351 + 新增 23（backend 284；lint 0 / tsc 0 / 三包 build 过）。
+
+### Design decisions
+- [2026-09-04] 决策：拒绝行为形态 = sanitizeValue 抛 `createAppError('VAL_001')`，middleware try/catch → next(err)。理由：纯函数语义无副作用（输入→输出或异常）；AppError 走既有全局 error handler 落 422，middleware 不重复错误分类。备选：middleware 扫描检测（拒——递归逻辑重复两遍）。
+- [2026-09-04] 决策：**Express 5 `req.query` 是 prototype getter（无缓存、每次访问重新解析返回新对象）——实例赋值抛 TypeError、原地 mutate 被丢弃，必须 `Object.defineProperty` 实例 value 属性覆写**。理由：express@5.2.1 源码 `lib/request.js:217` 实证；这是票面「作用 req.query」在 Express 5 下的唯一可行写回方式（票面未预见）。
+- [2026-09-04] 决策：SQL 正则 `'\s*(or|and|union|select|insert|update|delete|drop)\b` + i flag——票面字面无 `\b` 和 i；加 `\b` 防 `'oracle'` 类正常词误杀（or 后须非词字符），i 覆盖大小写变体。误杀防线用例（「Select 演示」「A and B」）均不受影响（无引号前缀）。
+- [2026-09-04] 决策：事件属性剥离覆盖双引号/单引号/无引号三形态（票面字面仅双引号）——同一意图的完整实现，剥离不拒绝宁多勿漏。
+- [2026-09-04] 决策：integration 场景3（notes 豁免）落在 Connection 上（票面字面写 projects notes——**Project 无 notes 字段**，schema 事实错误）。
+
+### Deviations
+- 票面文件清单外 1 文件：test/helpers/serverBootstrap.ts（双轴 review 后抽取：bootstrap 骨架在 audit.middleware/audit.api/sanitization.middleware 三处逐字复制达抽取阈值，P0-5/6 还会加两份；qs.ts 先例）。三文件改一行消费。
+- integration 场景3 端点从 projects 改 connections（Project model 无 notes，Connection 有——schema 实证）。票面意图「notes 豁免」不变。
+- **review 修复 4 项**（双轴均无硬伤，采纳如下）：
+  1. **[Spec-中] SANITIZATION_EXCLUDED_FIELDS 追加 oldPassword/newPassword**（reviewer 置信 85）：change-password 端点键名不命中 password 精确匹配，而密码合法含注入样字符——不豁免则改密 422，或剥离后入库 → **改密成功即永久无法登录**。票面条文键名缺口被忠实执行放大成用户可感缺陷，spec L153 已回写。+1 unit 用例（含注入样字符的密码对象透传）。
+  2. **[Spec-低] integration 补 GET query 场景4/5**：query 净化的 defineProperty 覆写在真实 HTTP 层零证据（unit fakeReq 是 own property，恰好绕开 Express 5 真实形状——mock-real-runtime-shape 教训位置）。`?userId=' OR 1=1 --` → 422 + 合法 query → 200 两条闭合。
+  3. **[Standards-建议] 抽 serverBootstrap.ts**（上述 Deviations 第 1 条）。
+  4. **[Standards-观察] unit env 前置注释措辞**微调（「CI 无 .env 必崩」对本文件不成立，改范式一致性措辞）。
+- **不采纳**：description 加入豁免（reviewer 判二选一，选 (b)：不私自扩权偏离票面钦定清单——挂 OQ 交裁决，见下）。
+
+### Tradeoffs
+- `--` 注释拒绝会误杀正常文本含 `--`（票面钦定，notes 豁免覆盖技术内容）；`&&`/`rm -rf` 同理——内网中文场景误杀面可接受。
+- XSS 剥离不对抗编码变体（< 等）：剥离不拒绝的兜底语义 + helmet CSP 已挡执行面，深对抗超票面。
+- sanitizeString 先检测拒绝（短路）再剥离，拒绝时原值不入库不返回。
+
+### Open questions
+- **Project `description` 不在豁免清单**（Standards 轴 review 判 spec 层错位）：schema 事实是 Project 自由文本字段为 description 非 notes——用户在项目描述写 `ssh … && ls`、`--` 类技术内容会被 422。二选一待裁决：(a) spec 修订补豁免（中文描述含技术串概率不低）；(b) 明示接受误杀面。实现未私自扩权。
+- Express 5 query 覆写方式（defineProperty）属 express 5 生态标准做法，记 notes 供 P0-5/P0-6 复用。
 
 ## [2026-09-04] 票 #17（P0-3）：审计查询/导出 API + auditCleaner
 

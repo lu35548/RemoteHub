@@ -1,46 +1,21 @@
-import '../helpers/env.js'; // 环境前置必须第一个 import（vitest 不加载 .env）
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import type { Express } from 'express';
-import type { PrismaClient } from '@prisma/client';
-import { setupTestDb } from '../helpers/testDb.js';
-import { seedAdmin } from '../../utils/seedAdmin.js';
+import { setupServerWithDb, teardownServerWithDb } from '../helpers/serverBootstrap.js';
 
-// server 链上 config/env.ts 在 import 时构建快照、prisma 单例随之连库——
-// server 必须在 DATABASE_URL 指向临时库之后**动态 import**（audit.middleware.test.ts 同款骨架）。
-let app: Express;
-let prisma: PrismaClient;
-let serverPrisma: PrismaClient;
-let cleanUp: () => Promise<void>;
-let adminToken: string;
+// migrate deploy 冷启动（Defender 首扫/CI 慢机）可超默认 10s
+let b: Awaited<ReturnType<typeof setupServerWithDb>>;
 
 beforeAll(async () => {
-  const t = await setupTestDb();
-  prisma = t.prisma;
-  cleanUp = t.cleanUp;
-  process.env.DATABASE_URL = t.url;
-
-  vi.resetModules();
-  (globalThis as Record<string, unknown>).prisma = undefined;
-
-  const server = await import('../../server.js');
-  app = server.app;
-  serverPrisma = (await import('../../utils/prisma.js')).prisma;
-
-  await seedAdmin(prisma);
-  const res = await request(app).post('/api/v1/auth/login').send({ username: 'admin', password: 'Admin123456!' });
-  adminToken = res.body.data.accessToken;
-  // migrate deploy 冷启动（Defender 首扫/CI 慢机）可超默认 10s
+  b = await setupServerWithDb();
 }, 120_000);
 
 afterAll(async () => {
-  await serverPrisma?.$disconnect(); // server 单例也连着临时库，Windows 下先断开才能删文件
-  await cleanUp?.();
+  await teardownServerWithDb(b);
 });
 
 /** 直接插库造审计行（不经中间件，查询/导出的输入数据）。userId 省略（外键可空）。 */
 async function seedAuditLog(overrides: Record<string, unknown> = {}) {
-  return prisma.auditLog.create({
+  return b.prisma.auditLog.create({
     data: {
       action: 'PROJECT_CREATE',
       resource: 'project',
@@ -61,9 +36,9 @@ describe('审计查询/导出 API integration（supertest + 真库）', () => {
     await seedAuditLog({ action: 'PROJECT_CREATE', resourceId: 's1-b', createdAt: new Date('2026-09-03T00:00:00Z') });
     await seedAuditLog({ action: 'PROJECT_CREATE', resourceId: 's1-c', createdAt: new Date('2026-09-02T00:00:00Z') });
 
-    const res = await request(app)
+    const res = await request(b.app)
       .get('/api/v1/audit-logs?action=PROJECT_CREATE&page=1&pageSize=2')
-      .set('Authorization', `Bearer ${adminToken}`);
+      .set('Authorization', `Bearer ${b.adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.pagination).toEqual({ page: 1, pageSize: 2, total: 3 });
@@ -75,17 +50,17 @@ describe('审计查询/导出 API integration（supertest + 真库）', () => {
 
   it('场景2：非 admin 403（AUTH_003）', async () => {
     const uniq = Date.now().toString().slice(-6);
-    const reg = await request(app)
+    const reg = await request(b.app)
       .post('/api/v1/auth/register')
-      .set('Authorization', `Bearer ${adminToken}`)
+      .set('Authorization', `Bearer ${b.adminToken}`)
       .send({ username: `audq${uniq}`, password: 'Member123!', nickname: '审计查询员' });
     expect(reg.status).toBe(201);
 
-    const login = await request(app).post('/api/v1/auth/login')
+    const login = await request(b.app).post('/api/v1/auth/login')
       .send({ username: `audq${uniq}`, password: 'Member123!' });
     const userToken = login.body.data.accessToken;
 
-    const res = await request(app)
+    const res = await request(b.app)
       .get('/api/v1/audit-logs')
       .set('Authorization', `Bearer ${userToken}`);
     expect(res.status).toBe(403);
@@ -96,9 +71,9 @@ describe('审计查询/导出 API integration（supertest + 真库）', () => {
     await seedAuditLog({ action: 'AUTH_LOGIN', resource: 'security', resourceId: null, result: 'failure', detail: JSON.stringify({ reason: 'AUTH_001' }) });
     // 场景1 已有 3 条 success，不干扰 failure 过滤
 
-    const res = await request(app)
+    const res = await request(b.app)
       .get('/api/v1/audit-logs?result=failure')
-      .set('Authorization', `Bearer ${adminToken}`);
+      .set('Authorization', `Bearer ${b.adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body.pagination.total).toBe(1);
     expect(res.body.data[0].result).toBe('failure');
@@ -112,9 +87,9 @@ describe('审计查询/导出 API integration（supertest + 真库）', () => {
       detail: '{"k":"v,1"}', // detail 原样入 CSV，同样触发转义
     });
 
-    const res = await request(app)
+    const res = await request(b.app)
       .get('/api/v1/audit-logs/export')
-      .set('Authorization', `Bearer ${adminToken}`);
+      .set('Authorization', `Bearer ${b.adminToken}`);
     expect(res.status).toBe(200);
     expect(res.headers['content-type']).toContain('text/csv');
     expect(res.headers['content-disposition']).toContain('attachment');
@@ -126,15 +101,15 @@ describe('审计查询/导出 API integration（supertest + 真库）', () => {
   });
 
   it('场景5：无效枚举参数 → 400 AUDIT_001（audit-logs 与 export 同语义）', async () => {
-    const res = await request(app)
+    const res = await request(b.app)
       .get('/api/v1/audit-logs?action=HACK')
-      .set('Authorization', `Bearer ${adminToken}`);
+      .set('Authorization', `Bearer ${b.adminToken}`);
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('AUDIT_001');
 
-    const res2 = await request(app)
+    const res2 = await request(b.app)
       .get('/api/v1/audit-logs/export?result=warn')
-      .set('Authorization', `Bearer ${adminToken}`);
+      .set('Authorization', `Bearer ${b.adminToken}`);
     expect(res2.status).toBe(400);
     expect(res2.body.error.code).toBe('AUDIT_001');
   });

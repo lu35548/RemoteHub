@@ -8,6 +8,7 @@ import { logger } from './utils/logger.js';
 import { AppError, createAppError } from './utils/appError.js';
 import { startSessionCleaner } from './utils/sessionCleaner.js';
 import { startAuditCleaner } from './utils/auditCleaner.js';
+import { sanitizationMiddleware } from './middleware/sanitization.js';
 import type { Request, Response, NextFunction } from 'express';
 
 const app: Express = express();
@@ -81,13 +82,16 @@ if (env.CORS_ORIGIN) {
 }
 
 // 6. Trust proxy
-app.set('trust proxy', 1); // 单跳反代（Caddy），防 X-Forwarded-For 伪造绕过速率限制
+app.set('trust proxy', 1); // 单跳反代（nginx），防 X-Forwarded-For 伪造绕过速率限制
 
 // ─── Rate limiters applied to routes ───
 app.use('/api/v1/auth/login', loginLimiter);
 app.use('/api/v1/auth/register', registerLimiter);
 app.use('/api/v1/auth/refresh', refreshLimiter);
 app.use('/api/v1/', generalLimiter);
+
+// 7. 输入净化（P0-4）：限流之后、路由之前——净化正则的 CPU 消耗处于限流保护之内
+app.use(sanitizationMiddleware);
 
 // ─── Route registration ───
 import { healthRoutes } from './routes/healthRoutes.js';
