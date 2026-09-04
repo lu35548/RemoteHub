@@ -47,7 +47,7 @@ RemoteHub 是 pnpm workspace monorepo（`packages/{shared,backend,frontend}`）�
 ### 架构分层（后端）
 - **routes** → **controllers**（输入验证，并行收集错误）→ **services**（业务逻辑 + Prisma）→ **utils**（prisma / encryption / password / logger / appError）
 - 三层权限中间件链：`authMiddleware`（JWT → 查用户 → `req.user`）→ `roleMiddleware`（全局角色）→ `projectRoleMiddleware`（项目级角色，admin 绕过）
-- 统一响应格式 `{ success, data | error }`；错误码体系（AUTH / USER / PROJ / CONN / MEMBER / VAL / SYS）
+- 统一响应格式 `{ success, data | error }`；错误码体系（AUTH / USER / PROJ / CONN / MEMBER / AUDIT / VAL / SYS）
 
 ### 命名约定
 - 表名 snake_case 复数（`@@map`），列名 snake_case（`@map`）

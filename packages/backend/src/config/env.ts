@@ -21,6 +21,8 @@ export const env = {
   RATE_LIMIT_REFRESH_MAX: parseInt(process.env.RATE_LIMIT_REFRESH_MAX || '20', 10),
   RATE_LIMIT_GENERAL_MAX: parseInt(process.env.RATE_LIMIT_GENERAL_MAX || '200', 10),
   CORS_ORIGIN: process.env.CORS_ORIGIN || '',
+  // 下界 1：0/负保留期会让每日清理删光审计日志
+  AUDIT_RETENTION_DAYS: Math.max(1, parseInt(process.env.AUDIT_RETENTION_DAYS || '90', 10)),
 } as const;
 
 // 密钥格式校验（fail-fast，启动时即暴露配置错误，避免运行时才报 ERR_CRYPTO_INVALID_KEYLEN）

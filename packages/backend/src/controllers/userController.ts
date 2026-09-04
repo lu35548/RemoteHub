@@ -2,12 +2,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import * as userService from '../services/userService.js';
 import { createAppError } from '../utils/appError.js';
-
-function qsParam(val: unknown, fallback: string): string {
-  if (typeof val === 'string') return val;
-  if (Array.isArray(val) && typeof val[0] === 'string') return val[0];
-  return fallback;
-}
+import { qsParam } from '../utils/qs.js';
 
 function paramId(req: Request, name: string): string {
   const val = req.params[name];

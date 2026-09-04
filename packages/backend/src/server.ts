@@ -7,6 +7,7 @@ import { env } from './config/env.js';
 import { logger } from './utils/logger.js';
 import { AppError, createAppError } from './utils/appError.js';
 import { startSessionCleaner } from './utils/sessionCleaner.js';
+import { startAuditCleaner } from './utils/auditCleaner.js';
 import type { Request, Response, NextFunction } from 'express';
 
 const app: Express = express();
@@ -95,6 +96,7 @@ import { userRoutes } from './routes/userRoutes.js';
 import { projectRoutes } from './routes/projectRoutes.js';
 import { memberRoutes } from './routes/memberRoutes.js';
 import { connectionRoutes } from './routes/connectionRoutes.js';
+import { auditRoutes } from './routes/auditRoutes.js';
 
 app.use('/api/v1/health', healthRoutes);
 app.use('/api/v1/auth', authRoutes);
@@ -102,6 +104,7 @@ app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/projects', projectRoutes);
 app.use('/api/v1/projects/:id/members', memberRoutes);
 app.use('/api/v1/connections', connectionRoutes);
+app.use('/api/v1/audit-logs', auditRoutes);
 
 // ─── 404 ───
 app.use((_req: Request, _res: Response, next: NextFunction) => {
@@ -161,7 +164,10 @@ async function bootstrap() {
   // 3. session cleaner（cron，启动不立即写，放 WAL 后一致）
   startSessionCleaner();
 
-  // 4. listen（DB 就绪后才接请求）
+  // 4. audit cleaner（每日 03:30，仅定时——不启动即清）
+  startAuditCleaner();
+
+  // 5. listen（DB 就绪后才接请求）
   app.listen(PORT, () => {
     logger.info(`Server running on port ${PORT} (${env.NODE_ENV})`);
   });

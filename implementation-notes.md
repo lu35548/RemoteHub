@@ -17,6 +17,35 @@
 
 ---
 
+## [2026-09-04] 票 #17（P0-3）：审计查询/导出 API + auditCleaner
+
+TDD 全程（unit 19 先红后绿 + integration 5 场景 supertest 真库），质量门 **351** = 基线 327 + 新增 24（backend 261；lint 0 / tsc 0 / 三包 build 过）。
+
+### Design decisions
+- [2026-09-04] 决策：票面「接口契约」节把 4 函数（query/export/clean/start）全列在 `// auditService` 注释下，与文件清单 Create `auditCleaner.ts` + 行为节「遵循 sessionCleaner 既有模式」矛盾。裁决按**文件清单+行为节**：queryAuditLogs/exportAuditLogsCsv → services/auditService.ts，cleanAuditLogs/startAuditCleaner → utils/auditCleaner.ts（sessionCleaner 先例 = clean+start 同文件）。
+- [2026-09-04] 决策：queryAuditLogs 返回值在票面 `{data,total}` 基础上加 `page/pageSize`（clamp 后）。理由：controller 拼 pagination 响应需要 clamp 后值，service 再 clamp 一遍是重复逻辑；加字段向后兼容。
+- [2026-09-04] 决策：endDate 为 date-only（YYYY-MM-DD）时按当天 23:59:59.999Z 截止。理由：`new Date('2026-01-31')` 解析为 UTC 00:00 会静默漏掉当天数据；ISO datetime 原样解析。前端日期选择器天然产 date-only。
+- [2026-09-04] 决策：CSV 行终止符 `\n`、无 BOM（票面未规定；RFC CRLF/BOM 对 Excel 中文场景有价值，留给前端/后续票按需加）。换行符不包裹会断行，csvEscape 对 `[",\n\r]` 一律包裹（超票面的格式正确性要求）。
+- [2026-09-04] 决策：cleanAuditLogs 的「91 天前记录」在 mock 层退化为 where.createdAt.lt 断言（deleteMany 参数即等价证据），vi.setSystemTime 锚定 cutoff 精确性。
+- [2026-09-04] 决策：integration 场景1 用 `?action=PROJECT_CREATE` 过滤隔离断言。理由：beforeAll 的 admin 登录本身产生 1 条 AUTH_LOGIN 审计（auditMiddleware 挂载的副作用），裸 total 断言恒多 1。
+
+### Deviations
+- 票面文件清单外 3 处：test/integration/audit.api.test.ts（票面 TDD 步骤2 要求 integration 但清单未列文件，命名从 audit.middleware.test.ts 先例）、utils/qs.ts + userController.ts 改引用（qsParam 双 controller 复用，预防 Standards Duplicated Code）、openspec/project.md 错误码清单补 AUDIT 族（Standards review 指出文档同步债）。
+- **CSV 非流式**（Spec 轴 (c)1）：权威 spec 有「CSV 流式下载」表述，但票面 Produces 钦定 `exportAuditLogsCsv(...): Promise<string>` 返回串——两者矛盾以票面为准（票面是拆票时的实施契约）。10000 条上限兜底后内存风险 ≈2MB；若未来上限放开再改流式。
+- queryAuditLogs 返回 `{data, total, page, pageSize}`（票面签名 `{data, total}` 是最低要求，加字段供 controller 拼 pagination，见 Design decisions）。
+- 「91 天前记录」在 mock 层退化为 deleteMany where cutoff 断言（unit 不连真库，where 参数即删除行为的等价证据；真库删除语义由 integration 层覆盖整体链路）。
+- review 修复 3 项：server.ts bootstrap 注释编号重复残留（// 4 listen 死注释，Spec+Standards 双轴共同点名）；AuditLogRow 改 `Prisma.AuditLogGetPayload`（原 `Awaited<ReturnType<...>>[number]` 与顶部「Prisma.* 命名空间」注释不符）；env AUDIT_RETENTION_DAYS 加 `Math.max(1, …)` 下界（0/负保留期会删光审计日志）。
+
+### Tradeoffs
+- detail JSON.parse 宽容策略：非法 JSON/数组落 null 不抛（审计展示数据损坏不应炸查询端点）。
+- export 失败包装 AUDIT_002：AppError 透传（AUDIT_001 仍是 400）、其余包装 500——controller 无需重复 try/catch 分类。
+- **不采纳（Standards）：校验上移 controller**——project.md:48「controllers（输入验证）」vs 校验全在 service buildWhere。理由：AUDIT_001 的 unit TDD 票面钦定在 service 层（createPrismaMock）；buildWhere 被 query/export 双消费，校验上移要么复制两遍要么失去 service 守卫；controller 的 `as` 断言是「service 会验」的显式契约。authController 先例是业务校验在 service、控制器只做格式归一，实质一致。
+- **不采纳（Standards）：auditRoutes.use() 收拢两行中间件**——userRoutes 逐行挂载是既有风格，2 行重复不值一个 use 抽象。
+- **不采纳（Standards）：分页 clamp 三处统一**（auditService 双向 [1,100] vs userController/userService 仅上限）——真观察但属跨票重构，语义差异是各票票面钦定，留 phase2 统一。
+
+### Open questions
+- 无新增。integration 场景 4/5（CSV 导出 / AUDIT_001 端到端）超票面 3 场景——正向冗余（测的均为 spec 行为），同票 #16 先例。
+
 ## [2026-09-04] 票 #16（P0-2）：审计中间件 + 16 端点挂载 + supertest 集成层
 
 TDD 全程（unit 16 先红后绿 + integration 6 场景行为级 RED：目标断言失败而非 import error），双轴 review（Standards 0 硬违规 + Spec 无违背）+ 修复 1 项（params.uid 兜底收紧），质量门 **327** = 基线 304 + 新增 23（backend 237 含 unit 16 + integration 7；lint 0 / tsc 0 / 三包 build 过）。commit `50d84da`。
