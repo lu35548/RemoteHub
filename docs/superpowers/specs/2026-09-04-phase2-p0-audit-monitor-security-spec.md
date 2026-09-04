@@ -109,7 +109,7 @@ model AuditLog {
   - connections：POST、PATCH /:id、DELETE /:id、decrypt-password（POST）
   - **排除**：`/auth/refresh`、**`/auth/heartbeat`**（修正表 #14）与所有 GET。
 - `res.json` monkey-patch 模式（Express 5 环境下验证，见 design §26.4）：before 快照由中间件自治获取（`:id` 参数 + resource→model 映射自动 findUnique，无需每路由传回调——6 月修订案）；after 快照取自响应体；`setImmediate` 异步落库，审计失败仅记日志不传播错误。
-- **脱敏规则**（继承 §3.4）：`SENSITIVE_FIELDS`（passwordHash/encryptedPass/token/tokenHash）值替换为 `[REDACTED]`（保留字段名标识变更）；IP 掩码末段（IPv4 点分末段置 `*`；IPv6 同理掩码后缀——修正 design 正则仅覆盖 IPv4 的缺口，dev 直连 `::1` 场景）。
+- **脱敏规则**（继承 §3.4）：`SENSITIVE_FIELDS`（passwordHash/encryptedPass/token/tokenHash，**票 #16 实施追加 `password`**——decrypt-password 端点响应体含明文密码，不脱敏则明文落审计表，违背 §3.4 脱敏初衷）值替换为 `[REDACTED]`（保留字段名标识变更）；IP 掩码末段（IPv4 点分末段置 `*`；IPv6 同理掩码后缀——修正 design 正则仅覆盖 IPv4 的缺口，dev 直连 `::1` 场景）。
 - userId 取自认证中间件挂载的 req.user；未认证端点（login）为 null。
 
 **查询 API**（继承 design §3.3 + 决策 4 扩展）：

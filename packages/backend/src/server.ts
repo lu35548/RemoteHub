@@ -167,9 +167,12 @@ async function bootstrap() {
   });
 }
 
-bootstrap().catch((err) => {
-  logger.error('启动失败', { error: err.message, stack: err.stack });
-  process.exit(1);
-});
+// 集成测试（supertest）import app 不得触发 listen/seed/cleaner——NODE_ENV guard（票 #16）
+if (process.env.NODE_ENV !== 'test') {
+  bootstrap().catch((err) => {
+    logger.error('启动失败', { error: err.message, stack: err.stack });
+    process.exit(1);
+  });
+}
 
 export { app };

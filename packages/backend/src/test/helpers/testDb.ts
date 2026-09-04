@@ -20,7 +20,12 @@ let dbInstanceCounter = 0;
  * 注：直接调用本地 prisma 二进制（带 --schema），避免在 vitest projects 并行时
  * 嵌套 `pnpm exec` 造成的竞态（曾导致偶发「表不存在」失败）。
  */
-export async function setupTestDb(): Promise<{ prisma: PrismaClient; cleanUp: () => Promise<void> }> {
+export async function setupTestDb(): Promise<{
+  prisma: PrismaClient;
+  cleanUp: () => Promise<void>;
+  /** 临时库 file: URL（绝对路径）——供测试把 DATABASE_URL 指向本库后动态 import server 链 */
+  url: string;
+}> {
   dbInstanceCounter += 1;
   const dbPath = path.join(os.tmpdir(), `remotehub-test-${process.pid}-${dbInstanceCounter}-${Date.now()}.db`);
   const url = `file:${dbPath}`;
@@ -39,6 +44,7 @@ export async function setupTestDb(): Promise<{ prisma: PrismaClient; cleanUp: ()
 
   return {
     prisma,
+    url,
     cleanUp: async () => {
       await prisma.$disconnect();
       for (const suffix of ['', '-journal', '-wal', '-shm']) {

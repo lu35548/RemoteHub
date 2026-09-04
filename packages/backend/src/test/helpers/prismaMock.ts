@@ -14,6 +14,7 @@ export function createPrismaMock() {
     project: modelFns(),
     projectMember: modelFns(),
     connection: modelFns(),
+    auditLog: modelFns(),
     $transaction: vi.fn(async (arg: unknown) =>
       typeof arg === 'function' ? (arg as (tx: unknown) => unknown)(prismaMock) : Promise.all(arg as Promise<unknown>[])),
     $queryRaw: vi.fn(),

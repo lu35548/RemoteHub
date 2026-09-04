@@ -45,4 +45,5 @@ export function isIcon(value: string): value is ProjectIcon {
 export const ENCRYPTION_VERSION = 'v1';
 
 // 审计脱敏字段：值替换为 [REDACTED]（保留字段名以标识变更）
-export const SENSITIVE_FIELDS = new Set<string>(['passwordHash', 'encryptedPass', 'token', 'tokenHash']);
+// password：decrypt-password 端点响应体含明文密码（票 #16 实施发现，design §3.4 密码类字段脱敏意图）
+export const SENSITIVE_FIELDS = new Set<string>(['password', 'passwordHash', 'encryptedPass', 'token', 'tokenHash']);
