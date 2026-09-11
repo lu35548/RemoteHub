@@ -8,6 +8,7 @@ import { logger } from './utils/logger.js';
 import { AppError, createAppError } from './utils/appError.js';
 import { startSessionCleaner } from './utils/sessionCleaner.js';
 import { startAuditCleaner } from './utils/auditCleaner.js';
+import { checkIpRisk, RATE_LIMIT_SKIP_PATHS } from './utils/ipMonitor.js';
 import { sanitizationMiddleware } from './middleware/sanitization.js';
 import type { Request, Response, NextFunction } from 'express';
 
@@ -70,7 +71,8 @@ const generalLimiter = rateLimit({
   // 两端点均有 authMiddleware 保护且客户端 5s 固定节奏轮询，无限流滥用敞口。
   // 注意 req.path 相对于挂载点 app.use('/api/v1/')（前缀已剥），全路径匹配恒 false——
   // 原代码 '/api/v1/health' 写法从未生效（预存在 bug 一并修正）
-  skip: (req) => ['/health', '/auth/heartbeat', '/auth/online'].includes(req.path),
+  // 白名单清单迁移至 RATE_LIMIT_SKIP_PATHS（P0-5 单一真相源：ipMonitor 计数豁免共用）
+  skip: (req) => (RATE_LIMIT_SKIP_PATHS as readonly string[]).includes(req.path),
 });
 
 // 5. CORS
@@ -84,13 +86,21 @@ if (env.CORS_ORIGIN) {
 // 6. Trust proxy
 app.set('trust proxy', 1); // 单跳反代（nginx），防 X-Forwarded-For 伪造绕过速率限制
 
+// 7. IP 风险检测（P0-5）：trust proxy 之后（req.ip 取 X-Forwarded-For 首跳）、限流挂载与
+//    净化之前（spec 定序：越靠外计数越全——被限流 429 / 净化拒绝的请求仍计入风险计数，
+//    注入尝试本身就是可疑信号）。仅告警不阻断。
+app.use((req: Request, _res: Response, next: NextFunction) => {
+  checkIpRisk(req.ip, req.path);
+  next();
+});
+
 // ─── Rate limiters applied to routes ───
 app.use('/api/v1/auth/login', loginLimiter);
 app.use('/api/v1/auth/register', registerLimiter);
 app.use('/api/v1/auth/refresh', refreshLimiter);
 app.use('/api/v1/', generalLimiter);
 
-// 7. 输入净化（P0-4）：限流之后、路由之前——净化正则的 CPU 消耗处于限流保护之内
+// 8. 输入净化（P0-4）：限流之后、路由之前——净化正则的 CPU 消耗处于限流保护之内
 app.use(sanitizationMiddleware);
 
 // ─── Route registration ───
