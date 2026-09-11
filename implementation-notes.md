@@ -18,6 +18,34 @@
 
 ---
 
+## [2026-09-11] 票 #19（P0-5）：IP 风险检测 ✅
+
+TDD 全程（unit 7 六片 RED→GREEN，fake timers），双轴 review（Standards 0 硬违规 / Spec 0 阻塞）+ 修复 2 项。质量门 **384** = 基线 377 + 新增 7（backend 294；lint 0 / tsc 0 / 三包 build 过；无 .env 场景 7/7 绿）。commit `03aa3e5` 双 push 关票，CI 34557109776 全绿。
+
+### Design decisions
+- [2026-09-11] 决策：**白名单双形态匹配**（`path === p || path === '/api/v1' + p`）。理由：IP 检测中间件挂 app 根（票面钦定 `app.use(...)` 全局），req.path 含 `/api/v1` 前缀；generalLimiter 挂 `/api/v1/` 下 req.path 剥前缀——同一常量两个消费点 path 语义不同，只匹配裸 '/health' 则生产豁免永不命中（NAT 心跳误报防线失守，express-rate-limit-mount-path 同族陷阱）。专项回归用例锁定全路径形态。
+- [2026-09-11] 决策：resource `'security'`（票面触发动作只列 action/detail/ip，schema resource 必填须给值）。选值与票 #16「认证动作归 security 域」裁决一致。
+- [2026-09-11] 决策：result 不显式写（走 schema `@default("success")`）。理由：票面 create 参数最小集；可疑 IP 告警无 HTTP 成败语义，强行与 audit.ts 路径同构反而引入假语义。
+- [2026-09-11] 决策：**限频惰性全表清扫**（`sweepExpired`，60s 至多一次）。理由：spec L160「内存 Map 带窗口过期淘汰，防长期运行泄漏」——票面钦定的惰性重置只覆盖 revisit 的 IP，扫描器换源的一次性条目无界驻留（IPv6 扫描真实敞口）；限频清扫摊销 O(size)/min，仍「无后台定时器」不违票面手段钦定。无可观察行为差异（内存卫生），由既有行为测试回归保护。
+
+### Deviations
+- 无文件清单外文件（Create 2 + Modify 1 全按票面）。
+- **review 修复 2 项**（双轴均无硬伤，采纳如下）：
+  1. [Standards] `action`/`resource` 裸字面量 → `satisfies AuditAction` / `satisfies AuditResource` 锚定 shared 枚举（project.md「共享类型从 @remotehub 导入」；action 落 String 列 tsc 不报，防枚举改名静默漂移）。
+  2. [Spec-低危 + Standards 跨轴] 上述 sweepExpired 限频清扫。
+- server.ts 中间件编号 7→8 重排（净化节顺延，插节必然）。
+
+### Tradeoffs
+- **不采纳**：RATE_LIMIT_SKIP_PATHS 类型改 `readonly string[]` 注解消两处 cast——票面钦定 `as const`，消费侧 cast 是 `shared/enums.ts:38` 全 repo 先例。
+- **不采纳**：result 显式 `'success'`（同上 Design decisions 第 3 条）。
+- **不采纳**：RATE_LIMIT_SKIP_PATHS 搬 config/rateLimiter 侧——票面钦定文件位置（Produces 列在 ipMonitor.ts）。
+- 不加 integration 场景：票面钦定 unit only；挂载为单行无逻辑，既有 supertest 集成全量请求已间接触达（中间件抛错即全红）；全路径形态风险已由 unit 专项回归覆盖。
+
+### Open questions
+- 无新增。衔接提醒：前端 action→中文标签映射需含 `SECURITY_SUSPICIOUS_IP` / resource `security`（票 #23 审计页义务，非本票）。
+
+
+
 ## [2026-09-04] 票 #18（P0-4）：输入净化中间件 ✅
 
 TDD 全程（unit 20 先红后绿 + integration 3 场景行为级 RED），双轴 review 无硬伤 + 修复 4 项。质量门 **377** = 基线 351 + 新增 26（backend 287：unit 21 + integration 23→含补的 query 2 场景；lint 0 / tsc 0 / 三包 build 过）。commit `ea6bdb9` 双 push 关票，CI 33852580210 全绿。
