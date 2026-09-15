@@ -15,8 +15,32 @@
 - [ ] **frontend ConnectionModal「新建 HOST」/ ProjectModal「新建」userEvent 测试负载下间歇 5s 超时**（2026-09-04 全量门暴露）：stash 基线两条间歇超时（main 既有，非票引入）——建议单开 issue 跟踪，不阻塞 P0。
 - [ ] **首个 SQLite 方言 migration vs project.md「MySQL 统一」约定**（Standards 轴提示）：v2 SQLite 切换 spec 修正表 #5 已自认，方言切换成本自此起算——迁移期结束统一处理或 ADR 明示豁免。
 - [ ] **净化豁免清单未含 Project `description`**（2026-09-04 票 #18 Standards 轴 review）：Project 自由文本字段是 description 非 notes，含 `--`/`&&` 技术串会被 422——(a) spec 修订补豁免 或 (b) 接受误杀面明示，待用户裁决。
+- [ ] **AUTH_LOGIN 审计行操作人恒为「系统」**（票 #22 Spec 轴 review 发现）：login 未认证 userId=null 是 P0-5 spec 口径，但登录人信息（IP/UA）其实已记录，是否让 login 审计带 userId 待裁决。
 
 ---
+
+## [2026-09-15] 票 #22（P0-8）：仪表盘页 ✅
+
+TDD 四分片（后端 username 契约 / constants / queries / 页面五块，全程 RED→GREEN + REFACTOR），双轴 review（Standards 0 硬违规 + 6 judgement call 采纳 3；Spec 忠实度高 + 2 备查）。质量门 **430** = 基线 414 + 新增 16（backend 311(+2) / shared 37 / frontend 82(+14)；lint 0 / tsc 0 / 三包 build 过）。commit `decfc21` 双 push，真机手验五块 + staleTime network 实证（SPA 往返无重取）。
+
+### Design decisions
+- [2026-09-15] 决策：**后端 AuditLog DTO 加 username**（票外改动）。理由：票面活动流要「操作人 username」，但 #20 钦定 recentActivity=toDTO 直出无此字段，前端 useUsers 分页 map（100/页上限 + staleTime 错位）是妥协品；后端批量 join 成本极低、#23 直接受益、spec L55「操作人置空」模型下 username null ↔ userId null 一一对应。CSV 不动（机器消费 userId）。
+- [2026-09-15] 决策：趋势走 /admin/stats/users（30 桶补零 DailyActivityStat[]），统计三格取 Dashboard.stats；useProjectStats 按票面建、页面无消费块（排行图留 P1）。
+- [2026-09-15] 决策：usageTier/formatUptime/errMsg 抽 utils.ts——react-refresh/only-export-components lint 门强制纯函数出组件文件。
+
+### Deviations
+- 票面「Create AdminDashboardPage.test.tsx」实为扩充（#21 已建 4 条守卫测试），并入同文件两 describe。
+- 真机联调暴露 queryFn 选 getRaw 错配（getRaw 返回完整响应体不剥壳；jsdom 双层 mock 均测不出，浏览器渲染 data.health undefined 才崩）→ 改 api.get，测试先红后绿。真机是 mock 盲区的唯一暴露层。
+- review 修复 3 项：① username join 五行块抽 fetchUsernameMap 共享（两 service 逐字重复）；② errMsg 提进 utils（与 UserManagementModal 逐字重复，两处同步，顺带删后者 unused import）；③ 删测试 useProjectStats 死 mock。
+
+### Tradeoffs
+- 不采纳：usageTier 返回语义档位——单消费方 + 边界测试锚定。
+- 不采纳：formatTime 前瞻提 utils——#23 审计页消费时再提，现在抽是 Speculative Generality。
+- 不采纳：测试 helper overrides 参数统一——describe 级结构清晰优先。
+
+### Open questions
+- AUTH_LOGIN 行操作人恒显示「系统」：P0-5 audit middleware login 未认证 userId=null（spec 口径）下游效果，前端忠实执行；登录人其实可知（请求 IP/userAgent 都记了），是否让 login 审计带 userId 待用户裁决（不阻塞）。
+- TrendChart 单日数据（length=1）单点 polyline 视觉不可见：30 桶补零常态不出现，备查。
 
 ## [2026-09-15] 票 #21（P0-7）：/admin 路由骨架 + DataTable + favicon ✅
 
