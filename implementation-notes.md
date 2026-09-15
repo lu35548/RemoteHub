@@ -18,6 +18,34 @@
 
 ---
 
+## [2026-09-15] 票 #20（P0-6）：健康检查扩展 + 监控 API ✅
+
+TDD 全程（unit 10 五片 + integration 5 + healthRoutes router-seam 2，全程 RED→GREEN），双轴 review（Standards 0 硬违规 / Spec 2 AC 缺口 + 1 建议，全采纳修复）。质量门 **399** = 基线 384 + 新增 15（backend 309；lint 0 / tsc 0 / 三包 build 过；无 .env 场景 15/15 绿）。commit `bc5af3b` 双 push 关票，CI 34922419728 全绿。
+
+### Design decisions
+- [2026-09-15] 决策：**503 分支用 router-seam 测试**（vi.mock getSystemHealth + supertest 小 app 挂载）。理由：AC「compose 探活不破」押注在 database:false → 503 分支，真库 integration 无法注入 DB 宕机；vi.mock service 层后 router 是被测 seam。**Express 5 实证：Router 不能直接传给 supertest**（router@2.x `argument callback is required`），须 `express()` 小 app 挂载——与 [[tool-search-core-tools-hidden]] 无关，新坑记下。
+- [2026-09-15] 决策：趋势分桶 **UTC 日界**（`toISOString().slice(0,10)`）。票面 `date:'YYYY-MM-DD'` 未规定时区；UTC 与 Prisma/ISO 链路一致，类型注释声明，前端消费同口径（票 #22 衔接点）。
+- [2026-09-15] 决策：**趋势 success-only 双保险**——where `result:'success'` + 分桶层 `row.result !== 'success' continue`。理由：AC「趋势 failure 排除用例固化」在 service seam 行为级成立（mock findMany 返回 failure 行验证分桶排除），而非仅参数断言。
+- [2026-09-15] 决策：getDashboard 六查询 Promise.all 并发（health/online/三计数/recent），DTO 组装单层。
+- [2026-09-15] 决策：onlineUsers 断言锚定 shared `LAST_ACTIVE_THROTTLE_MS`（5min 口径单一真相源，CONTEXT.md「在线」定义）。
+
+### Deviations
+- 票面文件清单外 2 文件：routes/healthRoutes.test.ts（review 修复产物：503 分支零覆盖）、shared types.ts 之 Dashboard 段（票面行为节明文授权「Dashboard DTO 进 shared types.ts」）。
+- auditService.ts `toDTO` 改 export（+1 -1）：recentActivity 行→DTO 映射零复制的必要支撑，纯可见性放宽。
+- **review 修复 3 项**：① stats/users+projects 403 实测补齐（AC「三端点门禁实测」）；② healthRoutes 503 分支直测（上述 Design decisions 第 1 条）；③ 趋势 findMany 补 `orderBy: createdAt desc`（超 cap 10000 截取须是「最近」——auditService export spec L118 同款语义；票面字面未写 orderBy，忠实票面但超限场景分桶有偏，采纳修复）。
+- healthRoutes 未见 controller 直调 service：分层字面偏差（routes→controllers→services）。理由：无参读端点 controller 即 Middle Man；旧代码 route 内裸查 prisma 先例已在，本次已上收 service。**豁免是否成文入 project.md 留用户裁定**（不挂 OQ 清单，属文档层面）。
+
+### Tradeoffs
+- **不采纳**：healthRoutes 补 controller 层（同上）。
+- **不采纳**：diskUsage -1 改 `number | null`（Standards 轴 Primitive Obsession judgement call；票面钦定 -1）。
+- **不采纳**：monitoringService 拆分（Divergent Change judgement call；票面钦定单文件，体量 ~100 行，增长再拆）。
+- monitoringRoutes 三行重复 authMiddleware+roleMiddleware('admin')：auditRoutes 先例同构，未到抽取阈值。
+
+### Open questions
+- 无新增。衔接提醒：前端仪表盘消费趋势数据需 UTC 日界同口径（票 #22）；SECURITY_SUSPICIOUS_IP 中文标签映射（票 #23）。
+
+
+
 ## [2026-09-11] 票 #19（P0-5）：IP 风险检测 ✅
 
 TDD 全程（unit 7 六片 RED→GREEN，fake timers），双轴 review（Standards 0 硬违规 / Spec 0 阻塞）+ 修复 2 项。质量门 **384** = 基线 377 + 新增 7（backend 294；lint 0 / tsc 0 / 三包 build 过；无 .env 场景 7/7 绿）。commit `03aa3e5` 双 push 关票，CI 34557109776 全绿。
