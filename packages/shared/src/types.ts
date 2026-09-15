@@ -230,3 +230,41 @@ export interface AuditLogQuery {
   page?: number;
   pageSize?: number;
 }
+
+// ─── 系统监控（P0-6，票 #20）───
+
+/** 健康快照（/health 与 dashboard.health 同构）。百分比字段一位小数；diskUsage -1 = 探测失败（前端显示「未知」）。 */
+export interface SystemHealth {
+  status: 'healthy' | 'degraded';
+  database: boolean;
+  diskUsage: number;
+  memoryUsage: number;
+  uptime: number;
+}
+
+export interface DashboardStats {
+  totalProjects: number;
+  totalConnections: number;
+  totalUsers: number;
+}
+
+/** 仪表盘聚合（recentActivity 全量含 failure 与安全事件——活动流口径）。 */
+export interface Dashboard {
+  health: SystemHealth;
+  onlineUsers: number;
+  stats: DashboardStats;
+  recentActivity: AuditLog[];
+}
+
+/** 活跃趋势单日桶（result='success' 仅成功——趋势口径）。 */
+export interface DailyActivityStat {
+  date: string; // 'YYYY-MM-DD'（UTC 日界）
+  logins: number;
+  operations: number;
+}
+
+export interface ProjectConnectionStat {
+  projectId: string;
+  projectName: string;
+  connectionCount: number;
+}

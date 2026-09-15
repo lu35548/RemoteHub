@@ -111,6 +111,7 @@ import { projectRoutes } from './routes/projectRoutes.js';
 import { memberRoutes } from './routes/memberRoutes.js';
 import { connectionRoutes } from './routes/connectionRoutes.js';
 import { auditRoutes } from './routes/auditRoutes.js';
+import { monitoringRoutes } from './routes/monitoringRoutes.js';
 
 app.use('/api/v1/health', healthRoutes);
 app.use('/api/v1/auth', authRoutes);
@@ -119,6 +120,7 @@ app.use('/api/v1/projects', projectRoutes);
 app.use('/api/v1/projects/:id/members', memberRoutes);
 app.use('/api/v1/connections', connectionRoutes);
 app.use('/api/v1/audit-logs', auditRoutes);
+app.use('/api/v1/admin', monitoringRoutes);
 
 // ─── 404 ───
 app.use((_req: Request, _res: Response, next: NextFunction) => {

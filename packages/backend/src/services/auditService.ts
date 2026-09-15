@@ -68,7 +68,7 @@ function parseEndDate(value: string): Date {
 }
 
 /** DB 行 → shared AuditLog DTO：detail JSON 宽容解析（非法 JSON 落 null）。 */
-function toDTO(row: AuditLogRow): AuditLog {
+export function toDTO(row: AuditLogRow): AuditLog {
   let detail: AuditLogDetail | null = null;
   if (row.detail) {
     try {
