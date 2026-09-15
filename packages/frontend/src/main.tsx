@@ -5,6 +5,8 @@ import { getAccessToken, refreshAccessToken } from './api/client.js';
 import { UIProvider } from './components/UIComponents.js';
 import App from './App.js';
 import LoginPage from './components/LoginPage.js';
+import AdminDashboardPage from './components/AdminDashboardPage.js';
+import AuditLogsPage from './components/AuditLogsPage.js';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -35,6 +37,10 @@ async function bootstrap() {
   const router = createBrowserRouter([
     { path: '/', loader: requireAuth, element: <App /> },
     { path: '/login', loader: requireUnauth, element: <LoginPage /> },
+    // /admin 两页（票 #21）：loader 只验登录（第一段），admin 角色在页面组件内校验（第二段）——
+    // access token payload 仅 { userId } 无 role，不动 jwt.ts 一期签名契约
+    { path: '/admin/dashboard', loader: requireAuth, element: <AdminDashboardPage /> },
+    { path: '/admin/audit-logs', loader: requireAuth, element: <AuditLogsPage /> },
   ]);
 
   const root = document.getElementById('root')!;

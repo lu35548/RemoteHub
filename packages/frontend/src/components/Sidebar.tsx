@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { LayoutGrid, Plus, Monitor, Network, PanelLeftClose, PanelLeftOpen, Search, X, LogOut, Settings, MoreVertical, Edit2, Trash2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { LayoutGrid, Plus, Monitor, Network, PanelLeftClose, PanelLeftOpen, Search, X, LogOut, Settings, MoreVertical, Edit2, Trash2, LayoutDashboard } from 'lucide-react';
 import type { ProjectListItem, UserPublic } from '@remotehub/shared';
 import { Tooltip } from './UIComponents';
 import { ProjectIcon } from './ProjectIcons';
@@ -35,6 +36,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [projectMenuOpenId, setProjectMenuOpenId] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
 
   const filteredProjects = useMemo(() => {
     if (!searchTerm) return projects;
@@ -242,6 +244,19 @@ const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Footer */}
       <div className="p-4 border-t border-white/5 bg-slate-900/30 space-y-2 flex-shrink-0 backdrop-blur-md">
+         {/* 管理后台入口：仅 admin 渲染（入口隐藏而非仅路由拒绝，票 #21） */}
+         {currentUser?.role === 'admin' && (
+           <Tooltip content="管理后台" side="right" className={isCollapsed ? 'w-full' : ''}>
+            <button
+              onClick={() => navigate('/admin/dashboard')}
+              className={`w-full flex items-center gap-3 px-3 py-2 text-slate-400 hover:text-blue-200 hover:bg-blue-500/10 rounded-xl transition-colors duration-200 ${isCollapsed ? 'justify-center' : ''}`}
+            >
+              <LayoutDashboard size={16} />
+              {!isCollapsed && <span className="text-xs font-medium">管理后台</span>}
+            </button>
+           </Tooltip>
+         )}
+
          <Tooltip content={currentUser.nickname} side="right" className={isCollapsed ? 'w-full' : ''}>
             <button 
               onClick={onOpenUserModal}

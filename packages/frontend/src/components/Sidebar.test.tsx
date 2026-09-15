@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import type { ProjectListItem, UserPublic } from '@remotehub/shared';
 
@@ -28,7 +29,11 @@ const props = {
 
 describe('Sidebar 冒烟（T4）', () => {
   it('渲染项目列表与视图入口', () => {
-    render(<Sidebar {...props} />);
+    render(
+      <MemoryRouter>
+        <Sidebar {...props} />
+      </MemoryRouter>,
+    );
     expect(screen.getByText('某某科技 - 私有云')).toBeInTheDocument();
     expect(screen.getByText('测试项目')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /所有资源/ })).toBeInTheDocument();
@@ -36,7 +41,11 @@ describe('Sidebar 冒烟（T4）', () => {
 
   it('项目搜索过滤', async () => {
     const events = userEvent.setup();
-    render(<Sidebar {...props} />);
+    render(
+      <MemoryRouter>
+        <Sidebar {...props} />
+      </MemoryRouter>,
+    );
     await events.type(screen.getByPlaceholderText('搜索客户...'), '某某');
     expect(screen.getByText('某某科技 - 私有云')).toBeInTheDocument();
     expect(screen.queryByText('测试项目')).not.toBeInTheDocument();
@@ -45,7 +54,11 @@ describe('Sidebar 冒烟（T4）', () => {
   it('选中项目回调', async () => {
     const onSelectProject = vi.fn();
     const events = userEvent.setup();
-    render(<Sidebar {...props} onSelectProject={onSelectProject} />);
+    render(
+      <MemoryRouter>
+        <Sidebar {...props} onSelectProject={onSelectProject} />
+      </MemoryRouter>,
+    );
     await events.click(screen.getByText('某某科技 - 私有云'));
     expect(onSelectProject).toHaveBeenCalledWith('p1');
   });
