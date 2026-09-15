@@ -14,7 +14,11 @@ import { cleanAuditLogs, startAuditCleaner } from '../utils/auditCleaner.js';
 
 const prisma = _prisma as any;
 
-beforeEach(() => { vi.clearAllMocks(); });
+beforeEach(() => {
+  vi.clearAllMocks();
+  // queryAuditLogs username join：文件级默认空集（各用例按需覆盖）
+  prisma.user.findMany.mockResolvedValue([]);
+});
 
 /** 造一条合法 DB 行（字段对齐 prisma schema AuditLog model） */
 function auditRow(overrides: Record<string, unknown> = {}) {
@@ -124,6 +128,24 @@ describe('queryAuditLogs - DTO 映射', () => {
 
     const r = await queryAuditLogs({});
     expect(r.data[0]!.detail).toBeNull();
+  });
+
+  it('username 映射：行 userId join user 表 → username；userId null → username null', async () => {
+    prisma.auditLog.findMany.mockResolvedValue([
+      auditRow({ id: 'a1', userId: 'u1' }),
+      auditRow({ id: 'a2', userId: null, action: 'SECURITY_SUSPICIOUS_IP', resource: 'security' }),
+    ]);
+    prisma.auditLog.count.mockResolvedValue(2);
+    prisma.user.findMany.mockResolvedValue([{ id: 'u1', username: 'admin' }]);
+
+    const r = await queryAuditLogs({});
+
+    expect(prisma.user.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ['u1'] } },
+      select: { id: true, username: true },
+    });
+    expect(r.data[0]!.username).toBe('admin');
+    expect(r.data[1]!.username).toBeNull();
   });
 });
 

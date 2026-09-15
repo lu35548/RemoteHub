@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, setAccessToken } from './client.js';
 import type {
   LoginRequest, LoginResponse, UserPublic,
+  Dashboard, DailyActivityStat, ProjectConnectionStat,
   ProjectListItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
   ConnectionListItem, ConnectionDetail, CreateConnectionRequest, UpdateConnectionRequest,
   MemberListItem, AddMemberRequest, UpdateMemberRoleRequest,
@@ -227,5 +228,32 @@ export function useDeleteUser() {
   return useMutation({
     mutationFn: (id: string) => api.delete(`/users/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+  });
+}
+
+// ── /admin 监控端点（票 #22）───────────────────────────────────────────
+// 监控读端点 staleTime 5 分钟覆盖 QueryClient 默认 30s：仪表盘数据非高频变化，
+// 5min 内来回切页/刷新不重取（票面 AC「staleTime 5min 生效」）
+export function useDashboard() {
+  return useQuery({
+    queryKey: ['admin-dashboard'],
+    queryFn: () => api.get<Dashboard>('/admin/dashboard'),
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useUserStats() {
+  return useQuery({
+    queryKey: ['admin-stats-users'],
+    queryFn: () => api.get<DailyActivityStat[]>('/admin/stats/users'),
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useProjectStats() {
+  return useQuery({
+    queryKey: ['admin-stats-projects'],
+    queryFn: () => api.get<ProjectConnectionStat[]>('/admin/stats/projects'),
+    staleTime: 5 * 60_000,
   });
 }

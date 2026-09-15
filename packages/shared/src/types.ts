@@ -209,6 +209,7 @@ export interface AuditLogDetail {
 
 export interface AuditLog {
   id: string;
+  username: string | null; // 操作人显示名（服务端 join user 表；userId null（系统/SECURITY_*）→ null，前端显示「系统」）
   userId: string | null;
   action: AuditAction;
   resource: AuditResource;

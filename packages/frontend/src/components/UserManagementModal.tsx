@@ -1,19 +1,15 @@
 import React, { useState } from 'react';
-import type { ApiErrorResponse, UserListItem, UserPublic } from '@remotehub/shared';
+import type { UserListItem, UserPublic } from '@remotehub/shared';
 import { Modal, useUI } from './UIComponents';
 import { UserCog, Plus, Trash2, Key, Shield } from 'lucide-react';
 import { useUsers, useCreateUser, useDeleteUser, useChangePassword } from '../api/queries';
+import { errMsg } from '../utils';
 
 interface UserManagementModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentUser: UserPublic;
 }
-
-// API 错误消息提取（client 抛 ApiErrorResponse 形状）——业务错误显示后端中文消息（等价 v1 err.message），
-// 其余（网络异常/内部 Error 均为英文）一律中文兜底，不上英文 toast
-const errMsg = (e: unknown, fallback: string): string =>
-  (e as ApiErrorResponse)?.error?.message || fallback;
 
 const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen, onClose, currentUser }) => {
   const [activeTab, setActiveTab] = useState<'profile' | 'users'>('profile');

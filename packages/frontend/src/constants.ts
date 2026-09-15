@@ -1,7 +1,7 @@
 // 枚举短码 → 中文显示文案（v1 enum 的文案值在 v2 拆为「机器码 + 展示层映射」）。
 // 仅含 PROTOCOL：v2 的 vpnType 语义是 VPN 协议类型，与 v1 VpnType（登录方式：网页登录/客户端/L2TP）
 // 是两个概念，T5 迁移 ConnectionModal 时按 shared 语义另行处理。
-import type { Protocol, VpnType } from '@remotehub/shared';
+import type { AuditAction, AuditResource, Protocol, VpnType } from '@remotehub/shared';
 
 // 协议族分类（ConnectionModal/ConnectionCard 共用的领域概念）
 export const PROPRIETARY_PROTOCOLS: Protocol[] = ['TODESK', 'SUNLOGIN', 'TEAMVIEWER', 'ANYDESK'];
@@ -72,3 +72,37 @@ export const PROTOCOL_ACTION_META: Record<Protocol, ProtocolActionMeta> = {
 
 // v1 utils.getProtocolColor 等价迁移：改查统一描述表
 export const getProtocolColor = (protocol: Protocol): string => PROTOCOL_ACTION_META[protocol].color;
+
+// 审计枚举 → 中文标签全量表（票 #22 活动流 / P0-9 审计页筛选与表格列共用）
+export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
+  AUTH_LOGIN: '登录',
+  AUTH_LOGOUT: '退出登录',
+  AUTH_PASSWORD_CHANGE: '修改密码',
+  AUTH_PROFILE_UPDATE: '更新资料',
+  USER_CREATE: '创建用户',
+  USER_UPDATE: '更新用户',
+  USER_DELETE: '删除用户',
+  PROJECT_CREATE: '创建项目',
+  PROJECT_UPDATE: '更新项目',
+  PROJECT_DELETE: '删除项目',
+  MEMBER_ADD: '添加成员',
+  MEMBER_UPDATE: '更新成员',
+  MEMBER_REMOVE: '移除成员',
+  CONNECTION_CREATE: '创建连接',
+  CONNECTION_UPDATE: '更新连接',
+  CONNECTION_DELETE: '删除连接',
+  CONNECTION_ACCESS: '访问连接',
+  SYSTEM_BACKUP: '系统备份',
+  SYSTEM_RESTORE: '系统恢复',
+  SYSTEM_CONFIG_CHANGE: '系统配置变更',
+  SECURITY_SUSPICIOUS_IP: '可疑 IP 告警',
+};
+
+export const AUDIT_RESOURCE_LABELS: Record<AuditResource, string> = {
+  user: '用户',
+  project: '项目',
+  connection: '连接',
+  member: '成员',
+  system: '系统',
+  security: '安全',
+};

@@ -68,7 +68,17 @@ function parseEndDate(value: string): Date {
 }
 
 /** DB 行 → shared AuditLog DTO：detail JSON 宽容解析（非法 JSON 落 null）。 */
-export function toDTO(row: AuditLogRow): AuditLog {
+/** 批量取操作人 username 映射（id→username）：列表/仪表盘 DTO join 共用（P0-9 审计页复用） */
+export async function fetchUsernameMap(userIds: string[]): Promise<Map<string, string>> {
+  if (userIds.length === 0) return new Map();
+  const users = await prisma.user.findMany({
+    where: { id: { in: userIds } },
+    select: { id: true, username: true },
+  });
+  return new Map(users.map((u) => [u.id, u.username]));
+}
+
+export function toDTO(row: AuditLogRow, username: string | null): AuditLog {
   let detail: AuditLogDetail | null = null;
   if (row.detail) {
     try {
@@ -83,6 +93,7 @@ export function toDTO(row: AuditLogRow): AuditLog {
 
   return {
     id: row.id,
+    username,
     userId: row.userId,
     action: row.action as AuditAction,
     resource: row.resource as AuditResource,
@@ -113,7 +124,16 @@ export async function queryAuditLogs(q: AuditLogQuery): Promise<{
   });
   const total = await prisma.auditLog.count({ where });
 
-  return { data: rows.map(toDTO), total, page, pageSize };
+  // 操作人 username 批量 join（去重 userId；行→DTO 时按 id 取名，查不到兜底 null）
+  const userIds = [...new Set(rows.map((r) => r.userId).filter((v): v is string => v !== null))];
+  const nameById = await fetchUsernameMap(userIds);
+
+  return {
+    data: rows.map((r) => toDTO(r, r.userId === null ? null : nameById.get(r.userId) ?? null)),
+    total,
+    page,
+    pageSize,
+  };
 }
 
 export async function exportAuditLogsCsv(q: Omit<AuditLogQuery, 'page' | 'pageSize'>): Promise<string> {

@@ -121,6 +121,7 @@ describe('getDashboard', () => {
         createdAt: new Date('2026-09-15T11:59:00Z'),
       },
     ]);
+    prisma.user.findMany.mockResolvedValue([{ id: 'u1', username: 'admin' }]);
 
     const d = await getDashboard();
 
@@ -135,12 +136,49 @@ describe('getDashboard', () => {
       stats: { totalProjects: 4, totalConnections: 11, totalUsers: 7 },
       recentActivity: [
         {
-          id: 'a1', userId: 'u1', action: 'AUTH_LOGIN', resource: 'security', resourceId: null,
+          id: 'a1', username: 'admin', userId: 'u1', action: 'AUTH_LOGIN', resource: 'security', resourceId: null,
           result: 'success', detail: null, ip: '10.0.0.1', userAgent: 'ua',
           createdAt: '2026-09-15T11:59:00.000Z',
         },
       ],
     });
+    vi.useRealTimers();
+  });
+
+  it('recentActivity username 映射：join user 表；SECURITY_* 行 userId null → username null', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-15T12:00:00Z'));
+
+    vi.mocked(prisma.$queryRaw).mockResolvedValue([]);
+    vi.mocked(os.totalmem).mockReturnValue(1000);
+    vi.mocked(os.freemem).mockReturnValue(600);
+    vi.mocked(statfs).mockResolvedValue({ blocks: 100, bfree: 25 } as never);
+
+    prisma.user.count.mockResolvedValue(0);
+    prisma.project.count.mockResolvedValue(0);
+    prisma.connection.count.mockResolvedValue(0);
+    prisma.user.findMany.mockResolvedValue([{ id: 'u1', username: 'admin' }]);
+    prisma.auditLog.findMany.mockResolvedValue([
+      {
+        id: 'a1', userId: 'u1', action: 'AUTH_LOGIN', resource: 'user', resourceId: null,
+        result: 'success', detail: null, ip: null, userAgent: null,
+        createdAt: new Date('2026-09-15T11:59:00Z'),
+      },
+      {
+        id: 'a2', userId: null, action: 'SECURITY_SUSPICIOUS_IP', resource: 'security', resourceId: null,
+        result: 'failure', detail: null, ip: '10.0.0.1', userAgent: null,
+        createdAt: new Date('2026-09-15T11:58:00Z'),
+      },
+    ]);
+
+    const d = await getDashboard();
+
+    expect(prisma.user.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ['u1'] } },
+      select: { id: true, username: true },
+    });
+    expect(d.recentActivity[0]!.username).toBe('admin');
+    expect(d.recentActivity[1]!.username).toBeNull();
     vi.useRealTimers();
   });
 });

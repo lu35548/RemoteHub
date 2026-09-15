@@ -7,7 +7,7 @@ import { statfs } from 'node:fs/promises';
 import type { DailyActivityStat, Dashboard, ProjectConnectionStat, SystemHealth } from '@remotehub/shared';
 import { LAST_ACTIVE_THROTTLE_MS } from '@remotehub/shared';
 import { prisma } from '../utils/prisma.js';
-import { toDTO } from './auditService.js';
+import { fetchUsernameMap, toDTO } from './auditService.js';
 
 const round1 = (n: number): number => Math.round(n * 10) / 10;
 
@@ -46,11 +46,15 @@ export async function getDashboard(): Promise<Dashboard> {
     prisma.auditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 20 }),
   ]);
 
+  // 操作人 username 批量 join（fetchUsernameMap 共享；SECURITY_* 等系统行 userId null → username null）
+  const userIds = [...new Set(recentRows.map((r) => r.userId).filter((v): v is string => v !== null))];
+  const nameById = await fetchUsernameMap(userIds);
+
   return {
     health,
     onlineUsers,
     stats: { totalProjects, totalConnections, totalUsers },
-    recentActivity: recentRows.map(toDTO),
+    recentActivity: recentRows.map((r) => toDTO(r, r.userId === null ? null : nameById.get(r.userId) ?? null)),
   };
 }
 
