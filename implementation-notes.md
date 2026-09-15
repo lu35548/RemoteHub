@@ -18,6 +18,32 @@
 
 ---
 
+## [2026-09-15] 票 #21（P0-7）：/admin 路由骨架 + DataTable + favicon ✅
+
+TDD 全程（DataTable 7 测试 + 两页骨架 8 测试，分片 RED→GREEN），双轴 review（Standards 0 硬违规 / Spec 忠实实现无缺口）+ 修复 3 项。质量门 **414** = 基线 399 + 新增 15（frontend 68；lint 0 / tsc 0 / 三包 build 过）。commit `9d8cc1e` 双 push 关票，compose 栈 favicon 实测 200。
+
+### Design decisions
+- [2026-09-15] 决策：两段式守卫 loader 用 requireAuth。票面文件节「加 requireAdmin」与接口契约「loader 只复用 requireAuth」字面冲突——按接口契约 + 立项决策裁决（payload 仅 { userId } 无 role，requireAdmin 不存在是既定设计，spec L164 措辞已被立项节修订）。
+- [2026-09-15] 决策：守卫 **fail-closed**（`!me || me.role !== 'admin'`）。理由：useMe retry:false，请求失败 me=undefined 时票面模式 `me && me.role !== 'admin'` 放行渲染（fail-open），P0-8 接真数据即权限洞；双轴交叉确认采纳，+2 回归用例（me=undefined → 重定向）。
+- [2026-09-15] 决策：isLoading 骨架自绘深色，不复用 UIComponents LoadingTable。理由：LoadingTable 是 v1 浅色遗产（bg-white/gray），与 slate-950 admin 界面冲突，spec「深色 slate-950 中文界面」优先。
+- [2026-09-15] 决策：render 语义 = 完全接管单元格（render 存在不回落字段直出）。review (c)2 采纳：`??` 回落会在 render 故意返回 null 时意外直出字段值。
+- [2026-09-15] 决策：DataTable 行 key 用 index——消费场景是分页只读列表，无行重排。
+
+### Deviations
+- Sidebar.test.tsx 补包 MemoryRouter（票面清单外）：Sidebar 引入 useNavigate 的必要配套（Router context），3 处 render 全补，既有 3 测试零破坏。
+- review 修复 3 项：① fail-closed（+2 用例）；② DataTable thead 抽取消两份重复（Standards Duplicated Code）；③ render 接管语义。
+- 本次会话生成层多次文件损坏（烂尾句/语法残缺 4 次），全部靠事后 sed/诊断核实修正——生成内容必须回读验证。
+
+### Tradeoffs
+- 不采纳：分页四参数捆 pagination 对象（Standards Data Clumps judgement call）——票面钦定扁平接口，P0-9 消费接口精确。
+- 不采纳：两页守卫抽 useAdminGuard hook——骨架期两处逐字同构是票面钦定「统一模式」；P0-8/9 填充出现第三处再抽，现在抽是 Speculative Generality。
+- 不采纳：Sidebar `currentUser?.role` 改直取（Standards 极轻 Speculative Generality）——票面字面钦定 `?.`。
+- spec「审计页 DataTable 排序」：本票 DataTableProps 无排序字段，P0-9 消费时按需扩展 props（票面接口契约为准）。
+
+### Open questions
+- 无新增。衔接：P0-8 仪表盘消费趋势数据须 UTC 日界同口径（#20 交付契约）；P0-9 审计页 constants 标签映射须含 SECURITY_SUSPICIOUS_IP action + security resource（#19 交付契约）。
+
+
 ## [2026-09-15] 票 #20（P0-6）：健康检查扩展 + 监控 API ✅
 
 TDD 全程（unit 10 五片 + integration 5 + healthRoutes router-seam 2，全程 RED→GREEN），双轴 review（Standards 0 硬违规 / Spec 2 AC 缺口 + 1 建议，全采纳修复）。质量门 **399** = 基线 384 + 新增 15（backend 309；lint 0 / tsc 0 / 三包 build 过；无 .env 场景 15/15 绿）。commit `bc5af3b` 双 push 关票，CI 34922419728 全绿。
