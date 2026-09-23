@@ -12,12 +12,32 @@
 - [x] **怪文件清理待拍板（2026-08-28 T11 发现）**——✅ 用户拍板提交（`921f9a6`）：`C：ProjectsRemoteHubbackend.env.example`（文件名实为私用区字符 U+F03A 非全角冒号，git 转义 `C\357\200\272`；0 字节路径转义事故产物）从 initial commit `9bd1c7c` 起被跟踪，磁盘早已不存在，`git add -u` 记录删除（顺带坐实 client.ts 的 M 为 stat 假象，add 后消失）。
 - [x] **`RemoteHub/.env.local` 磁盘去留（2026-08-31 T12 发现）**——✅ 用户拍板保留：git rm 后磁盘残留的唯一未跟踪文件（352B，曾因 v1 `.gitignore` 层被 porcelain 隐藏），密钥模式 1 命中。保留为未跟踪文件——根 `.gitignore:4` 的 `.env.local` 规则覆盖之，`git status` 不显示（初判「会显示 `?? RemoteHub/`」系未验证预测，已自查纠正）。
 - [x] **shared `AuditLog` 接口与 Prisma model 同名不同形**（2026-09-04 票 #15 review 发现）——✅ 票 #16 裁决（见下 section）：**不改名、不强制映射**。约定 = 后端文件不同时裸名导入两侧；DB 行类型如需引用走 `Prisma.*` 命名空间（audit.ts 顶部注释固化）。P0-2 实际未出现同文件双导入（中间件只写库不读 DTO）；DTO 映射函数推迟到 P0-3 查询端点按需落地。
-- [ ] **frontend ConnectionModal/ProjectModal/App userEvent 测试全量默认并发下 5s 超时**（2026-09-04 首暴露 2 条；2026-09-23 #24 验收实证恶化：默认并发 7 败/99，失败集漂移；单文件恒绿、`--poolOptions.threads.maxThreads=2` 全量 99/99 绿——jsdom 14 文件并行挤爆本机资源所致，非用例缺陷）。已开 issue 跟踪（修法：testTimeout 提档或限制并发），不阻塞 P0 验收（447 基线以 2 线程口径记录）。
+- [x] **frontend ConnectionModal/ProjectModal/App userEvent 测试全量默认并发下 5s 超时**（2026-09-04 首暴露 2 条；2026-09-23 #24 验收实证恶化：默认并发 7 败/99，失败集漂移；单文件恒绿、2 线程全量 99/99 绿——jsdom 14 文件并行挤爆本机资源所致，非用例缺陷）——✅ 已修关（#26 方案 A：vite.config.ts 锁 threads 池 2 线程，commit 6f8a5b5，默认命令 99/99 绿 54.5s）。
 - [ ] **首个 SQLite 方言 migration vs project.md「MySQL 统一」约定**（Standards 轴提示）：v2 SQLite 切换 spec 修正表 #5 已自认，方言切换成本自此起算——迁移期结束统一处理或 ADR 明示豁免。
 - [ ] **净化豁免清单未含 Project `description`**（2026-09-04 票 #18 Standards 轴 review）：Project 自由文本字段是 description 非 notes，含 `--`/`&&` 技术串会被 422——(a) spec 修订补豁免 或 (b) 接受误杀面明示，待用户裁决。
 - [ ] **AUTH_LOGIN 审计行操作人恒为「系统」**（票 #22 Spec 轴 review 发现）：login 未认证 userId=null 是 P0-5 spec 口径，但登录人信息（IP/UA）其实已记录，是否让 login 审计带 userId 待裁决。
 
 ---
+
+## [2026-09-23] 票 #26：frontend 测试锁 2 线程 ✅
+
+方案 A（用户拍板）：vite.config.ts test 段 `pool: 'threads'` + `poolOptions.threads.{maxThreads:2, minThreads:1}`（commit 6f8a5b5，Closes #26）。默认命令复验 99/99 绿 54.5s（修复前默认并发 7 败/99 @ 98-121s）。
+
+### Design decisions
+- [2026-09-23] 决策：config 必须同时显式 `pool: 'threads'`——vitest 3 默认池是 forks，只写 `poolOptions.threads.*` 不生效（CLI 验证时显式传了 --pool 才绿，config 移植时差点漏）。
+- [2026-09-23] 决策：minThreads:1 一并固定——只锁 max 时 vitest 仍可按核数起 min 池，锁 min 才与基线记录口径严格一致。
+
+## [2026-09-23] 票 #25：审计脱敏清单补 accessToken/refreshToken ✅
+
+TDD 红→绿（backend 312 全绿），真链路复验（修复后登录新行 `[REDACTED]`、旧行明文保留），双轴 review 双零发现。commit `c5bd16d`，票已关。
+
+### Design decisions
+- [2026-09-23] 决策：彻底抹除口径（用户拍板）——值替换 `[REDACTED]` 不留指纹；token 对审计零价值，IP/UA 已足够定位。
+- [2026-09-23] 决策：refreshToken 一并追加——当前 login 响应体实际不含它（走 httpOnly cookie），但票面建议方向明文列出，属防御纵深（未来响应体带 refresh 即自动覆盖）。
+- [2026-09-23] 决策：存量 dev.db 不清——票面口径「旧数据不清」，且 JWT 均 15m 过期无价值；真链路复验特意展示新旧行对照。
+
+### Deviations
+- （无）review Standards 轴 1 条弱 judgement call 备案不采纳：精确键名匹配的开放集合代价（每次新增 token 类键靠人记得补清单）——现状显式清单 + 注释自认 + 单测锁定是合理取舍，再漏一次升级为后缀匹配。
 
 ## [2026-09-23] 票 #24（P0-10）：P0 浏览器级总验收 ✅
 
