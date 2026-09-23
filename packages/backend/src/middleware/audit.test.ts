@@ -43,6 +43,11 @@ describe('redactDetail', () => {
       .toEqual({ password: '[REDACTED]', connectionId: 'c1' });
   });
 
+  it('accessToken/refreshToken 键脱敏（AUTH_LOGIN after 含完整 JWT，票 #25：审计页+CSV 双泄漏通道）', () => {
+    expect(redactDetail({ after: { accessToken: 'eyJhbGciOiJIUzI1NiJ9.payload.sig', refreshToken: 'rt-secret', user: { username: 'admin' } } }))
+      .toEqual({ after: { accessToken: '[REDACTED]', refreshToken: '[REDACTED]', user: { username: 'admin' } } });
+  });
+
   it('嵌套对象递归脱敏', () => {
     expect(redactDetail({ user: { nickname: '张三', tokenHash: 'secret' } }))
       .toEqual({ user: { nickname: '张三', tokenHash: '[REDACTED]' } });

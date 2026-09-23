@@ -46,4 +46,5 @@ export const ENCRYPTION_VERSION = 'v1';
 
 // 审计脱敏字段：值替换为 [REDACTED]（保留字段名以标识变更）
 // password：decrypt-password 端点响应体含明文密码（票 #16 实施发现，design §3.4 密码类字段脱敏意图）
-export const SENSITIVE_FIELDS = new Set<string>(['password', 'passwordHash', 'encryptedPass', 'token', 'tokenHash']);
+// accessToken/refreshToken：/auth/login 响应体整体进 AUTH_LOGIN after 快照（票 #25，Set 精确键名匹配故须逐键列出）
+export const SENSITIVE_FIELDS = new Set<string>(['password', 'passwordHash', 'encryptedPass', 'token', 'tokenHash', 'accessToken', 'refreshToken']);
