@@ -12,12 +12,52 @@
 - [x] **怪文件清理待拍板（2026-08-28 T11 发现）**——✅ 用户拍板提交（`921f9a6`）：`C：ProjectsRemoteHubbackend.env.example`（文件名实为私用区字符 U+F03A 非全角冒号，git 转义 `C\357\200\272`；0 字节路径转义事故产物）从 initial commit `9bd1c7c` 起被跟踪，磁盘早已不存在，`git add -u` 记录删除（顺带坐实 client.ts 的 M 为 stat 假象，add 后消失）。
 - [x] **`RemoteHub/.env.local` 磁盘去留（2026-08-31 T12 发现）**——✅ 用户拍板保留：git rm 后磁盘残留的唯一未跟踪文件（352B，曾因 v1 `.gitignore` 层被 porcelain 隐藏），密钥模式 1 命中。保留为未跟踪文件——根 `.gitignore:4` 的 `.env.local` 规则覆盖之，`git status` 不显示（初判「会显示 `?? RemoteHub/`」系未验证预测，已自查纠正）。
 - [x] **shared `AuditLog` 接口与 Prisma model 同名不同形**（2026-09-04 票 #15 review 发现）——✅ 票 #16 裁决（见下 section）：**不改名、不强制映射**。约定 = 后端文件不同时裸名导入两侧；DB 行类型如需引用走 `Prisma.*` 命名空间（audit.ts 顶部注释固化）。P0-2 实际未出现同文件双导入（中间件只写库不读 DTO）；DTO 映射函数推迟到 P0-3 查询端点按需落地。
-- [ ] **frontend ConnectionModal「新建 HOST」/ ProjectModal「新建」userEvent 测试负载下间歇 5s 超时**（2026-09-04 全量门暴露）：stash 基线两条间歇超时（main 既有，非票引入）——建议单开 issue 跟踪，不阻塞 P0。
+- [ ] **frontend ConnectionModal/ProjectModal/App userEvent 测试全量默认并发下 5s 超时**（2026-09-04 首暴露 2 条；2026-09-23 #24 验收实证恶化：默认并发 7 败/99，失败集漂移；单文件恒绿、`--poolOptions.threads.maxThreads=2` 全量 99/99 绿——jsdom 14 文件并行挤爆本机资源所致，非用例缺陷）。已开 issue 跟踪（修法：testTimeout 提档或限制并发），不阻塞 P0 验收（447 基线以 2 线程口径记录）。
 - [ ] **首个 SQLite 方言 migration vs project.md「MySQL 统一」约定**（Standards 轴提示）：v2 SQLite 切换 spec 修正表 #5 已自认，方言切换成本自此起算——迁移期结束统一处理或 ADR 明示豁免。
 - [ ] **净化豁免清单未含 Project `description`**（2026-09-04 票 #18 Standards 轴 review）：Project 自由文本字段是 description 非 notes，含 `--`/`&&` 技术串会被 422——(a) spec 修订补豁免 或 (b) 接受误杀面明示，待用户裁决。
 - [ ] **AUTH_LOGIN 审计行操作人恒为「系统」**（票 #22 Spec 轴 review 发现）：login 未认证 userId=null 是 P0-5 spec 口径，但登录人信息（IP/UA）其实已记录，是否让 login 审计带 userId 待裁决。
 
 ---
+
+## [2026-09-23] 票 #24（P0-10）：P0 浏览器级总验收 ✅
+
+纯验证票（无代码改动），八路径全过，证据贴 #24 评论。dev 栈（3000/3001）+ compose 栈（8080）双栈验证，Chrome DevTools MCP（mcp-dom-match-pitfalls 六陷阱全程适用：icon 按钮 title 匹配、evaluate 内联点击+延时断言、isolatedContext 双用户/双栈）。质量门终值 **447** = backend 311 / shared 37 / frontend 99（P1 起点基线）。验收修复 1 项（票面授权范围）：docker/nginx.conf 补 `location = /index.html` no-cache 规则。
+
+### Design decisions
+- [2026-09-23] 决策：CSV 落盘验证双轨——浏览器层拦 `createObjectURL` 持有 Blob 直读字节（7583B 与响应等长 + 首行 header），磁盘层 Bearer curl 同端点存档。理由：本机 CentBrowser 下载询问设置挡住静默落盘，blob 拦截证明 a[download] 链路完整、curl 证明字节级输出，两者合壁等价于落盘验证。
+- [2026-09-23] 决策：趋势「只含成功」用差分实证——今日桶 operations=3（三个成功操作）而非 4（失败改密不计入），比断言 SVG 形状更强。
+- [2026-09-23] 决策：compose 栈验证用独立 isolatedContext（compose8080），从机制上规避 cookie jar 跨栈串扰（multi-stack-localhost-cookie-jar 的根治版）。
+
+### Deviations
+- 票面「无代码改动」实改 docker/nginx.conf +6 行——票面 AC 明文授权（「若 nginx 配置未含则本票补 location 规则——属验收修复允许范围」）。复验：`/` 与 `/index.html` 均 `Cache-Control: no-cache`，`/assets/*` 仍 immutable 长缓存。
+
+### Tradeoffs
+- 不提交验证 CSV 入库：含 7 处 AUTH_LOGIN detail accessToken JWT 明文（#25 缺口双通道实证），仅票评论引用 header 行。
+- frontend 基线以 `--poolOptions.threads.maxThreads=2` 口径记录（默认并发在本机爆已知 OQ 超时，7 败/99 失败集漂移；单文件恒绿）。备选：默认口径记 92/99——被否，掩盖环境挤压本质。
+
+### Open questions
+- （无新增挂起）已知 OQ「userEvent 全量并发超时」当日实证恶化 2→7 条，已单开 issue 跟踪；父票 #14 验收清单已核验，关票流程待用户确认。
+
+## [2026-09-23] 票 #23（P0-9）：审计日志页 ✅
+
+TDD 三分片（queries +6 / utils +3 / 组件净增 8，82→99 全绿；lint 0 / tsc 0 / build 过），双轴 review（Standards 0 硬违规 + 4 judgement call 采纳 2；Spec 7 项采纳 3 备查 3），修复复验后真机手验全过（筛选 URL 联动 / 空态 / detail 折叠 / CSV 首行 header / 系统占位 / IP 掩码 / 分页禁用态）。commit ef10fc9 双 push，票外发现开 #25（accessToken 脱敏缺口）。
+
+### Design decisions
+- [2026-09-23] 决策：useAuditLogs 走 api.getRaw（分页端点含 pagination）+ queryKey [audit-logs, filters, page]；URL 拼装键序固定（userId→action→resource→startDate→endDate→result→page），空值不拼。
+- [2026-09-23] 决策：导出 401 → ensureRefreshed 重试一次（review 采纳，对齐统一客户端口径），仍失败 toast 中文不跳 login（用户主动动作可重试）；ApiErrorResponse 中文消息透传。
+- [2026-09-23] 决策：formatTime 手动 pad 拼装替代 toLocaleString——full-icu 分隔符为 /（09/23）与 #22 注释口径 MM-DD 从交付起不符（无人断言锁过），本次测试锁死 MM-DD，仪表盘活动流同步微调。
+- [2026-09-23] 决策：result: undefined 与缺键等价（TanStack hash 丢 undefined 键 + auditLogParams 跳过），segmented「全部」不清键。
+
+### Deviations
+- 票面「Create AuditLogsPage.test.tsx」实为扩充（#21 骨架 4 条并入 4→13）。
+- 票面 3 文件实改 8：review 修复带出 client.ts export（API_BASE/ensureRefreshed）与 utils downloadBlob 收敛（rdp/csv 共享，顺带修 revoke 缺失）。
+
+### Tradeoffs
+- 不采纳：读 Content-Disposition 文件名（spec 未规定，固定 audit-logs.csv）。useUsers 全量分页（票面口径，>100 截断备查）。
+- 备查：formatTime 显示 09/23→09-23（对齐注释口径的有据变化）；toast 错误提示票外防御（两先例）。
+
+### Open questions
+- （无新增挂起；AUTH_LOGIN accessToken 脱敏缺口已开 #25 跟踪）
 
 ## [2026-09-15] 票 #22（P0-8）：仪表盘页 ✅
 
