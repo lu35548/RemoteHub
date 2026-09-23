@@ -1,7 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api, setAccessToken } from './client.js';
+import { API_BASE, api, ensureRefreshed, getAccessToken, setAccessToken } from './client.js';
+import { downloadBlob } from '../utils';
 import type {
-  LoginRequest, LoginResponse, UserPublic,
+  ApiErrorResponse, AuditLog, AuditLogQuery, LoginRequest, LoginResponse, UserPublic,
   Dashboard, DailyActivityStat, ProjectConnectionStat,
   ProjectListItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
   ConnectionListItem, ConnectionDetail, CreateConnectionRequest, UpdateConnectionRequest,
@@ -248,6 +249,52 @@ export function useUserStats() {
     queryFn: () => api.get<DailyActivityStat[]>('/admin/stats/users'),
     staleTime: 5 * 60_000,
   });
+}
+
+// ─── Audit Logs（P0-9 审计页）──
+
+/** 筛选参数 → URL query 串：只拼已设置项，键序固定（userId→…→result→page） */
+function auditLogParams(filters: Omit<AuditLogQuery, 'page' | 'pageSize'>, page?: number): string {
+  const params = new URLSearchParams();
+  for (const key of ['userId', 'action', 'resource', 'startDate', 'endDate', 'result'] as const) {
+    const v = filters[key];
+    if (v) params.set(key, v);
+  }
+  if (page) params.set('page', String(page));
+  return params.toString();
+}
+
+/** 审计日志列表（分页端点：响应含 pagination，须走不剥壳的 getRaw） */
+export function useAuditLogs(filters: AuditLogQuery, page: number) {
+  return useQuery({
+    queryKey: ['audit-logs', filters, page],
+    queryFn: () => api.getRaw<PaginatedResponse<AuditLog>>(`/audit-logs?${auditLogParams(filters, page)}`),
+  });
+}
+
+/** CSV 导出：文件流走手动 fetch（api 封装只解 JSON 不返回 blob）→ downloadBlob 触发浏览器保存 */
+export async function exportAuditLogsCsv(filters: Omit<AuditLogQuery, 'page' | 'pageSize'>): Promise<void> {
+  const qs = auditLogParams(filters);
+  const url = `${API_BASE}/audit-logs/export${qs ? `?${qs}` : ''}`;
+  const doFetch = (token: string | null) =>
+    fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {}, credentials: 'include' });
+  // 401 与统一客户端同口径：ensureRefreshed 后重试一次（仍失败落下方错误分支，toast 呈现）
+  let res = await doFetch(getAccessToken());
+  if (res.status === 401) {
+    const newToken = await ensureRefreshed();
+    if (newToken) res = await doFetch(newToken);
+  }
+  if (!res.ok) {
+    let message = '导出失败';
+    try {
+      const body: unknown = await res.json();
+      message = (body as ApiErrorResponse)?.error?.message || message;
+    } catch {
+      // 错误响应非 JSON（如网关 502）→ 中文兜底
+    }
+    throw new Error(message);
+  }
+  downloadBlob(await res.blob(), 'audit-logs.csv');
 }
 
 export function useProjectStats() {

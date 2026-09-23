@@ -1,5 +1,8 @@
 import type { ApiResponse, ApiErrorResponse } from '@remotehub/shared';
 
+/** API 前缀单一真相源（blob 导出等手动 fetch 场景共用，票 #23 review 收敛） */
+export const API_BASE = '/api/v1';
+
 // 401 时不应触发 refresh 的端点（仅认证入口自身；me/change-password 等过期恰恰需要 refresh，
 // 不能按 /auth/ 前缀一刀切排除——否则 token 过期时 me 401 直接报错，App 侧还得兜底清 token）
 const NO_REFRESH_PATHS = ['/auth/login', '/auth/refresh', '/auth/logout', '/auth/register'];
@@ -35,7 +38,7 @@ export async function refreshAccessToken(): Promise<string | null> {
   }
 }
 
-async function ensureRefreshed(): Promise<string | null> {
+export async function ensureRefreshed(): Promise<string | null> {
   if (refreshPromise) return refreshPromise;
   refreshPromise = refreshAccessToken();
   const token = await refreshPromise;
@@ -52,7 +55,7 @@ export async function apiRequest<T>(
   if (body) headers['Content-Type'] = 'application/json';
   if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
 
-  const res = await fetch(`/api/v1${path}`, {
+  const res = await fetch(`${API_BASE}${path}`, {
     method,
     headers,
     body: body ? JSON.stringify(body) : undefined,
@@ -63,7 +66,7 @@ export async function apiRequest<T>(
     const newToken = await ensureRefreshed();
     if (newToken) {
       headers['Authorization'] = `Bearer ${newToken}`;
-      const retryRes = await fetch(`/api/v1${path}`, {
+      const retryRes = await fetch(`${API_BASE}${path}`, {
         method,
         headers,
         body: body ? JSON.stringify(body) : undefined,
@@ -93,7 +96,7 @@ async function apiRequestRaw<T>(path: string): Promise<T> {
   const headers: Record<string, string> = {};
   if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
 
-  const res = await fetch(`/api/v1${path}`, {
+  const res = await fetch(`${API_BASE}${path}`, {
     method: 'GET',
     headers,
     credentials: 'include',

@@ -5,13 +5,7 @@ import { useDashboard, useMe, useUserStats } from '../api/queries';
 import { AUDIT_ACTION_LABELS } from '../constants';
 import { PageLoading } from './LoadingStates';
 import { useUI } from './UIComponents';
-import { errMsg, formatUptime, usageTier } from '../utils';
-
-/** 活动流时间：MM-DD HH:mm（24 小时制） */
-const formatTime = (iso: string): string =>
-  new Date(iso).toLocaleString('zh-CN', {
-    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
-  });
+import { errMsg, formatTime, formatUptime, usageTier } from '../utils';
 
 /** 使用率进度条：pct<0 显示「未知」且不渲染条（diskUsage=-1 约定） */
 function UsageBar({ label, pct, testId }: { label: string; pct: number; testId: string }) {

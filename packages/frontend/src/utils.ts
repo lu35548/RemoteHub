@@ -11,13 +11,18 @@ export const markRdpConfigured = () => localStorage.setItem(RDP_CONFIG_KEY, 'tru
 
 export const downloadRdpFile = (connection: Pick<ConnectionListItem, 'name' | 'host' | 'port' | 'username'>) => {
   const content = `full address:s:${connection.host}:${connection.port || 3389}\nusername:s:${connection.username || ''}\nprompt for credentials:i:1`;
-  const blob = new Blob([content], { type: 'application/x-rdp' });
+  downloadBlob(new Blob([content], { type: 'application/x-rdp' }), `${connection.name}.rdp`);
+};
+
+/** 浏览器保存 blob（rdp/csv 共用）：a[download] 触发后回收 objectURL */
+export const downloadBlob = (blob: Blob, filename: string): void => {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${connection.name}.rdp`;
+  a.download = filename;
   a.click();
-};
+  URL.revokeObjectURL(url);
+};;
 
 export const generateRdpRegistryFile = () => {
   const regContent = `Windows Registry Editor Version 5.00\n\n[HKEY_CLASSES_ROOT\\rh-rdp]\n@="URL:RemoteHub RDP Protocol"\n"URL Protocol"=""\n\n[HKEY_CLASSES_ROOT\\rh-rdp\\shell\\open\\command]\n@="cmd /V:ON /C \\"set url=%1 & set url=!url:rh-rdp://=! & set url=!url:rh-rdp:=! & set url=!url:/=! & start mstsc /v:!url!\\""`;
@@ -47,3 +52,10 @@ export const formatUptime = (seconds: number): string => {
 // （client 抛 ApiErrorResponse 形状），其余（网络异常/内部 Error 均为英文）一律中文兜底，不上英文 toast
 export const errMsg = (e: unknown, fallback: string): string =>
   (e as ApiErrorResponse)?.error?.message || fallback;
+
+/** ISO 时间 → MM-DD HH:mm（admin 页共用）。手动拼装：toLocaleString 分隔符随 ICU 版本漂移（full-icu 为 /），注释口径 MM-DD 须确定性 */
+export const formatTime = (iso: string): string => {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
