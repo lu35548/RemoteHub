@@ -2,7 +2,7 @@
 
 **版本**: v1.2-draft（v1.1 双轴审查修订 + v1.2 库核验增补：新依赖版本定版与 5 处方案精确化，2026-09-24）
 **日期**: 2026-09-24
-**状态**: 待用户终审
+**状态**: v1.2 定稿（用户终审通过，2026-09-24）
 **产生方式**: grill-with-docs 8 决策（2026-09-24）+ 四域现状证据调研（`docs/superpowers/research/2026-09-24-p1-*.md` 四份，file:line 引用）+ 双轴 spec 审查（引用抽查命中率 ~85%，发现全处置）+ 四组库核验（`research/2026-09-24-p1-libcheck-*.md` 四份，版本与 API 均取自 npm registry 实查/官方文档/本地实测）
 **上游文档**: `2026-04-23-remotehub-v2-phase2-design.md`（§6-§13 八模块，原文不动，本 spec 为刷新基底）· `phase2-backlog.md`（开放 10 项全落位）· `2026-08-25-frontend-migration.md`（Out of Scope 4 大类收编）
 **下游**: 拆票（父票 + 约 26 子票，spec→tickets 直通）→ 分支 `feat/phase2-p1`
