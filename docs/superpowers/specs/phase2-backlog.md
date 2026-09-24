@@ -21,10 +21,10 @@
 - [ ] input name/autocomplete a11y issue（T3，v1 遗留）
 - [ ] setup Modal「暂不配置」文案与行为不符（T6）
 - [ ] copyTarget 魔法串重构（T6）
-- [ ] favicon.ico 404：加 `public/favicon.ico` 即清零（T11）
+- [x] ~~favicon.ico 404~~ ✅ P0-7 以 `favicon.svg` 解决（页面 link 声明，浏览器不再请求 .ico，#24 路径 6 复验 console 零 404；commit 9d8cc1e）
 
 ### 部署/工程
-- [ ] nginx index.html 显式 no-cache 头（T10：新版本入口可能被浏览器启发式缓存延迟）
+- [x] ~~nginx index.html 显式 no-cache 头~~ ✅ #24 验收修复补 `location = /index.html` 规则（commit 00901e5，`/` 与 `/index.html` 双命中，assets immutable 不变）
 - [ ] nginx `proxy_pass` DNS resolver 方案（T10：现仅启动时解析，backend 重建换 IP 需 restart frontend）
 - [ ] CI actions v4 → v5 升级（T9：v4 强制跑 Node 24，「Node.js 20 is deprecated」告警）
 
