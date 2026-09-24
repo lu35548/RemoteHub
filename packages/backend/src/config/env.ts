@@ -23,6 +23,14 @@ export const env = {
   CORS_ORIGIN: process.env.CORS_ORIGIN || '',
   // 下界 1：0/负保留期会让每日清理删光审计日志
   AUDIT_RETENTION_DAYS: Math.max(1, parseInt(process.env.AUDIT_RETENTION_DAYS || '90', 10)),
+  // 密码重置（票 #28）：FRONTEND_URL 空 = 未配置，链接退化为同源相对路径（/reset-password?...）
+  FRONTEND_URL: process.env.FRONTEND_URL || '',
+  // 下界 1：0 小时会让重置 token 立即过期
+  PASSWORD_RESET_TOKEN_EXPIRES_HOURS: Math.max(1, parseInt(process.env.PASSWORD_RESET_TOKEN_EXPIRES_HOURS || '1', 10)),
+  // 下界 1：0 上限会让有效 token 配额恒为 0
+  PASSWORD_RESET_MAX_PER_USER: Math.max(1, parseInt(process.env.PASSWORD_RESET_MAX_PER_USER || '3', 10)),
+  // forgot-password per-IP 限流（次/小时，design §6.5）
+  RATE_LIMIT_FORGOT_PASSWORD_MAX: Math.max(1, parseInt(process.env.RATE_LIMIT_FORGOT_PASSWORD_MAX || '3', 10)),
 } as const;
 
 // 密钥格式校验（fail-fast，启动时即暴露配置错误，避免运行时才报 ERR_CRYPTO_INVALID_KEYLEN）

@@ -3,6 +3,7 @@ import { Router, type Router as RouterType } from 'express';
 import { authMiddleware } from '../middleware/auth.js';
 import { roleMiddleware } from '../middleware/role.js';
 import { auditMiddleware } from '../middleware/audit.js';
+import { forgotPasswordIpLimiter, forgotPasswordUserLimiter } from '../middleware/passwordResetLimiter.js';
 import * as authController from '../controllers/authController.js';
 
 export const authRoutes: RouterType = Router();
@@ -21,3 +22,19 @@ authRoutes.post('/change-password', authMiddleware, auditMiddleware({ action: 'A
 authRoutes.patch('/profile', authMiddleware, auditMiddleware({ action: 'AUTH_PROFILE_UPDATE', resource: 'security' }), authController.updateProfile);
 authRoutes.post('/heartbeat', authMiddleware, authController.heartbeat);
 authRoutes.get('/online', authMiddleware, authController.getOnlineUsers);
+
+// 密码重置（票 #28，公开端点）：限流双轨挂路由级（避开 app.use 挂载点剥前缀陷阱，
+// 且 server.ts 由并行票占用）；audit 循 login 公开端点先例（userId 落 null），
+// 排在 limiter 之后——429 不落审计，与 login 同口径。
+authRoutes.post(
+  '/forgot-password',
+  forgotPasswordIpLimiter,
+  forgotPasswordUserLimiter,
+  auditMiddleware({ action: 'AUTH_PASSWORD_RESET_REQUEST', resource: 'security' }),
+  authController.forgotPassword,
+);
+authRoutes.post(
+  '/reset-password',
+  auditMiddleware({ action: 'AUTH_PASSWORD_RESET', resource: 'security' }),
+  authController.resetPassword,
+);

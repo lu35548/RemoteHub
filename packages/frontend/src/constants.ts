@@ -78,6 +78,8 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   AUTH_LOGIN: '登录',
   AUTH_LOGOUT: '退出登录',
   AUTH_PASSWORD_CHANGE: '修改密码',
+  AUTH_PASSWORD_RESET_REQUEST: '发起密码重置',
+  AUTH_PASSWORD_RESET: '重置密码',
   AUTH_PROFILE_UPDATE: '更新资料',
   USER_CREATE: '创建用户',
   USER_UPDATE: '更新用户',

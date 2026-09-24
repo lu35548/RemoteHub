@@ -22,6 +22,11 @@ vi.mock('../utils/prisma.js', () => ({
   },
 }));
 
+vi.mock('../services/passwordResetService.js', () => ({
+  requestPasswordReset: vi.fn(),
+  resetPassword: vi.fn(),
+}));
+
 vi.mock('../utils/jwt.js', () => ({
   hashRefreshToken: vi.fn().mockReturnValue('hashed-token'),
 }));
@@ -42,6 +47,7 @@ vi.mock('../utils/appError.js', async (importOriginal) => {
 
 import * as authController from './authController.js';
 import * as authService from '../services/authService.js';
+import * as passwordResetService from '../services/passwordResetService.js';
 import { prisma } from '../utils/prisma.js';
 import type { Request, Response, NextFunction } from 'express';
 
@@ -330,5 +336,63 @@ describe('getOnlineUsers', () => {
     await authController.getOnlineUsers(req, res, next);
     expect(authService.getOnlineUsers).toHaveBeenCalled();
     expect(res.json).toHaveBeenCalledWith({ success: true, data: online });
+  });
+});
+
+// ─── 密码重置（票 #28）───
+describe('forgotPassword / resetPassword（票 #28）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('forgotPassword：合法 username → 调 service（带 ip/ua）+ 统一 200', async () => {
+    const req = { body: { username: 'alice' }, ip: '203.0.113.5', headers: { 'user-agent': 'ua1' } } as unknown as Request;
+    const { res, next } = mockReqRes();
+    await authController.forgotPassword(req as Request, res as Response, next as NextFunction);
+
+    expect(passwordResetService.requestPasswordReset).toHaveBeenCalledWith('alice', '203.0.113.5', 'ua1');
+    expect(res.json).toHaveBeenCalledWith({ success: true });
+  });
+
+  it('forgotPassword：username 缺失/非字符串 → VAL_001', async () => {
+    const { req, res, next } = mockReqRes({ username: 42 });
+    await authController.forgotPassword(req, res, next);
+
+    expect(next).toHaveBeenCalled();
+    expect(passwordResetService.requestPasswordReset).not.toHaveBeenCalled();
+  });
+
+  it('forgotPassword：service 抛错 → 传递到 next（统一响应兜底）', async () => {
+    const error = new Error('VAL_001');
+    (passwordResetService.requestPasswordReset as ReturnType<typeof vi.fn>).mockRejectedValue(error);
+    const { req, res, next } = mockReqRes({ username: 'alice' });
+    await authController.forgotPassword(req, res, next);
+
+    expect(next).toHaveBeenCalledWith(error);
+  });
+
+  it('resetPassword：token+newPassword → 调 service + 200', async () => {
+    (passwordResetService.resetPassword as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    const { req, res, next } = mockReqRes({ token: 't', newPassword: 'NewPass123' });
+    await authController.resetPassword(req, res, next);
+
+    expect(passwordResetService.resetPassword).toHaveBeenCalledWith('t', 'NewPass123');
+    expect(res.json).toHaveBeenCalledWith({ success: true });
+  });
+
+  it('resetPassword：缺 token → VAL_001 且不调 service', async () => {
+    const { req, res, next } = mockReqRes({ newPassword: 'NewPass123' });
+    await authController.resetPassword(req, res, next);
+
+    expect(next).toHaveBeenCalled();
+    expect(passwordResetService.resetPassword).not.toHaveBeenCalled();
+  });
+
+  it('resetPassword：缺 newPassword → VAL_001 且不调 service', async () => {
+    const { req, res, next } = mockReqRes({ token: 't' });
+    await authController.resetPassword(req, res, next);
+
+    expect(next).toHaveBeenCalled();
+    expect(passwordResetService.resetPassword).not.toHaveBeenCalled();
   });
 });

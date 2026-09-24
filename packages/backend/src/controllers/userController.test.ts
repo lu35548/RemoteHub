@@ -10,8 +10,13 @@ vi.mock('../services/userService.js', () => ({
   deleteUser: vi.fn(),
 }));
 
+vi.mock('../services/passwordResetService.js', () => ({
+  createResetLink: vi.fn(),
+}));
+
 import * as userController from './userController.js';
 import * as userService from '../services/userService.js';
+import * as passwordResetService from '../services/passwordResetService.js';
 import type { Request, Response, NextFunction } from 'express';
 
 function mockReqRes(
@@ -230,6 +235,34 @@ describe('userController', () => {
       await userController.deleteUser(req, res, next);
 
       expect(next).toHaveBeenCalledWith(error);
+    });
+  });
+
+  // ─── createResetLink（票 #28：admin 代重置）───
+  describe('createResetLink', () => {
+    it('成功 → 调 service 并返回 { resetLink }', async () => {
+      (passwordResetService.createResetLink as ReturnType<typeof vi.fn>).mockResolvedValue('http://fe.local/reset-password?token=abc');
+      const { req, res, next } = mockReqRes({ id: 'u2' }, undefined, {}, { id: 'u1', role: 'admin' });
+      (req as any).headers = { 'user-agent': 'admin-agent' };
+
+      await userController.createResetLink(req, res, next);
+
+      expect(passwordResetService.createResetLink).toHaveBeenCalledWith('u2', null, 'admin-agent');
+      expect(res.json).toHaveBeenCalledWith({ success: true, data: { resetLink: 'http://fe.local/reset-password?token=abc' } });
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    it('用户不存在 → 传递 USER_002 到 next', async () => {
+      const error = new Error('USER_002') as any;
+      error.code = 'USER_002';
+      (passwordResetService.createResetLink as ReturnType<typeof vi.fn>).mockRejectedValue(error);
+
+      const { req, res, next } = mockReqRes({ id: 'uX' }, undefined, {}, { id: 'u1', role: 'admin' });
+      (req as any).headers = {};
+      await userController.createResetLink(req, res, next);
+
+      expect(next).toHaveBeenCalledWith(error);
+      expect(res.json).not.toHaveBeenCalled();
     });
   });
 });

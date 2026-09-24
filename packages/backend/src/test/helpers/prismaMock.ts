@@ -11,6 +11,7 @@ export function createPrismaMock() {
   const prismaMock: Record<string, any> = {
     user: modelFns(),
     session: modelFns(),
+    passwordResetToken: modelFns(),
     project: modelFns(),
     projectMember: modelFns(),
     connection: modelFns(),

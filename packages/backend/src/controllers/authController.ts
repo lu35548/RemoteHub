@@ -1,6 +1,7 @@
 // packages/backend/src/controllers/authController.ts
 import type { Request, Response, NextFunction } from 'express';
 import * as authService from '../services/authService.js';
+import * as passwordResetService from '../services/passwordResetService.js';
 import { createAppError, shouldClearRefreshCookie } from '../utils/appError.js';
 import { hashRefreshToken } from '../utils/jwt.js';
 import { prisma } from '../utils/prisma.js';
@@ -136,5 +137,40 @@ export async function getOnlineUsers(_req: Request, res: Response, next: NextFun
   try {
     const data = await authService.getOnlineUsers();
     res.json({ success: true, data });
+  } catch (err) { next(err); }
+}
+
+/** POST /auth/forgot-password（公开，票 #28）：统一成功响应，不暴露用户存在性 */
+export async function forgotPassword(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { username } = req.body as { username?: unknown };
+    if (typeof username !== 'string' || username.trim() === '') {
+      throw createAppError('VAL_001', [{ field: 'username', message: '用户名不能为空' }]);
+    }
+    await passwordResetService.requestPasswordReset(
+      username,
+      req.ip?.slice(0, 45) ?? null,
+      (req.headers['user-agent'] || '').slice(0, 500),
+    );
+    res.json({ success: true });
+  } catch (err) { next(err); }
+}
+
+/** POST /auth/reset-password（公开，票 #28）：token + 新密码 → 改密 + 撤全部 session */
+export async function resetPassword(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { token, newPassword } = req.body as { token?: unknown; newPassword?: unknown };
+    const missing: Array<{ field: string; message: string }> = [];
+    if (typeof token !== 'string' || token === '') {
+      missing.push({ field: 'token', message: 'token 不能为空' });
+    }
+    if (typeof newPassword !== 'string' || newPassword === '') {
+      missing.push({ field: 'newPassword', message: '新密码不能为空' });
+    }
+    if (missing.length > 0 || typeof token !== 'string' || typeof newPassword !== 'string') {
+      throw createAppError('VAL_001', missing);
+    }
+    await passwordResetService.resetPassword(token, newPassword);
+    res.json({ success: true });
   } catch (err) { next(err); }
 }

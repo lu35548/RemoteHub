@@ -24,3 +24,13 @@ export function generateRefreshToken(): string {
 export function hashRefreshToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
+
+// ─── 密码重置 token（票 #28，design §6.3：256-bit 随机，SHA-256 hex 落库与 Session 同族）───
+
+export function generatePasswordResetToken(): string {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+export function hashPasswordResetToken(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}

@@ -11,14 +11,14 @@ afterEach(async () => {
 });
 
 describe('schema 约束（真实 SQLite）', () => {
-  it('migrate deploy 建出 6 张表', async () => {
+  it('migrate deploy 建出 7 张表', async () => {
     const { prisma, cleanUp } = await setupTestDb();
     instances.push(cleanUp);
     const tables = await prisma.$queryRaw<Array<{ name: string }>>`
       SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_prisma_%'
     `;
     const names = tables.map((t) => t.name).sort();
-    expect(names).toEqual(['audit_logs', 'connections', 'project_members', 'projects', 'sessions', 'users']);
+    expect(names).toEqual(['audit_logs', 'connections', 'password_reset_tokens', 'project_members', 'projects', 'sessions', 'users']);
   });
 
   it('@@unique([projectId, name]) 抛 P2002', async () => {

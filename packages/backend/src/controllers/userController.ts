@@ -1,6 +1,7 @@
 // packages/backend/src/controllers/userController.ts
 import type { Request, Response, NextFunction } from 'express';
 import * as userService from '../services/userService.js';
+import * as passwordResetService from '../services/passwordResetService.js';
 import { createAppError } from '../utils/appError.js';
 import { qsParam } from '../utils/qs.js';
 
@@ -52,5 +53,18 @@ export async function deleteUser(req: Request, res: Response, next: NextFunction
     const id = paramId(req, 'id');
     const result = await userService.deleteUser(req.user.id, id);
     res.json({ success: true, data: result });
+  } catch (err) { next(err); }
+}
+
+/** POST /admin/users/:id/reset-link（admin 代重置，票 #28）：生成一次性链接供面板复制转交 */
+export async function createResetLink(req: Request, res: Response, next: NextFunction) {
+  try {
+    const id = paramId(req, 'id');
+    const resetLink = await passwordResetService.createResetLink(
+      id,
+      req.ip?.slice(0, 45) ?? null,
+      (req.headers['user-agent'] || '').slice(0, 500),
+    );
+    res.json({ success: true, data: { resetLink } });
   } catch (err) { next(err); }
 }
