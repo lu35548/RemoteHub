@@ -1,9 +1,9 @@
 # RemoteHub Phase2-P1 Spec：全量收官批
 
-**版本**: v1.1-draft（v1.0 经双轴审查修订：一致性 9 发现 + 可实施性 13 发现全数处置，2026-09-24）
+**版本**: v1.2-draft（v1.1 双轴审查修订 + v1.2 库核验增补：新依赖版本定版与 5 处方案精确化，2026-09-24）
 **日期**: 2026-09-24
 **状态**: 待用户终审
-**产生方式**: grill-with-docs 8 决策（2026-09-24）+ 四域现状证据调研（`docs/superpowers/research/2026-09-24-p1-*.md` 四份，file:line 引用）+ 双轴 spec 审查（并行 agent，引用抽查命中率 ~85%，发现全处置）
+**产生方式**: grill-with-docs 8 决策（2026-09-24）+ 四域现状证据调研（`docs/superpowers/research/2026-09-24-p1-*.md` 四份，file:line 引用）+ 双轴 spec 审查（引用抽查命中率 ~85%，发现全处置）+ 四组库核验（`research/2026-09-24-p1-libcheck-*.md` 四份，版本与 API 均取自 npm registry 实查/官方文档/本地实测）
 **上游文档**: `2026-04-23-remotehub-v2-phase2-design.md`（§6-§13 八模块，原文不动，本 spec 为刷新基底）· `phase2-backlog.md`（开放 10 项全落位）· `2026-08-25-frontend-migration.md`（Out of Scope 4 大类收编）
 **下游**: 拆票（父票 + 约 26 子票，spec→tickets 直通）→ 分支 `feat/phase2-p1`
 **基线**: 448 = 447（#24 记录）+ #25 新增 1（backend 312 / shared 37 / frontend 99 @threads 池 2 线程口径）
@@ -57,16 +57,16 @@ P0 交付审计/监控/安全三模块后，系统仍存三类缺口：
 
 **1. 密码重置域**（design §6，修正后）
 - `PasswordResetToken` 表照 §6.1（tokenHash/usedAt 语义与 Session 同族，无冲突）
-- 自助流：`POST /auth/forgot-password`（公开+限流 **3 次/h/IP + 每用户 24h 5 次**双轨，§6.5 全量）+ 前端 `/reset-password?token=` 路由（**新建**——FRONTEND_URL 环境变量与该路由现状双缺，见证据 auth-security.md）
+- 自助流：`POST /auth/forgot-password`（公开+限流 **3 次/h/IP + 每用户 24h 5 次**双轨，§6.5 全量；用户轨 keyGenerator 用 `req.body.username` **须判型防 undefined 退化成全局共享配额** + trim/lowercase 防变体绕过，v7 的 windowMs 自首次请求起算非自然日——libcheck-auth.md）+ 前端 `/reset-password?token=` 路由（**新建**——FRONTEND_URL 环境变量与该路由现状双缺，见证据 auth-security.md）
 - **admin 代重置**：人员管理面板假按钮换真——调 `POST /admin/users/:id/reset-link` 生成一次性链接，面板弹窗展示供 admin 复制转交（与自助流共用 token 表；**换真必改锁定假行为的测试** UserManagementModal.test.tsx:143-153，且该测试现无 Router 包裹，onSuccess 加 navigate 须补 MemoryRouter）
 - **会话空窗修复**（auth 证据 #4）：改密/重置成功 → 后端已撤 session 清 cookie，但前端内存 access token 残留 ≤15 分钟——`useChangePassword` 与新重置流 onSuccess 必须清 token + 跳 /login；顺带落 backlog「改密 toast 请重新登录」
 - 安全约束照 §6.5（token 1h、每用户 ≤3 有效、用后标记不物理删）
 
 **2. 2FA TOTP**（design §11，**方案修正**）
 - **§11.4 tempToken 复用 Session 表 + consumedAt 的方案作废**——现状 consumedAt 是 refresh 轮换语义，非空 session 被再触达判重用攻击撤全部 session（authService.ts:104-139）。改用：登录二段挑战发短时 JWT（**`aud:'mfa'` 独立声明**，15 分钟）
-- **安全三件套（审查发现，必做）**：① mfa JWT 用 `aud:'mfa'` 签发 ② `verifyAccessToken` 校验 aud（access token 的 aud 必须非 'mfa'）③ authMiddleware 拒收 aud='mfa' 的 token——否则 mfaPending token 可直接当 access token 用，密码到手即绕过 2FA（jwt.ts:5-18 现状丢弃 claim、auth.ts:34 无区分）。测试锁死「mfa token 访问任意业务 API 必 401」
+- **安全三件套（审查发现 + jose 源码核验精确化，必做）**：① mfa JWT 用 `aud:'mfa'` 签发 ② **access token 签发端显式 `setAudience('access')`、校验端 `jwtVerify` 显式传 `audience:'access'`**（jose 实测：不传 audience 选项时 aud claim 完全不校验——「只拒收 mfa」的反向逻辑不够）③ **绝不签发多值 `aud:['access','mfa']` token**（any-overlap 语义下双校验皆过等于没防）。authMiddleware 拒收 aud='mfa'。测试锁死「mfa token 访问任意业务 API 必 401」+「access token 无 aud/多值 aud 必被拒」
 - User 表加 `twoFactorEnabled Boolean @default(false)` + `totpSecret String?`（加密复用通用通道 utils/encryption.ts:17-51，已核非 connection 专用）
-- 开关：admin 按用户启用；启用时用户首登进入绑定流（二维码+恢复码）
+- 开关：admin 按用户启用；启用时用户首登进入绑定流（**qrcode.react@4.2.0** 渲染 otpauth:// URI，peer 明确支持 React 19）；TOTP 用 **otpauth@9.5.2**（纯 JS 零原生依赖，window=1 官方建议）；**恢复码自实现**（otpauth 无内建，OWASP 口径：N 组单次码 + hash 存储 + 启用流程强制确认）
 
 **3. 性能监控**
 - 中间件记 API 响应时间（内存环形缓冲，按路由聚合 P50/P95/P99），`GET /admin/stats/performance`（挂 roleMiddleware('admin')，参照 monitoringRoutes.ts:11-13 现有三端点）
@@ -78,7 +78,8 @@ P0 交付审计/监控/安全三模块后，系统仍存三类缺口：
 
 **5. WebSocket 通知管道**（design §8，偏差修正后）
 - **nginx WS 三件套为硬前置**（证据 notify-backup.md #1）：`/api/` location 补 `proxy_http_version 1.1` + `proxy_set_header Upgrade $http_upgrade` + `proxy_set_header Connection "upgrade"`；design 写 Caddy 处订正为 nginx
-- **dev 栈前置**：vite proxy 补 `ws: true`（vite.config.ts:25-30 现无）——WS 路径定为 **`/api/v1/ws`**（复用 /api 前缀走两条代理通道，不另开端口）
+- **dev 栈前置**：vite proxy 补 `ws: true`（vite.config.ts:25-30 现无；官方确认 rewrite 对 upgrade 同样生效）——WS 路径定为 **`/api/v1/ws`**（复用 /api 前缀走两条代理通道，不另开端口）
+- **连接鉴权通道（协议硬约束，libcheck-ws.md）**：浏览器 WebSocket **无法设置 Authorization header**——鉴权改走 upgrade 时验 httpOnly cookie（refresh token 对应 session 有效性）或首消息 token；库定版 **ws@8.21.3**，`WebSocketServer({ server, path: '/api/v1/ws' })` 官方支持路径过滤，心跳 30s ping + isAlive + terminate 为 README 原文惯例（30s < nginx 60s read_timeout 默认，安全）；**前端自写 ~60 行 WS hook**（react-use-websocket 停更 2025-02 仅验 React 18、reconnecting-websocket 停更 2023，均不采用），WS→Query 联动用官方 setQueryData/invalidateQueries 模式
 - CSP 假设作废：生产页由 nginx 托管且不加安全头（nginx.conf:12-13），helmet connect-src 仅 dev 生效——spec 不依赖 CSP 改动
 - `ws` 库 attach 到 http server 实例（**server.ts 现无实例引用，顺手补 graceful shutdown：SIGTERM → 关 ws 连接 → 关 server**；**重构红线：保持「import 不 listen」语义**——NODE_ENV=test guard 跳过 bootstrap 依赖此，证据 #2）
 - 房间模型照 §8.2（project 房间 + admin 房间）；心跳 30s；前端指数退避重连 + token 过期 `reconnect_required` 处理
@@ -88,7 +89,8 @@ P0 交付审计/监控/安全三模块后，系统仍存三类缺口：
 - WS 集成测试：beforeAll 手动 `app.listen(0)` 拿真实端口（serverBootstrap 只返回 app）；jsdom 无 WebSocket 须桩客户端
 
 **6. 数据备份**（design §7，修正后）
-- `VACUUM INTO` 走 `$queryRaw`（server.ts:171 先例）；**dev 路径必须过 `resolveSqliteUrl` 锚定**（否则备到空库，证据 #4）。**测试红线：回归用例用相对 URL + 变 CWD 断言锚定分支**（setupTestDb 造绝对 URL 走不到该分支，集成挂上去只会空转绿；sqliteUrl.test.ts 已有底子）
+- `VACUUM INTO` 走 **`$executeRaw` 模板参数化**（libcheck-backup.md 实测：文件名是标量表达式**可绑定参数**，Prisma 6.19.3 + better-sqlite3@11.10.0（捆绑 SQLite 3.49.2 ≥ 3.27 达标）三链路验证通过——零 SQL 注入面，文件系统层校验仍需）；**目标已存在时报错**——写临时名成功后 rename，防中断损坏留半档；**dev 路径必须过 `resolveSqliteUrl` 锚定**（否则备到空库，证据 #4）。**测试红线：回归用例用相对 URL + 变 CWD 断言锚定分支**（setupTestDb 造绝对 URL 走不到该分支，集成挂上去只会空转绿；sqliteUrl.test.ts 已有底子）
+- 定时任务复用 **node-cron@3.0.3（项目已在）**，照 auditCleaner.ts:24-30 同款模式挂 02:00（.backup() 通道对比已核：Prisma adapter 下拿不到裸 Database 句柄，维持 VACUUM INTO 有据）
 - **compose 卷**：现状无 backup 卷（docker-compose.yml:37-38 已核），**新建顶层独立卷** `backup-data`（§7.6 的嵌套结构废弃，无旧卷迁移负担）；retention 清理保留 N 份
 - cron 02:00 定时（仅定时，见 W2-5 cleaner 裁决）+ admin 手动触发端点；备份完成/失败走通知管道；恢复流程 = 文档化 runbook（停栈 → 替换 db 文件 → 起栈），不做在线恢复
 - /admin/backups 页（§19 预留第三页落位）：列表 + 手动触发 + 下载
@@ -107,8 +109,8 @@ P0 交付审计/监控/安全三模块后，系统仍存三类缺口：
 - **编辑密码清空**：编辑时密码框支持「清空」显式动作（区别于「留空=保持不变」）
 **11. 协议注册表（完整版，D8）**
 - shared：`PROTOCOL_REGISTRY`——每协议 schema（字段定义/类型/默认值：SSH port=22、HTTPS=443；ToDesk/向日葵=设备 ID+验证码形态无 host/port；RDP=host+port+域前缀可选）
-- 后端：连接 create/update 按 registry 校验（协议专属必填/默认值填充）；直连端点按协议分派——RDP 生成 mstsc 指令串/`.rdp` 内容、SSH 拼 `ssh user@host` 命令、VPN/HTTPS 返回打开 URL、ToDesk 类返回深链
-- 前端：新建/编辑表单按 registry 动态渲染（协议切换字段联动）；「一键直连」按协议分派动作
+- 后端：连接 create/update 按 registry 校验（协议专属必填/默认值填充）；**直连分派三类**（libcheck-docs-ci-rdp.md 核验：mstsc 命令行无 /user 参数、ssh:///rdp:// 全平台无系统级 handler，深链方案砍）——① **.rdp 文件下载**（UTF-16 LE+BOM、`application/x-rdp`、唯一必填 `full address:s: host:port`）② **命令串复制**（RDP `mstsc /v:host:port`、SSH `ssh user@host`、ToDesk 设备码）③ **URL 打开**（VPN/HTTPS）
+- 前端：新建/编辑表单按 registry 动态渲染（协议切换字段联动）；「一键直连」按协议分派上述三类动作
 **12. 项目管理增强**（design §10，修正后）
 - 归档：Project 加 `status` 字段（active/archived，**纯 string 不用 design 的 @db.VarChar(20)**——SQLite 方言冲突）；归档项目只读展示+可恢复
 - 复制（**照 design 深拷贝**：项目+全部连接密文服务端复制，成员不复制；`（副本）` 递增改名）/ 转让（owner 变更、原 owner 降 **editor**——design 原文，MEMBER_ROLES 无 admin；**事务内先升新 owner 后降原 owner**，避 memberService.ts:70-75 的 last-owner 保护 MEMBER_002）/ 批量归档
@@ -122,11 +124,11 @@ P0 交付审计/监控/安全三模块后，系统仍存三类缺口：
 - JSON 全量导出（projects/connections/members/users-不含密码哈希/审计不含）；导入 = 事务 upsert + 密文字文原样搬运（同 key 前提）；导出文件含 `encryptionKeyFingerprint`（key 的 SHA-256 前 8 位）供导入前校验——**key 不匹配 422 拒绝**
 - v1 export 路由从未挂载（证据 infra-cleanup.md），无参照，从零按本节
 **15. Swagger**（design §13）
-- swagger-jsdoc + Express 5 兼容性验证（v1 有全套 Express 4 注解实践可抄结构）；统一响应 `{success,data|error}` 包一层生成 schema；/api-docs 仅非生产环境暴露；**依赖边：后于全部新增端点票**（W1/W2/W3 后端票），先做会漏注解
+- **swagger-jsdoc@6.3.0 + swagger-ui-express@5.0.1**（libcheck 核验：peer 已放行 express >=5.0.0-beta，项目 ^5.1.0 满足；配 @types 双包；遗留风险为上游无 express5 回归测试——本票集成测试自兜底）；统一响应 `{success,data|error}` 包一层生成 schema；/api-docs 仅非生产环境暴露；**依赖边：后于全部新增端点票**（W1/W2/W3 后端票），先做会漏注解
 **16. 清理与订正票**
 - 删 `backend/`（git tracked 116 文件，删前金矿票已消费参照）；删前核对 `.gitignore` 覆盖与磁盘残留（git-rm-ignored-residue 教训）
 - ADR：SQLite 豁免（project.md **四处** MySQL 表述一并订正）+ Caddy→nginx 订正 + health 五字段口径固化
-- 工程填缝：CI actions 升级（**checkout/setup-node ×2 共 4 处升 v5；pnpm/action-setup 无 v5 维持 v4**）；nginx `resolver` 指令（docker DNS 127.0.0.11，backend 重建不 restart frontend）；compose backend healthcheck `localhost`→`127.0.0.1`（对齐 frontend，避 IPv6 ::1 坑）；setup Modal「暂不配置」文案 + copyTarget 魔法串重构（backlog 落位）
+- 工程填缝：**CI actions 升至当前主线（checkout/setup-node 已到 v7——v5 为旧情报；setup-node v6+ 自动缓存仅 npm，本项目显式 `cache:'pnpm'` 兼容；pnpm/action-setup 升 v6.1.0）**；**Node 22 LTS 升级**（Node 20 已于 2026-04-30 EOL，与 CI 升级同票顺手：Dockerfile 基镜像 + engines + CI matrix）；nginx `resolver` 指令（docker DNS 127.0.0.11，backend 重建不 restart frontend）；compose backend healthcheck `localhost`→`127.0.0.1`（对齐 frontend，避 IPv6 ::1 坑）；setup Modal「暂不配置」文案 + copyTarget 魔法串重构（backlog 落位）
 **17. 浏览器级总验收**（P0-10 同款模式）：双栈验收含 2FA 挑战流/重置流/**mfa token 越权 401**/通知即时性（WS）/备份下载恢复 runbook 演练/金矿操作/协议表单切换/移动视口抽检/console 卫生/质量门终值
 
 ## 测试决策
@@ -161,6 +163,10 @@ P0 交付审计/监控/安全三模块后，系统仍存三类缺口：
 ### 既定事实（2026-09-24 考证 + 双轴审查复核）
 
 四份证据文件为权威：`research/2026-09-24-p1-auth-security.md`（12 偏差/10 风险/12 疑问）、`-notify-backup.md`、`-collab-frontend.md`、`-infra-cleanup.md`。审查增量：分页后端已齐备（非缺口）；ENCRYPTION_KEY 通道为通用 crypto util（utils/encryption.ts:17-51，含 ENCRYPTION_KEY_OLD 轮换兜底）；WS upgrade 不经 express 链限流拦不到；v1 金矿参照按项锚定行号。
+
+### 库核验定版（2026-09-24，`research/2026-09-24-p1-libcheck-*.md` 四份）
+
+新依赖版本定版：**otpauth@9.5.2**（纯 JS）/ **qrcode.react@4.2.0**（React 19 peer）/ **ws@8.21.3** / swagger-jsdoc@6.3.0 + swagger-ui-express@5.0.1；已在项目复用：node-cron@3.0.3、express-rate-limit 7.5.1（不跨 major）、jose 6.2.2（aud 语义已源码级核验）。核验级方案修订：jose 双向显式 aud（W1-2）、WS cookie 鉴权 + 自写 hook（W2-5）、VACUUM INTO 参数化 + 临时名 rename（W2-6）、直连三类分派砍深链（W3-11）、CI 主线 v7 + Node 22 LTS（W4-16）。
 
 ### 流程与治理
 
