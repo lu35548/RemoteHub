@@ -47,6 +47,24 @@ export interface ChangePasswordRequest {
   newPassword: string;
 }
 
+// ─── 密码重置（票 #29 消费，端点契约见票 #28）───
+
+/** POST /auth/forgot-password */
+export interface ForgotPasswordRequest {
+  username: string;
+}
+
+/** POST /auth/reset-password */
+export interface ResetPasswordRequest {
+  token: string;
+  newPassword: string;
+}
+
+/** POST /admin/users/:id/reset-link 响应 data */
+export interface AdminResetLinkResponse {
+  resetLink: string;
+}
+
 export interface UpdateProfileRequest {
   nickname: string;
 }

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { UserListItem } from '@remotehub/shared';
+import { MemoryRouter } from 'react-router-dom';
 import { UIProvider } from './UIComponents';
 import UserManagementModal from './UserManagementModal';
 
@@ -11,6 +12,7 @@ const { state } = vi.hoisted(() => ({
     createUser: vi.fn(),
     deleteUser: vi.fn(),
     changePassword: vi.fn(),
+    resetLink: vi.fn(),
   },
 }));
 vi.mock('../api/queries', () => ({
@@ -20,9 +22,10 @@ vi.mock('../api/queries', () => ({
       pagination: { page: 1, pageSize: 100, total: state.users.length },
     },
   }),
-  useCreateUser: () => ({ mutateAsync: state.createUser }),
-  useDeleteUser: () => ({ mutateAsync: state.deleteUser }),
-  useChangePassword: () => ({ mutateAsync: state.changePassword }),
+  useCreateUser: () => ({ mutateAsync: state.createUser, isPending: false }),
+  useDeleteUser: () => ({ mutateAsync: state.deleteUser, isPending: false }),
+  useChangePassword: () => ({ mutateAsync: state.changePassword, isPending: false }),
+  useAdminResetLink: () => ({ mutateAsync: state.resetLink, isPending: false }),
 }));
 
 // mock 按真实运行时形状造（backend listUsers select 输出：lastActiveAt string|null）
@@ -39,14 +42,16 @@ const adminUser = userItem({
 
 const renderModal = (props: Partial<Parameters<typeof UserManagementModal>[0]> = {}) =>
   render(
-    <UIProvider>
-      <UserManagementModal
-        isOpen
-        onClose={vi.fn()}
-        currentUser={adminUser}
-        {...props}
-      />
-    </UIProvider>,
+    <MemoryRouter>
+      <UIProvider>
+        <UserManagementModal
+          isOpen
+          onClose={vi.fn()}
+          currentUser={adminUser}
+          {...props}
+        />
+      </UIProvider>
+    </MemoryRouter>,
   );
 
 // v1 行为：admin 打开弹窗默认「个人中心」tab，切「人员管理 (Admin)」见列表
@@ -60,6 +65,7 @@ describe('UserManagementModal（T7）', () => {
     state.createUser.mockReset();
     state.deleteUser.mockReset();
     state.changePassword.mockReset();
+    state.resetLink.mockReset();
   });
 
   it('admin 渲染：双 tab + 个人资料卡（昵称/@用户名/角色徽章）+ 修改密码表单', () => {
@@ -140,16 +146,47 @@ describe('UserManagementModal（T7）', () => {
     expect(await screen.findByText('用户已删除')).toBeInTheDocument();
   });
 
-  it('重置密码按钮：仅 toast 提示（v1 假动作逐字），不发任何请求', () => {
+  it('重置密码按钮：调 admin 代重置端点（u2）并弹窗展示一次性链接（假动作已换真）', async () => {
     state.users = [adminUser, userItem()];
+    state.resetLink.mockResolvedValue({ resetLink: 'http://fe.local/reset-password?token=abc123' });
     renderModal();
 
     openUsersTab();
     fireEvent.click(screen.getByTitle('重置密码'));
-    expect(screen.getByText('请通知该员工：密码已重置为 "123456"')).toBeInTheDocument();
-    expect(state.createUser).not.toHaveBeenCalled();
-    expect(state.deleteUser).not.toHaveBeenCalled();
-    expect(state.changePassword).not.toHaveBeenCalled();
+
+    await waitFor(() => expect(state.resetLink).toHaveBeenCalledWith('u2'));
+    expect(await screen.findByLabelText('重置链接')).toHaveValue('http://fe.local/reset-password?token=abc123');
+    // v1 撒谎文案已移除
+    expect(screen.queryByText('请通知该员工：密码已重置为 "123456"')).not.toBeInTheDocument();
+  });
+
+  it('重置密码弹窗：复制按钮写入剪贴板 + 已复制 toast', async () => {
+    state.users = [adminUser, userItem()];
+    state.resetLink.mockResolvedValue({ resetLink: 'http://fe.local/reset-password?token=abc123' });
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+      configurable: true,
+    });
+    renderModal();
+
+    openUsersTab();
+    fireEvent.click(screen.getByTitle('重置密码'));
+    fireEvent.click(await screen.findByRole('button', { name: '复制链接' }));
+
+    await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith('http://fe.local/reset-password?token=abc123'));
+    expect(await screen.findByText('已复制')).toBeInTheDocument();
+  });
+
+  it('重置链接请求失败 → toast 错误（无弹窗）', async () => {
+    state.users = [adminUser, userItem()];
+    state.resetLink.mockRejectedValue({ error: { code: 'RESET_003', message: '重置请求已达上限，请等待现有令牌过期后再试' } });
+    renderModal();
+
+    openUsersTab();
+    fireEvent.click(screen.getByTitle('重置密码'));
+
+    expect(await screen.findByText('重置请求已达上限，请等待现有令牌过期后再试')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '复制链接' })).not.toBeInTheDocument();
   });
 
   it('改密校验：两次新密码不一致 → toast 错误，不调 API', async () => {
@@ -177,7 +214,7 @@ describe('UserManagementModal（T7）', () => {
       expect(state.changePassword).toHaveBeenCalledWith({
         oldPassword: 'Old123!', newPassword: 'New123!',
       }));
-    expect(await screen.findByText('下次登录请使用新密码')).toBeInTheDocument();
+    expect(await screen.findByText('请使用新密码重新登录')).toBeInTheDocument();
     await waitFor(() =>
       expect((screen.getByLabelText('当前密码') as HTMLInputElement).value).toBe(''));
   });

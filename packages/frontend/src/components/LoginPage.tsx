@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Monitor, Lock, User, ArrowRight, ShieldCheck, AlertCircle } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useLogin } from '../api/queries';
 import { useUI } from './UIComponents';
 import type { ApiErrorResponse } from '@remotehub/shared';
@@ -103,6 +103,13 @@ const LoginPage: React.FC = () => {
               )}
             </button>
           </form>
+
+          {/* 票 #29：自助重置入口 */}
+          <div className="mt-4 text-center">
+            <Link to="/forgot-password" className="text-xs text-slate-400 hover:text-blue-400 transition-colors">
+              忘记密码？
+            </Link>
+          </div>
 
           <div className="mt-8 pt-6 border-t border-white/5 text-center">
             <div className="inline-flex items-center gap-1.5 text-[10px] text-slate-500 bg-white/5 px-3 py-1 rounded-full border border-white/5">

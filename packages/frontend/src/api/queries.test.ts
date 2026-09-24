@@ -3,18 +3,26 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 // mock 数据层与 react-query：捕获 useQuery options 断言（queryKey/URL/staleTime），
 // 不真渲染 Provider——hooks 层契约测试（票 #22：staleTime 5min 覆盖默认 30s）
 let captured: Record<string, unknown> | undefined;
+let mutationCaptured: Record<string, unknown> | undefined;
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: vi.fn((opts: unknown) => {
     captured = opts as Record<string, unknown>;
     return { data: undefined, isPending: true };
   }),
-  useMutation: vi.fn(),
+  useMutation: vi.fn((opts: unknown) => {
+    mutationCaptured = opts as Record<string, unknown>;
+    return { mutateAsync: vi.fn(), isPending: false };
+  }),
   useQueryClient: vi.fn(() => ({ invalidateQueries: vi.fn() })),
 }));
 
+vi.mock('react-router-dom', () => ({
+  useNavigate: () => vi.fn(),
+}));
+
 vi.mock('./client.js', () => ({
-  api: { get: vi.fn(), getRaw: vi.fn() },
+  api: { get: vi.fn(), getRaw: vi.fn(), post: vi.fn() },
   setAccessToken: vi.fn(),
   API_BASE: '/api/v1',
   // 导出走手动 fetch，token 从内存取；401 走 ensureRefreshed 重试（票 #23 review 采纳）
@@ -22,7 +30,7 @@ vi.mock('./client.js', () => ({
   ensureRefreshed: vi.fn().mockResolvedValue(null),
 }));
 
-import { exportAuditLogsCsv, useAuditLogs, useDashboard, useProjectStats, useUserStats } from './queries';
+import { exportAuditLogsCsv, useAuditLogs, useDashboard, useForgotPassword, useProjectStats, useResetPassword, useAdminResetLink, useUserStats } from './queries';
 import { api, ensureRefreshed } from './client.js';
 import type { AuditLogQuery } from '@remotehub/shared';
 
@@ -187,5 +195,33 @@ describe('exportAuditLogsCsv（票 #23）', () => {
 
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+});
+
+// ── 密码重置 hooks（票 #29）──
+// forgot/reset 是 POST 端点：mutationFn URL/载荷契约（空窗导航行为在 useChangePassword.test 锁）
+describe('密码重置 hooks（票 #29）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mutationCaptured = undefined;
+  });
+
+  it('useForgotPassword：POST /auth/forgot-password', () => {
+    useForgotPassword();
+    expect(typeof mutationCaptured!.mutationFn).toBe('function');
+    (mutationCaptured!.mutationFn as (d: unknown) => unknown)({ username: 'alice' });
+    expect((api.post as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('/auth/forgot-password', { username: 'alice' });
+  });
+
+  it('useResetPassword：POST /auth/reset-password（token+newPassword）', () => {
+    useResetPassword();
+    (mutationCaptured!.mutationFn as (d: unknown) => unknown)({ token: 't', newPassword: 'n' });
+    expect(api.post).toHaveBeenCalledWith('/auth/reset-password', { token: 't', newPassword: 'n' });
+  });
+
+  it('useAdminResetLink：POST /admin/users/:id/reset-link', () => {
+    useAdminResetLink();
+    (mutationCaptured!.mutationFn as (d: unknown) => unknown)('u2');
+    expect(api.post).toHaveBeenCalledWith('/admin/users/u2/reset-link');
   });
 });

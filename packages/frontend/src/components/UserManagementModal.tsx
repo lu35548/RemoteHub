@@ -2,8 +2,14 @@ import React, { useState } from 'react';
 import type { UserListItem, UserPublic } from '@remotehub/shared';
 import { Modal, useUI } from './UIComponents';
 import { UserCog, Plus, Trash2, Key, Shield } from 'lucide-react';
-import { useUsers, useCreateUser, useDeleteUser, useChangePassword } from '../api/queries';
+import { useUsers, useCreateUser, useDeleteUser, useChangePassword, useAdminResetLink } from '../api/queries';
 import { errMsg } from '../utils';
+
+/** 重置链接弹窗数据：目标用户 + 一次性链接 */
+interface ResetLinkInfo {
+  nickname: string;
+  resetLink: string;
+}
 
 interface UserManagementModalProps {
   isOpen: boolean;
@@ -25,6 +31,28 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen, onClo
   const createUser = useCreateUser();
   const deleteUser = useDeleteUser();
   const changePassword = useChangePassword();
+  const resetLinkMutation = useAdminResetLink();
+  const [resetLinkInfo, setResetLinkInfo] = useState<ResetLinkInfo | null>(null);
+
+  /** 票 #29：假重置换真——调 admin 代重置端点，弹窗展示一次性链接供复制转交 */
+  const handleResetLink = async (u: UserListItem) => {
+    try {
+      const { resetLink } = await resetLinkMutation.mutateAsync(u.id);
+      setResetLinkInfo({ nickname: u.nickname || u.username, resetLink });
+    } catch (err) {
+      toast('error', '生成重置链接失败', errMsg(err, '无法生成重置链接'));
+    }
+  };
+
+  const handleCopyResetLink = async () => {
+    if (!resetLinkInfo) return;
+    try {
+      await navigator.clipboard.writeText(resetLinkInfo.resetLink);
+      toast('success', '已复制', '重置链接已复制到剪贴板');
+    } catch {
+      toast('error', '复制失败', '请手动选中链接复制');
+    }
+  };
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,7 +97,7 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen, onClo
         oldPassword: passChange.old,
         newPassword: passChange.new,
       });
-      toast('success', '修改成功', '下次登录请使用新密码');
+      toast('success', '修改成功', '请使用新密码重新登录');
       setPassChange({ old: '', new: '', confirm: '' });
     } catch (err) {
       toast('error', '修改失败', errMsg(err, '无法修改密码'));
@@ -77,7 +105,8 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen, onClo
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} className="max-w-4xl h-[600px] flex flex-col">
+    <>
+      <Modal isOpen={isOpen} onClose={onClose} className="max-w-4xl h-[600px] flex flex-col">
       <div className="flex h-full bg-slate-950 rounded-2xl overflow-hidden">
         {/* 侧栏 */}
         <div className="w-64 bg-slate-900 border-r border-slate-800 p-4 flex flex-col gap-2">
@@ -183,8 +212,8 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen, onClo
                     </div>
                     {u.id !== currentUser.id && (
                       <div className="flex gap-2">
-                        {/* v1 假动作逐字保留：仅提示、不请求（v1 无重置密码 API，文案怪癖归 phase2） */}
-                        <button onClick={() => toast('info', '重置密码', '请通知该员工：密码已重置为 "123456"')} className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg" title="重置密码"><Key size={16} /></button>
+                        {/* 票 #29 换真：生成一次性重置链接，弹窗展示供 admin 复制转交 */}
+                        <button onClick={() => handleResetLink(u)} className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg" title="重置密码"><Key size={16} /></button>
                         <button onClick={() => handleDeleteUser(u.id)} className="p-2 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg" title="删除用户"><Trash2 size={16} /></button>
                       </div>
                     )}
@@ -195,7 +224,41 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen, onClo
           )}
         </div>
       </div>
-    </Modal>
+      </Modal>
+
+      {/* 票 #29：重置链接弹窗（展示一次性链接 + 复制） */}
+      <Modal isOpen={!!resetLinkInfo} onClose={() => setResetLinkInfo(null)} className="max-w-lg">
+        {resetLinkInfo && (
+          <div className="p-6">
+            <h3 className="text-lg font-bold text-white mb-2">重置密码链接</h3>
+            <p className="text-xs text-slate-400 mb-4">
+              一次性链接，1 小时内有效。请转交 {resetLinkInfo.nickname}，由其打开链接自行设置新密码。
+            </p>
+            <input
+              type="text"
+              readOnly
+              value={resetLinkInfo.resetLink}
+              aria-label="重置链接"
+              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-blue-300 text-sm mb-4"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setResetLinkInfo(null)}
+                className="px-4 py-2 rounded-lg text-sm text-slate-300 hover:bg-slate-800"
+              >
+                关闭
+              </button>
+              <button
+                onClick={handleCopyResetLink}
+                className="px-4 py-2 rounded-lg text-sm bg-blue-600 hover:bg-blue-500 text-white"
+              >
+                复制链接
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+    </>
   );
 };
 

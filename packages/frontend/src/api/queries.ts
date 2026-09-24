@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { API_BASE, api, ensureRefreshed, getAccessToken, setAccessToken } from './client.js';
 import { downloadBlob } from '../utils';
 import type {
@@ -8,7 +9,7 @@ import type {
   ConnectionListItem, ConnectionDetail, CreateConnectionRequest, UpdateConnectionRequest,
   MemberListItem, AddMemberRequest, UpdateMemberRoleRequest,
   UserListItem, AdminUpdateUserRequest, UserSearchResult, RegisterRequest,
-  PaginatedResponse,
+  PaginatedResponse, ForgotPasswordRequest, ResetPasswordRequest, AdminResetLinkResponse,
 } from '@remotehub/shared';
 
 // ─── Auth ───
@@ -33,9 +34,46 @@ export function useMe() {
 }
 
 export function useChangePassword() {
+  const qc = useQueryClient();
+  // 会话空窗修复（票 #29）：后端改密成功即撤 session + 清 cookie，内存 access token
+  // 残留 ≤15 分钟空窗——onSuccess 主动清 token + 清缓存 + 跳登录页
+  const navigate = useNavigate();
   return useMutation({
     mutationFn: (data: { oldPassword: string; newPassword: string }) =>
       api.post('/auth/change-password', data),
+    onSuccess: () => {
+      setAccessToken(null);
+      qc.clear();
+      navigate('/login');
+    },
+  });
+}
+
+/** POST /auth/forgot-password（票 #29）：统一成功响应，由页面层渲染固定文案 */
+export function useForgotPassword() {
+  return useMutation({
+    mutationFn: (data: ForgotPasswordRequest) => api.post('/auth/forgot-password', data),
+  });
+}
+
+/** POST /auth/reset-password（票 #29）：成功后同款会话空窗处理（清 token + 跳 /login） */
+export function useResetPassword() {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  return useMutation({
+    mutationFn: (data: ResetPasswordRequest) => api.post('/auth/reset-password', data),
+    onSuccess: () => {
+      setAccessToken(null);
+      qc.clear();
+      navigate('/login');
+    },
+  });
+}
+
+/** POST /admin/users/:id/reset-link（票 #29）：admin 代重置，返回一次性链接 */
+export function useAdminResetLink() {
+  return useMutation({
+    mutationFn: (id: string) => api.post<AdminResetLinkResponse>(`/admin/users/${id}/reset-link`),
   });
 }
 
