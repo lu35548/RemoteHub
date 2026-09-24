@@ -13,10 +13,30 @@
 - [x] **`RemoteHub/.env.local` 磁盘去留（2026-08-31 T12 发现）**——✅ 用户拍板保留：git rm 后磁盘残留的唯一未跟踪文件（352B，曾因 v1 `.gitignore` 层被 porcelain 隐藏），密钥模式 1 命中。保留为未跟踪文件——根 `.gitignore:4` 的 `.env.local` 规则覆盖之，`git status` 不显示（初判「会显示 `?? RemoteHub/`」系未验证预测，已自查纠正）。
 - [x] **shared `AuditLog` 接口与 Prisma model 同名不同形**（2026-09-04 票 #15 review 发现）——✅ 票 #16 裁决（见下 section）：**不改名、不强制映射**。约定 = 后端文件不同时裸名导入两侧；DB 行类型如需引用走 `Prisma.*` 命名空间（audit.ts 顶部注释固化）。P0-2 实际未出现同文件双导入（中间件只写库不读 DTO）；DTO 映射函数推迟到 P0-3 查询端点按需落地。
 - [x] **frontend ConnectionModal/ProjectModal/App userEvent 测试全量默认并发下 5s 超时**（2026-09-04 首暴露 2 条；2026-09-23 #24 验收实证恶化：默认并发 7 败/99，失败集漂移；单文件恒绿、2 线程全量 99/99 绿——jsdom 14 文件并行挤爆本机资源所致，非用例缺陷）——✅ 已修关（#26 方案 A：vite.config.ts 锁 threads 池 2 线程，commit 6f8a5b5，默认命令 99/99 绿 54.5s）。
-- [ ] **首个 SQLite 方言 migration vs project.md「MySQL 统一」约定**（Standards 轴提示）：v2 SQLite 切换 spec 修正表 #5 已自认，方言切换成本自此起算——迁移期结束统一处理或 ADR 明示豁免。
-- [ ] **净化豁免清单未含 Project `description`**（2026-09-04 票 #18 Standards 轴 review）：Project 自由文本字段是 description 非 notes，含 `--`/`&&` 技术串会被 422——(a) spec 修订补豁免 或 (b) 接受误杀面明示，待用户裁决。
+- [ ] **首个 SQLite 方言 migration vs project.md「MySQL 统一」约定**——已移交 P1 #52（ADR 豁免 + project.md 四处订正，spec D6 裁决）。
+- [ ] **净化豁免清单未含 Project `description`**——已裁决（P1 spec D6）：接受误杀面并明示边界，随 #52 ADR 固化。
 - [ ] **AUTH_LOGIN 审计行操作人恒为「系统」**（票 #22 Spec 轴 review 发现）：login 未认证 userId=null 是 P0-5 spec 口径，但登录人信息（IP/UA）其实已记录，是否让 login 审计带 userId 待裁决。
 
+---
+
+## [2026-09-24] Phase2-P1 立项：spec v1.2 定稿 + 27 票拆票 ✅
+
+grill 8 决策（全量收官/WebSocket 场景重排/i18n 砍/2FA 开关制/backend git rm/OQ 进 ADR/波次依赖驱动/协议元数据完整版）→ 四域证据调研（4 agent 并行，file:line）→ spec 双轴审查（22 发现全处置，含 mfa token 可当 access token 用的安全级拦路项）→ 四组库核验（版本+API 实查定版）→ v1.2 终审定稿 → 拆票：父票 #27 + 子票 #28-#53（26 张四波次）。分支 feat/phase2-p1 待首票创建。
+
+### Design decisions
+- [2026-09-24] 决策：jose 双向显式 aud（签发 setAudience('access') + 校验 audience:'access'，禁多值 aud）——源码级核验「不传 audience 完全不校验」，反向拒收逻辑不够。
+- [2026-09-24] 决策：WS 鉴权走 cookie（浏览器 WebSocket 无法设 Authorization header，协议硬约束）；前端自写 hook（两个候选库均停更）。
+- [2026-09-24] 决策：VACUUM INTO 模板参数化（三链路实测可绑定，零注入）；直连三类分派（.rdp 文件/命令串/URL），深链砍（全平台无 handler 实证）；CI 升当前主线 v7 + Node 22 LTS（Node 20 已 EOL）。
+- [2026-09-24] 决策：复制项目照 design 深拷贝（成员不复制）——v1.0 曾擅自反转为浅复制被审查抓回，登记修正表 #9。
+
+### Deviations
+- 拆票脚本 bash 转义事故 ×2（反引号内 VACUUM/${absPath} 被命令替换吞、$CLAUDE_JOB_DIR 未展开）——修复均走 Write 文件 + gh --body-file 零转义通道；教训：含反引号/美元符的 issue 正文禁走内联 bash，一律文件化。
+
+### Tradeoffs
+- 库核验前先「文档/审查定稿」后「核验增补 v1.2」两段式，而非核验后再写 spec——接受 v1.1→v1.2 一轮返工，换取审查与核验并行。
+
+### Open questions
+- （无新增挂起；AUTH_LOGIN 审计 userId 一条仍开放，非阻塞）
 ---
 
 ## [2026-09-23] 票 #26：frontend 测试锁 2 线程 ✅
