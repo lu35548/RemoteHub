@@ -105,6 +105,7 @@ app.use(sanitizationMiddleware);
 
 // ─── Route registration ───
 import { healthRoutes } from './routes/healthRoutes.js';
+import { probeRoutes } from './routes/probeRoutes.js';
 import { authRoutes } from './routes/authRoutes.js';
 import { userRoutes } from './routes/userRoutes.js';
 import { projectRoutes } from './routes/projectRoutes.js';
@@ -113,6 +114,10 @@ import { connectionRoutes } from './routes/connectionRoutes.js';
 import { auditRoutes } from './routes/auditRoutes.js';
 import { monitoringRoutes } from './routes/monitoringRoutes.js';
 
+// K8s 探针（票 #33）：挂 app 根（K8s 惯例路径 /healthz /readyz，无 /api/v1 前缀）。
+// 探针路径已入 RATE_LIMIT_SKIP_PATHS 白名单：ipMonitor 根挂载处计数豁免 + generalLimiter skip 同源；
+// 探针不挂认证、无审计写入，无限流头（K8s 高频打点场景惯例）。
+app.use('/', probeRoutes);
 app.use('/api/v1/health', healthRoutes);
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', userRoutes);

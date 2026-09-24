@@ -86,6 +86,13 @@ describe('限流白名单豁免', () => {
 
     expect(prisma.auditLog.create).not.toHaveBeenCalled();
   });
+
+  it('K8s 探针路径双形态豁免（票 #33：/healthz /readyz 裸路径与 /api/v1 前缀形态，探针高频打点不计数）', () => {
+    for (const path of ['/healthz', '/readyz', '/api/v1/healthz', '/api/v1/readyz']) {
+      for (let i = 0; i < 2000; i++) checkIpRisk('198.51.100.3', path);
+    }
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
+  });
 });
 
 describe('落库失败', () => {

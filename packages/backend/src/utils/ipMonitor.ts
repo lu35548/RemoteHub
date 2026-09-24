@@ -6,7 +6,7 @@ import type { AuditAction, AuditResource } from '@remotehub/shared';
 import { prisma } from './prisma.js';
 import { logger } from './logger.js';
 
-export const RATE_LIMIT_SKIP_PATHS = ['/health', '/auth/heartbeat', '/auth/online'] as const;
+export const RATE_LIMIT_SKIP_PATHS = ['/health', '/auth/heartbeat', '/auth/online', '/healthz', '/readyz'] as const;
 
 const WINDOW_MS = 60_000;
 const THRESHOLD = 1000;
