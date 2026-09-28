@@ -58,7 +58,7 @@ describe('改密/重置成功后的会话清理（票 #29 会话空窗修复）'
     setAccessToken('stale-token');
     function Probe() {
       const m = useResetPassword();
-      return <button onClick={() => m.mutate({ token: 't', newPassword: 'n' })}>触发改密</button>;
+      return <button onClick={() => m.mutate({ token: 't', newPassword: 'n' })}>触发重置</button>;
     }
     render(
       <QueryClientProvider client={new QueryClient()}>
@@ -71,7 +71,7 @@ describe('改密/重置成功后的会话清理（票 #29 会话空窗修复）'
       </QueryClientProvider>,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '触发改密' }));
+    fireEvent.click(screen.getByRole('button', { name: '触发重置' }));
 
     await waitFor(() => expect(getAccessToken()).toBeNull());
     expect(await screen.findByText('login-page-reached')).toBeInTheDocument();

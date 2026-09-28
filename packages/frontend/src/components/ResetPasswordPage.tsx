@@ -47,7 +47,7 @@ const ResetPasswordPage: React.FC = () => {
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-950 relative overflow-hidden">
       <div className="w-full max-w-md relative z-10 px-4">
-        <div className="glass-panel rounded-3xl shadow-2xl p-8">
+        <div className="glass-panel rounded-3xl shadow-2xl p-8 animate-in fade-in-up duration-500">
           <div className="flex flex-col items-center mb-8">
             <div className="w-16 h-16 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-900/50 mb-4 ring-1 ring-white/20">
               <KeyRound className="text-white w-8 h-8 drop-shadow-md" />
@@ -64,7 +64,7 @@ const ResetPasswordPage: React.FC = () => {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-slate-950/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-blue-600/50 focus:border-blue-500/50 outline-none"
+                className="w-full bg-slate-950/50 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-slate-600 focus:ring-2 focus:ring-blue-600/50 focus:border-blue-500/50 outline-none transition-all shadow-inner"
                 required
               />
             </div>
@@ -75,7 +75,7 @@ const ResetPasswordPage: React.FC = () => {
                 type="password"
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
-                className="w-full bg-slate-950/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-blue-600/50 focus:border-blue-500/50 outline-none"
+                className="w-full bg-slate-950/50 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-slate-600 focus:ring-2 focus:ring-blue-600/50 focus:border-blue-500/50 outline-none transition-all shadow-inner"
                 required
               />
             </div>
