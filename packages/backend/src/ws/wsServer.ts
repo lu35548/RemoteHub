@@ -10,14 +10,15 @@
 // admin                系统房间——仅 role === 'admin'
 //
 // ─── 升级鉴权（协议硬约束：浏览器 WS 无法带 Authorization header）───
-// upgrade 时手解 cookie 头取 refreshToken → 查 session（tokenHash + expiresAt + isActive）。
+// upgrade 时手解 cookie 头取 refreshToken → authService.validateRefreshSession
+// （tokenHash + consumedAt + expiresAt + isActive，与 REST 通道同源，不旁路重用检测语义）。
 // upgrade 请求不经过 express 中间件栈（cookie-parser 不会跑），必须在此手动解析。
 // 失败写 HTTP 401 后 destroy（官方形态）；noServer 模式独占 upgrade 监听器，
 // 避免 { server, path } 模式 ws 内部监听器的双监听器竞态（libcheck-ws §1 注意 #2）。
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Server as HttpServer, IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
-import { hashRefreshToken } from '../utils/jwt.js';
+import { validateRefreshSession } from '../services/authService.js';
 import { prisma } from '../utils/prisma.js';
 import { logger } from '../utils/logger.js';
 
@@ -52,6 +53,7 @@ export function parseCookieHeader(header: string | undefined): Record<string, st
     const eq = part.indexOf('=');
     if (eq === -1) continue;
     const key = part.slice(0, eq).trim();
+    // decode 失败原样保留；同名键后值覆盖（与 cookie-parser 的 last-value-wins 一致，测试锁死）
     try {
       out[key] = decodeURIComponent(part.slice(eq + 1).trim());
     } catch {
@@ -61,17 +63,9 @@ export function parseCookieHeader(header: string | undefined): Record<string, st
   return out;
 }
 
-/** 校验 refreshToken 对应 session 有效性，返回用户上下文；无效返回 null（authService.refresh 同族校验） */
-async function validateSessionToken(token: string): Promise<{ userId: string; role: string } | null> {
-  const tokenHash = hashRefreshToken(token);
-  const session = await prisma.session.findUnique({ where: { tokenHash }, include: { user: true } });
-  if (!session) return null;
-  if (session.expiresAt <= new Date()) return null;
-  if (!session.user.isActive) return null;
-  return { userId: session.userId, role: session.user.role };
-}
-
-/** upgrade 前置鉴权 + 分派（noServer 模式独占监听器） */
+/** upgrade 前置鉴权 + 分派（noServer 模式独占监听器）。
+ * session 校验统一走 authService.validateRefreshSession（含 consumedAt 检查），
+ * 不在 WS 层复制校验逻辑。 */
 async function handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
   socket.on('error', () => { /* 客户端提前断开等：destroy 后的杂散错误不进 unhandled */ });
   const pathname = new URL(req.url ?? '/', 'http://localhost').pathname;
@@ -86,7 +80,7 @@ async function handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer)
   }
   let user: { userId: string; role: string } | null = null;
   try {
-    user = await validateSessionToken(token);
+    user = await validateRefreshSession(token);
   } catch (err) {
     logger.error('WS 鉴权查询失败', { error: (err as Error).message });
   }
@@ -94,13 +88,20 @@ async function handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer)
     rejectUpgrade(socket);
     return;
   }
-  wss?.handleUpgrade(req, socket, head, (ws) => {
-    const aw = ws as AuthedWs;
-    aw.userId = user.userId;
-    aw.role = user.role;
-    aw.rooms = new Set();
-    wss?.emit('connection', aw, req);
-  });
+  if (wss) {
+    const server = wss; // 局部捕获：回调闭包内模块级 let 的 narrowing 失效
+    server.handleUpgrade(req, socket, head, (ws) => {
+      const aw = ws as AuthedWs;
+      aw.userId = user.userId;
+      aw.role = user.role;
+      aw.rooms = new Set();
+      server.emit('connection', aw, req);
+    });
+  } else {
+    // closeWsServer 已置 wss=null 的窄竞态：在途 socket 不能静默挂起——
+    // 不销毁会让 server.close 回调挂起，SIGTERM 退化为依赖容器 SIGKILL 兜底
+    socket.destroy();
+  }
 }
 
 /** 401 拒绝：升级请求无法走 res 管道，只能裸写 socket（官方形态） */
@@ -157,7 +158,10 @@ function onConnection(ws: WebSocket): void {
 
   aw.on('close', () => {
     if (aw.rooms) {
-      for (const room of aw.rooms) rooms.get(room)?.delete(aw);
+      for (const room of aw.rooms) {
+        const set = rooms.get(room);
+        if (set?.delete(aw) && set.size === 0) rooms.delete(room); // 空集回收，防房间表无限增长
+      }
     }
   });
 
@@ -182,7 +186,8 @@ async function joinRoom(aw: AuthedWs, room: string): Promise<void> {
 }
 
 function leaveRoom(aw: AuthedWs, room: string): void {
-  rooms.get(room)?.delete(aw);
+  const set = rooms.get(room);
+  if (set?.delete(aw) && set.size === 0) rooms.delete(room); // 空集回收，防房间表无限增长
   aw.rooms?.delete(room);
 }
 

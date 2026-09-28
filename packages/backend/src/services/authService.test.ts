@@ -29,7 +29,7 @@ vi.mock('../utils/appError.js', () => ({
 }));
 
 // ── Imports (after mocks) ──────────────────────────────────────────────
-import { login, register, refresh, logout, changePassword, getMe, updateProfile, heartbeat, getOnlineUsers } from './authService.js';
+import { login, register, refresh, logout, changePassword, getMe, updateProfile, heartbeat, getOnlineUsers, validateRefreshSession } from './authService.js';
 import { prisma } from '../utils/prisma.js';
 import { verifyPassword } from '../utils/password.js';
 import { hashRefreshToken, signAccessToken, signMfaToken } from '../utils/jwt.js';
@@ -285,6 +285,58 @@ describe('authService', () => {
         expect(err.code).toBe('AUTH_004');
         expect(err.clearCookie).toBe(true);
       }
+    });
+  });
+
+  // ─── validateRefreshSession（#34 review：WS 通道 session 校验与 REST 同源）───
+  describe('validateRefreshSession', () => {
+    const validSession = () => ({
+      id: 'sess-1',
+      tokenHash: 'hash:tok',
+      userId: 'user-1',
+      consumedAt: null as Date | null,
+      expiresAt: new Date(Date.now() + 60_000),
+      user: mockUser(),
+    });
+
+    it('未消费 + 未过期 + 活跃 → 返回 userId/role', async () => {
+      (prisma.session.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(validSession());
+
+      await expect(validateRefreshSession('tok')).resolves.toEqual({ userId: 'user-1', role: 'user' });
+      expect(prisma.session.findUnique).toHaveBeenCalledWith({
+        where: { tokenHash: 'hash:tok' },
+        include: { user: true },
+      });
+    });
+
+    it('consumedAt 非空（已轮换旧 token）→ null（严格拒绝，不享受 refresh 的 30s 并发宽容）', async () => {
+      const session = validSession();
+      session.consumedAt = new Date(Date.now() - 1000);
+      (prisma.session.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(session);
+
+      await expect(validateRefreshSession('tok')).resolves.toBeNull();
+    });
+
+    it('expiresAt 已过期 → null', async () => {
+      const session = validSession();
+      session.expiresAt = new Date(Date.now() - 1000);
+      (prisma.session.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(session);
+
+      await expect(validateRefreshSession('tok')).resolves.toBeNull();
+    });
+
+    it('用户已禁用 → null', async () => {
+      const session = validSession();
+      session.user = mockUser({ isActive: false });
+      (prisma.session.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(session);
+
+      await expect(validateRefreshSession('tok')).resolves.toBeNull();
+    });
+
+    it('session 不存在 → null', async () => {
+      (prisma.session.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+      await expect(validateRefreshSession('tok')).resolves.toBeNull();
     });
   });
 

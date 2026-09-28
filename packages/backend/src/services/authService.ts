@@ -180,6 +180,24 @@ export async function refresh(oldRefreshToken: string) {
   }
 }
 
+/**
+ * WS upgrade 通道的 session 校验（#34 review F1：消复制 + 补 consumedAt）。
+ * 严格拒绝已消费（consumedAt 非空）的 token——与 refresh 的 30s 并发宽容**不同口径**，
+ * 理由：浏览器 cookie jar 在 refresh 的 Set-Cookie 落地后即更新，多标签页竞态窗口
+ * 毫秒级且前端重连自愈；而已轮换旧 token 重放走 REST 通道会触发重用检测（撤全部
+ * session），WS 通道放行即旁路该语义。
+ * 返回 null 表示无效（不区分原因，WS 层统一 401）。
+ */
+export async function validateRefreshSession(token: string): Promise<{ userId: string; role: string } | null> {
+  const tokenHash = hashRefreshToken(token);
+  const session = await prisma.session.findUnique({ where: { tokenHash }, include: { user: true } });
+  if (!session) return null;
+  if (session.consumedAt !== null) return null;
+  if (session.expiresAt <= new Date()) return null;
+  if (!session.user.isActive) return null;
+  return { userId: session.userId, role: session.user.role };
+}
+
 /** Logout §5.1 */
 export async function logout(refreshToken: string | undefined) {
   if (!refreshToken) return;

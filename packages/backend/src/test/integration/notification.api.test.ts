@@ -8,6 +8,7 @@ import { setupServerWithDb, teardownServerWithDb, type ServerBootstrap } from '.
 
 let b: ServerBootstrap;
 let userToken: string;
+let adminToken: string;
 let userId: string;
 let adminUserId: string;
 
@@ -32,6 +33,7 @@ beforeAll(async () => {
 
   const res = await request(b.app).post('/api/v1/auth/login').send({ username: 'notifuser1', password: 'User123456!' });
   userToken = res.body.data.accessToken;
+  adminToken = b.adminToken;
 }, 120_000);
 
 afterAll(() => teardownServerWithDb(b));
@@ -101,11 +103,23 @@ describe('PATCH /api/v1/notifications/:id/read', () => {
     expect(list.body.data.find((x: { id: string }) => x.id === n.id)).toBeUndefined();
   });
 
-  it('AC 门禁：非本人通知 → 403 NOTIF_002（admin 标记他人通知同样被拒）', async () => {
+  it('AC 门禁：非本人通知 → 403 NOTIF_002（普通用户标记 admin 的通知被拒）', async () => {
     const n = await makeNotification(adminUserId);   // admin 的通知
     const res = await request(b.app)
       .patch(`/api/v1/notifications/${n.id}/read`)
       .set('Authorization', `Bearer ${userToken}`);  // 普通用户操作
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('NOTIF_002');
+    // 库里确认未被标记
+    const row = await b.prisma.notificationQueue.findUnique({ where: { id: n.id } });
+    expect(row?.isRead).toBe(false);
+  });
+
+  it('AC 门禁：admin 标记普通用户的通知同样被拒 → 403 NOTIF_002（权限即属主，无角色豁免）', async () => {
+    const n = await makeNotification(userId);        // 普通用户的通知
+    const res = await request(b.app)
+      .patch(`/api/v1/notifications/${n.id}/read`)
+      .set('Authorization', `Bearer ${adminToken}`); // admin 操作
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('NOTIF_002');
     // 库里确认未被标记

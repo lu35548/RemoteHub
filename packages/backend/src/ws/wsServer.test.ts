@@ -65,6 +65,14 @@ describe('parseCookieHeader', () => {
   it('空格归一化', () => {
     expect(parseCookieHeader('  a = 1  ;  b=2  ')).toEqual({ a: '1', b: '2' });
   });
+
+  it('decodeURIComponent 失败（%ZZ 非法序列）→ 值原样返回不抛', () => {
+    expect(parseCookieHeader('k=%ZZ')).toEqual({ k: '%ZZ' });
+  });
+
+  it('多个同名 cookie → 后值覆盖（与 cookie-parser 的 last-value-wins 同契约）', () => {
+    expect(parseCookieHeader('refreshToken=first; refreshToken=second')).toEqual({ refreshToken: 'second' });
+  });
 });
 
 // ─── init/close 生命周期 ───
@@ -132,6 +140,58 @@ describe('upgrade 前置鉴权', () => {
     await handler(fakeUpgradeReq(WS_PATH, 'refreshToken=deadbeef'), socket, Buffer.alloc(0));
     await flushAsync();
     expect(socket.write).toHaveBeenCalledWith(expect.stringContaining('401'));
+    expect(socket.destroy).toHaveBeenCalled();
+  });
+
+  it('session 已轮换（consumedAt 非空、expiresAt 未过期）→ 401（REST 重用检测语义不被 WS 通道旁路）', async () => {
+    const { server } = createFakeHttpServer();
+    initWsServer(server);
+    const handler = getUpgradeHandler(server);
+    const socket = createFakeSocket();
+    const { prisma } = await import('../utils/prisma.js');
+    vi.mocked(prisma.session.findUnique).mockResolvedValue({
+      id: 'sess-1', tokenHash: 'hash:x', userId: 'u1', consumedAt: new Date(),
+      expiresAt: new Date(Date.now() + 60_000),
+      user: { id: 'u1', role: 'user', isActive: true },
+    } as never);
+    await handler(fakeUpgradeReq(WS_PATH, 'refreshToken=rotated'), socket, Buffer.alloc(0));
+    await flushAsync();
+    expect(socket.write).toHaveBeenCalledWith(expect.stringContaining('401'));
+    expect(socket.destroy).toHaveBeenCalled();
+  });
+
+  it('validateRefreshSession DB 抛错 → 401 fail-closed（鉴权查询失败不放行）', async () => {
+    const { server } = createFakeHttpServer();
+    initWsServer(server);
+    const handler = getUpgradeHandler(server);
+    const socket = createFakeSocket();
+    const { prisma } = await import('../utils/prisma.js');
+    vi.mocked(prisma.session.findUnique).mockRejectedValue(new Error('db down'));
+    await handler(fakeUpgradeReq(WS_PATH, 'refreshToken=whatever'), socket, Buffer.alloc(0));
+    await flushAsync();
+    expect(socket.write).toHaveBeenCalledWith(expect.stringContaining('401'));
+    expect(socket.destroy).toHaveBeenCalled();
+  });
+
+  it('closeWsServer 后在途 upgrade → socket.destroy（不静默挂起，server.close 可回调）', async () => {
+    const { server, listeners } = createFakeHttpServer();
+    initWsServer(server);
+    const handler = listeners.get('upgrade')!;
+    const socket = createFakeSocket();
+    const { prisma } = await import('../utils/prisma.js');
+    let resolveQuery!: (v: unknown) => void;
+    vi.mocked(prisma.session.findUnique).mockImplementation(
+      (() => new Promise((resolve) => { resolveQuery = resolve; })) as unknown as
+        (...args: Parameters<typeof prisma.session.findUnique>) => ReturnType<typeof prisma.session.findUnique>,
+    );
+    const upgrade = handler(fakeUpgradeReq(WS_PATH, 'refreshToken=tok'), socket, Buffer.alloc(0));
+    closeWsServer(); // 竞态点：鉴权查询在途时关停，wss 已置 null
+    resolveQuery({
+      id: 'sess-1', tokenHash: 'hash:tok', userId: 'u1', consumedAt: null,
+      expiresAt: new Date(Date.now() + 60_000),
+      user: { id: 'u1', role: 'user', isActive: true },
+    });
+    await upgrade;
     expect(socket.destroy).toHaveBeenCalled();
   });
 });

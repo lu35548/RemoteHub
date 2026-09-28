@@ -56,7 +56,9 @@ export function isAuditResource(value: string): value is AuditResource {
 export function isAuditResult(value: string): value is AuditResult {
   return (AUDIT_RESULTS as readonly string[]).includes(value);
 }
-// 通知类型（票 #35，design §8.4 服务端推送事件全集——NotificationQueue.type 值域）
+// 通知类型（票 #35，NotificationQueue.type 值域）。相对 design §8.4 推送事件全集的偏离（裁决记录）：
+// ①多 BACKUP_COMPLETED / BACKUP_FAILED——design 折在 SYSTEM_ALERT 说明栏，拆出独立值使 #36 备份事件类型更精确；
+// ②无 reconnect_required——属瞬态 WS 控制消息，对离线排队无意义，不落 NotificationQueue。
 export const NOTIFICATION_TYPES = [
   'FORCE_LOGOUT',
   'MEMBER_ADDED',

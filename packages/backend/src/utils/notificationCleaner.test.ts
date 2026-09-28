@@ -6,11 +6,23 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 vi.mock('./prisma.js', () => ({
   prisma: { notificationQueue: { deleteMany: vi.fn().mockResolvedValue({ count: 3 }) } },
 }));
+vi.mock('node-cron', () => ({ default: { schedule: vi.fn() } }));
 
+import cron from 'node-cron';
 import { prisma } from './prisma.js';
-import { cleanReadNotifications } from './notificationCleaner.js';
+import { cleanReadNotifications, startNotificationCleaner } from './notificationCleaner.js';
 
 beforeEach(() => { vi.clearAllMocks(); });
+
+describe('startNotificationCleaner', () => {
+  it('仅定时（0 4 * * *），不启动即清（auditCleaner 先例同款）', () => {
+    startNotificationCleaner();
+
+    expect(vi.mocked(cron.schedule)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(cron.schedule)).toHaveBeenCalledWith('0 4 * * *', expect.any(Function));
+    expect(prisma.notificationQueue.deleteMany).not.toHaveBeenCalled();
+  });
+});
 
 describe('cleanReadNotifications', () => {
   it('deleteMany where isRead:true 且 createdAt 早于保留期，返回删除计数', async () => {
