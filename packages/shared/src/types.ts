@@ -287,3 +287,25 @@ export interface ProjectConnectionStat {
   projectName: string;
   connectionCount: number;
 }
+
+// ─── 性能监控（P1，票 #32）───
+
+/** 单路由模板延迟统计（窗口 = 环形缓冲容量内最近样本；count 为进程生命周期累计请求数）。
+ *  route 为路由模板（如 /api/v1/projects/:id）防高基数；unmatched = 未匹配路由的请求（404 等）。 */
+export interface RoutePerformanceStat {
+  route: string;
+  count: number;
+  p50Ms: number;
+  p95Ms: number;
+  p99Ms: number;
+  minMs: number;
+  maxMs: number;
+  avgMs: number;
+}
+
+/** API 性能统计（/admin/stats/performance）。routes 顺序为路由首次记录序；bufferSize 暴露窗口容量语义。 */
+export interface PerformanceStats {
+  routes: RoutePerformanceStat[];
+  bufferSize: number;
+  uptimeSeconds: number;
+}

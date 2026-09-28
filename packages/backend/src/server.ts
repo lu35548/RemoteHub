@@ -10,6 +10,7 @@ import { startSessionCleaner } from './utils/sessionCleaner.js';
 import { startAuditCleaner } from './utils/auditCleaner.js';
 import { checkIpRisk, RATE_LIMIT_SKIP_PATHS } from './utils/ipMonitor.js';
 import { sanitizationMiddleware } from './middleware/sanitization.js';
+import { performanceMonitorMiddleware } from './middleware/performanceMonitor.js';
 import type { Request, Response, NextFunction } from 'express';
 
 const app: Express = express();
@@ -102,6 +103,11 @@ app.use('/api/v1/', generalLimiter);
 
 // 8. 输入净化（P0-4）：限流之后、路由之前——净化正则的 CPU 消耗处于限流保护之内
 app.use(sanitizationMiddleware);
+
+// 8.5 性能监控（P1-5，票 #32）：净化之后、路由之前——被限流/净化拒绝的请求不进业务延迟分布。
+//     res.on('finish') 取路由模板（req.baseUrl + req.route.path）聚合，与挂载点无关；
+//     探针/心跳白名单路径豁免（高频基础设施打点不进业务延迟分布）。
+app.use(performanceMonitorMiddleware);
 
 // ─── Route registration ───
 import { healthRoutes } from './routes/healthRoutes.js';

@@ -15,6 +15,8 @@ export const monitoringRoutes: RouterType = Router();
 monitoringRoutes.get('/dashboard', authMiddleware, roleMiddleware('admin'), monitoringController.getDashboardHandler);
 monitoringRoutes.get('/stats/users', authMiddleware, roleMiddleware('admin'), monitoringController.getUserStatsHandler);
 monitoringRoutes.get('/stats/projects', authMiddleware, roleMiddleware('admin'), monitoringController.getProjectStatsHandler);
+// 票 #32 P1-5：性能统计端点（照上述三端点同款门禁；写端点无，审计不挂——读端点先例）
+monitoringRoutes.get('/stats/performance', authMiddleware, roleMiddleware('admin'), monitoringController.getPerformanceHandler);
 monitoringRoutes.post(
   '/users/:id/reset-link',
   authMiddleware,
