@@ -2,6 +2,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import * as authService from '../services/authService.js';
 import * as passwordResetService from '../services/passwordResetService.js';
+import * as twoFactorService from '../services/twoFactorService.js';
 import { createAppError, shouldClearRefreshCookie } from '../utils/appError.js';
 import { hashRefreshToken } from '../utils/jwt.js';
 import { prisma } from '../utils/prisma.js';
@@ -33,6 +34,12 @@ export async function login(req: Request, res: Response, next: NextFunction) {
     if (!username || !password) throw createAppError('AUTH_001');
 
     const result = await authService.login(username, password);
+
+    // 票 #30：2FA enabled 用户 → mfaPending（不建 session、不落 cookie、不签 access token）
+    if (result.mfaPending) {
+      res.json({ success: true, data: { mfaPending: true, mfaStage: result.mfaStage, mfaToken: result.mfaToken } });
+      return;
+    }
 
     // 更新 session 的 userAgent 和 IP §5.1
     const tokenHash = hashRefreshToken(result.refreshToken);
@@ -173,5 +180,65 @@ export async function resetPassword(req: Request, res: Response, next: NextFunct
     }
     await passwordResetService.resetPassword(token, newPassword);
     res.json({ success: true });
+  } catch (err) { next(err); }
+}
+
+// ─── 2FA（票 #30，mfaAuthMiddleware 守卫：aud:'mfa' 专用 token，与 access 互斥）───
+
+/** POST /auth/mfa/setup：发 secret + otpauth:// URI（stateless，confirm 校验通过才落库） */
+export async function mfaSetup(req: Request, res: Response, next: NextFunction) {
+  try {
+    const data = await twoFactorService.generateMfaSetup(req.user.id);
+    res.json({ success: true, data });
+  } catch (err) { next(err); }
+}
+
+/** POST /auth/mfa/confirm：校验一次 TOTP → secret 密文落库 + 恢复码一次性返回 */
+export async function mfaConfirm(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { secret, token } = req.body as { secret?: unknown; token?: unknown };
+    const missing: Array<{ field: string; message: string }> = [];
+    if (typeof secret !== 'string' || secret === '') {
+      missing.push({ field: 'secret', message: 'secret 不能为空' });
+    }
+    if (typeof token !== 'string' || token === '') {
+      missing.push({ field: 'token', message: '验证码不能为空' });
+    }
+    if (missing.length > 0 || typeof secret !== 'string' || typeof token !== 'string') {
+      throw createAppError('VAL_001', missing);
+    }
+    const data = await twoFactorService.confirmMfaSetup(req.user.id, secret, token);
+    res.json({ success: true, data });
+  } catch (err) { next(err); }
+}
+
+/** POST /auth/mfa/verify：TOTP 或恢复码 → 换正式 access token + 建 session。
+ * 验证码错误走 400 MFA_001（业务校验失败 ≠ 认证失败，RESET_001/AUTH_006 同款教训）；
+ * mfa token 无效/过期是 401 MFA_002——前端收到后应重走密码登录。 */
+export async function mfaVerify(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { token, recoveryCode } = req.body as { token?: unknown; recoveryCode?: unknown };
+    const hasToken = typeof token === 'string' && token !== '';
+    const hasRecovery = typeof recoveryCode === 'string' && recoveryCode !== '';
+    if (!hasToken && !hasRecovery) {
+      throw createAppError('VAL_001', [{ field: 'token', message: '请提供动态验证码或恢复码' }]);
+    }
+    const result = await twoFactorService.verifyMfa(
+      req.user.id,
+      { token: hasToken ? (token as string) : undefined, recoveryCode: hasRecovery ? (recoveryCode as string) : undefined },
+    );
+
+    // session 的 userAgent/IP 归一（login 同款）
+    const tokenHash = hashRefreshToken(result.refreshToken);
+    await prisma.session.updateMany({
+      where: { tokenHash },
+      data: {
+        userAgent: (req.headers['user-agent'] || '').slice(0, 500),
+        ip: req.ip?.slice(0, 45) || null,
+      },
+    });
+
+    res.cookie('refreshToken', result.refreshToken, REFRESH_COOKIE_OPTIONS);
+    res.json({ success: true, data: { accessToken: result.accessToken, user: result.user } });
   } catch (err) { next(err); }
 }

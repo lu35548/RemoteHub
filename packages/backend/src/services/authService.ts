@@ -1,26 +1,29 @@
 // packages/backend/src/services/authService.ts
 import { prisma } from '../utils/prisma.js';
 import { verifyPassword, hashPassword } from '../utils/password.js';
-import { signAccessToken, generateRefreshToken, hashRefreshToken } from '../utils/jwt.js';
+import { signAccessToken, signMfaToken, generateRefreshToken, hashRefreshToken } from '../utils/jwt.js';
 import { createAppError, handlePrismaUniqueViolation } from '../utils/appError.js';
 import { validateUsername, validateNickname, validatePassword as validatePwd, validateRole } from '@remotehub/shared';
 import { REFRESH_CONCURRENT_WINDOW_SEC } from '@remotehub/shared';
 import type { UserPublic } from '@remotehub/shared';
 
 /** 数据库 User → 公开 DTO（strip passwordHash, updatedAt）§4.1 */
-function toUserPublic(user: { id: string; username: string; nickname: string; role: string; isActive: boolean; lastActiveAt: Date | null; createdAt: Date }): UserPublic {
+export function toUserPublic(user: { id: string; username: string; nickname: string; role: string; isActive: boolean; twoFactorEnabled?: boolean; lastActiveAt: Date | null; createdAt: Date }): UserPublic {
   return {
     id: user.id,
     username: user.username,
     nickname: user.nickname,
     role: user.role as 'admin' | 'user',
     isActive: user.isActive,
+    twoFactorEnabled: user.twoFactorEnabled ?? false,
     lastActiveAt: user.lastActiveAt?.toISOString() ?? null,
     createdAt: user.createdAt.toISOString(),
   };
 }
 
-/** 登录 §5.1 — 全程 AUTH_001 防止用户名枚举 */
+/** 登录 §5.1 — 全程 AUTH_001 防止用户名枚举。
+ * 票 #30 二段分流：2FA enabled 用户密码通过后返回 mfaPending + aud:'mfa' 挑战 token，
+ * 不建 session、不签 access token（session 建立时机 = mfa/verify 成功后）。 */
 export async function login(username: string, password: string) {
   const user = await prisma.user.findUnique({ where: { username } });
   if (!user) throw createAppError('AUTH_001');
@@ -29,6 +32,12 @@ export async function login(username: string, password: string) {
   if (!valid) throw createAppError('AUTH_001');
 
   if (!user.isActive) throw createAppError('AUTH_001');
+
+  if (user.twoFactorEnabled) {
+    const mfaToken = await signMfaToken(user.id);
+    const mfaStage = user.totpSecret ? ('verify' as const) : ('setup' as const);
+    return { mfaPending: true as const, mfaStage, mfaToken };
+  }
 
   const accessToken = await signAccessToken(user.id);
   const refreshToken = generateRefreshToken();

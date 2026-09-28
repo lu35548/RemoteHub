@@ -31,6 +31,8 @@ export const env = {
   PASSWORD_RESET_MAX_PER_USER: Math.max(1, parseInt(process.env.PASSWORD_RESET_MAX_PER_USER || '3', 10)),
   // forgot-password per-IP 限流（次/小时，design §6.5）
   RATE_LIMIT_FORGOT_PASSWORD_MAX: Math.max(1, parseInt(process.env.RATE_LIMIT_FORGOT_PASSWORD_MAX || '3', 10)),
+  // mfa/verify per-IP 限流（次/分钟，票 #30：TOTP 验证必须配服务端节流防爆破，libcheck-auth §1）
+  RATE_LIMIT_MFA_VERIFY_MAX: Math.max(1, parseInt(process.env.RATE_LIMIT_MFA_VERIFY_MAX || '5', 10)),
 } as const;
 
 // 密钥格式校验（fail-fast，启动时即暴露配置错误，避免运行时才报 ERR_CRYPTO_INVALID_KEYLEN）

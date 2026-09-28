@@ -1,5 +1,7 @@
 // packages/backend/src/controllers/authController.test.ts
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+// 环境前置（票 #30：controller 新 import 链 twoFactorService→encryption→config/env 在 import 期 requireEnv）
+import '../test/helpers/env.js';
 
 // Mock modules before imports
 vi.mock('../services/authService.js', () => ({

@@ -35,6 +35,40 @@ export interface LoginResponse {
   user: UserPublic;
 }
 
+// ─── 2FA（票 #30 后端契约，票 #31 前端消费）───
+
+/** 登录二段挑战：2FA enabled 用户密码通过后的响应 data（不签 access token、不建 session）。
+ * mfaStage='setup'：admin 已开启但用户未绑定（首登强制绑定页）；'verify'：已完成绑定，直接挑战。 */
+export interface MfaPendingLoginResponse {
+  mfaPending: true;
+  mfaStage: 'setup' | 'verify';
+  /** aud:'mfa' 的短时挑战 token（15 分钟），仅用于 /auth/mfa/* 三端点 */
+  mfaToken: string;
+}
+
+/** POST /auth/mfa/setup 响应 data：secret 供手输，otpauthUri 供前端渲染二维码 */
+export interface MfaSetupResponse {
+  secret: string;
+  otpauthUri: string;
+}
+
+/** POST /auth/mfa/confirm 请求体：secret 来自 setup 响应（confirm 校验一次 TOTP 后才落库） */
+export interface MfaConfirmRequest {
+  secret: string;
+  token: string;
+}
+
+/** POST /auth/mfa/confirm 响应 data：恢复码一次性返回，后端只存 hash */
+export interface MfaConfirmResponse {
+  recoveryCodes: string[];
+}
+
+/** POST /auth/mfa/verify 请求体：TOTP 6 位码或恢复码，二选一（都传时 TOTP 优先、恢复码兜底） */
+export interface MfaVerifyRequest {
+  token?: string;
+  recoveryCode?: string;
+}
+
 export interface RegisterRequest {
   username: string;
   nickname: string;
@@ -77,6 +111,8 @@ export interface UserPublic {
   isActive: boolean;
   lastActiveAt: string | null;
   createdAt: string;
+  /** 2FA 状态（票 #30 新增，可选字段向后兼容旧 mock/消费方） */
+  twoFactorEnabled?: boolean;
 }
 
 export type UserListItem = UserPublic;
@@ -85,6 +121,8 @@ export interface AdminUpdateUserRequest {
   nickname?: string;
   role?: UserRole;
   isActive?: boolean;
+  /** 2FA 开关（票 #30）：置 false 时后端清 totpSecret 并作废全部恢复码 */
+  twoFactorEnabled?: boolean;
 }
 
 export interface UserSearchResult {

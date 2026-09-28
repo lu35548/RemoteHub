@@ -6,6 +6,8 @@ export async function signAccessToken(userId: string): Promise<string> {
   const secret = new TextEncoder().encode(env.JWT_SECRET);
   return new jose.SignJWT({ userId })
     .setProtectedHeader({ alg: 'HS256' })
+    // 票 #30 安全核心：显式 aud（jose 不传 audience 选项时 aud claim 完全不校验）
+    .setAudience('access')
     .setExpirationTime(env.JWT_ACCESS_EXPIRES_IN)
     .setIssuedAt()
     .sign(secret);
@@ -13,7 +15,36 @@ export async function signAccessToken(userId: string): Promise<string> {
 
 export async function verifyAccessToken(token: string): Promise<{ userId: string }> {
   const secret = new TextEncoder().encode(env.JWT_SECRET);
-  const { payload } = await jose.jwtVerify<{ userId: string }>(token, secret);
+  // 显式 audience:'access'：aud 缺失即抛错；aud='mfa' 的挑战 token 在此被拒收
+  const { payload } = await jose.jwtVerify<{ userId: string; aud?: string | string[] }>(token, secret, { audience: 'access' });
+  // 多值 aud 拒收：jose any-overlap 语义会放行 ['access','mfa']，双过等于没防——
+  // 绝不签发多值 aud，验签侧亦显式拒绝（libcheck-auth §4）
+  if (Array.isArray(payload.aud)) {
+    throw new Error('多值 aud token 拒收（any-overlap 双过=没防）');
+  }
+  return { userId: payload.userId };
+}
+
+// ─── mfa 挑战 token（票 #30，独立 aud:'mfa'，15 分钟）───
+
+const MFA_TOKEN_EXPIRES_IN = '15m';
+
+export async function signMfaToken(userId: string): Promise<string> {
+  const secret = new TextEncoder().encode(env.JWT_SECRET);
+  return new jose.SignJWT({ userId })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setAudience('mfa')
+    .setExpirationTime(MFA_TOKEN_EXPIRES_IN)
+    .setIssuedAt()
+    .sign(secret);
+}
+
+export async function verifyMfaToken(token: string): Promise<{ userId: string }> {
+  const secret = new TextEncoder().encode(env.JWT_SECRET);
+  const { payload } = await jose.jwtVerify<{ userId: string; aud?: string | string[] }>(token, secret, { audience: 'mfa' });
+  if (Array.isArray(payload.aud)) {
+    throw new Error('多值 aud token 拒收（any-overlap 双过=没防）');
+  }
   return { userId: payload.userId };
 }
 

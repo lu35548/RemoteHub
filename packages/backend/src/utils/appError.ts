@@ -38,6 +38,12 @@ export const ERROR_CODES: Record<string, number> = {
   // （RESET_002 已删：无 throw 点，限流 429 走 RATE_LIMIT 统一形状）
   RESET_001: 400,
   RESET_003: 429,
+  // 2FA（票 #30）：MFA_001 业务校验（验证码/恢复码错误）400——401 会触发前端 refresh 重放
+  // 误判会话失效（RESET_001/AUTH_006 同款坑）；MFA_002 是认证失败（挑战 token 无效/过期）401；
+  // MFA_003 是状态冲突（2FA 未启用/已绑定）400。
+  MFA_001: 400,
+  MFA_002: 401,
+  MFA_003: 400,
   VAL_001: 422,
   SYS_001: 500,
   SYS_002: 404,
@@ -66,6 +72,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
   // 密码重置（design §16）
   RESET_001: '密码重置令牌无效或已过期',
   RESET_003: '重置请求已达上限，请等待现有令牌过期后再试',
+  // 2FA（票 #30）
+  MFA_001: '动态验证码或恢复码错误',
+  MFA_002: '多因素认证令牌无效或已过期',
+  MFA_003: '双因素认证未启用或已完成绑定',
   VAL_001: '输入验证失败',
   SYS_001: '内部服务器错误',
   SYS_002: '路由不存在',

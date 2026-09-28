@@ -15,6 +15,7 @@ vi.mock('../utils/jwt.js', () => ({
   signAccessToken: vi.fn(() => 'access-token'),
   generateRefreshToken: vi.fn(() => 'refresh-token-raw'),
   hashRefreshToken: vi.fn((t: string) => `hash:${t}`),
+  signMfaToken: vi.fn(() => 'mfa-token'),
 }));
 
 vi.mock('../utils/appError.js', () => ({
@@ -31,7 +32,7 @@ vi.mock('../utils/appError.js', () => ({
 import { login, register, refresh, logout, changePassword, getMe, updateProfile, heartbeat, getOnlineUsers } from './authService.js';
 import { prisma } from '../utils/prisma.js';
 import { verifyPassword } from '../utils/password.js';
-import { hashRefreshToken } from '../utils/jwt.js';
+import { hashRefreshToken, signAccessToken, signMfaToken } from '../utils/jwt.js';
 import { createAppError } from '../utils/appError.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -97,6 +98,27 @@ describe('authService', () => {
       (verifyPassword as ReturnType<typeof vi.fn>).mockResolvedValue(true);
 
       await expect(login('testuser', 'password123')).rejects.toThrow('AppError:AUTH_001');
+    });
+  });
+
+  // ─── login 2FA 分流（票 #30）──────────────────────────────────
+  describe('login 2FA 分流', () => {
+    it('enabled 用户 → mfaPending：不建 session、不签 access token', async () => {
+      (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mockUser({ twoFactorEnabled: true, totpSecret: 'v1:encrypted' }));
+      const result = await login('testuser', 'password123');
+      expect(result.mfaPending).toBe(true);
+      expect(result.mfaStage).toBe('verify');
+      expect(result.mfaToken).toBe('mfa-token');
+      expect(signMfaToken).toHaveBeenCalledWith('user-1');
+      expect(prisma.session.create).not.toHaveBeenCalled();
+      expect(signAccessToken).not.toHaveBeenCalled();
+    });
+
+    it('enabled 但未完成绑定 → mfaStage=setup', async () => {
+      (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mockUser({ twoFactorEnabled: true }));
+      const result = await login('testuser', 'password123');
+      expect(result.mfaPending).toBe(true);
+      expect(result.mfaStage).toBe('setup');
     });
   });
 

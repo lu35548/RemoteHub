@@ -8,23 +8,40 @@ generator client {
 }
 
 model User {
-  id           String    @id @default(uuid())
-  username     String    @unique
-  nickname     String
-  passwordHash String    @map("password_hash")
-  role         String    @default("user")
-  isActive     Boolean   @default(true) @map("is_active")
-  lastActiveAt DateTime? @map("last_active_at")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
+  id               String    @id @default(uuid())
+  username         String    @unique
+  nickname         String
+  passwordHash     String    @map("password_hash")
+  role             String    @default("user")
+  isActive         Boolean   @default(true) @map("is_active")
+  twoFactorEnabled Boolean   @default(false) @map("two_factor_enabled")
+  totpSecret       String?   @map("totp_secret")
+  lastActiveAt     DateTime? @map("last_active_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
 
   projects ProjectMember[]
   sessions Session[]
   auditLogs AuditLog[]
   resetTokens PasswordResetToken[]
+  recoveryCodes TwoFactorRecoveryCode[]
 
   @@index([role])
   @@map("users")
+}
+
+/// 2FA 恢复码（票 #30，OWASP 口径：N 组单次码 + hash 存储 + 用后作废）
+model TwoFactorRecoveryCode {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  codeHash  String    @unique @map("code_hash")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("two_factor_recovery_codes")
 }
 
 model Session {

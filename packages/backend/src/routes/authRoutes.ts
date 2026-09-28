@@ -1,9 +1,11 @@
 // packages/backend/src/routes/authRoutes.ts
 import { Router, type Router as RouterType } from 'express';
 import { authMiddleware } from '../middleware/auth.js';
+import { mfaAuthMiddleware } from '../middleware/mfaAuth.js';
 import { roleMiddleware } from '../middleware/role.js';
 import { auditMiddleware } from '../middleware/audit.js';
 import { forgotPasswordIpLimiter, forgotPasswordUserLimiter } from '../middleware/passwordResetLimiter.js';
+import { mfaVerifyLimiter } from '../middleware/mfaLimiter.js';
 import * as authController from '../controllers/authController.js';
 
 export const authRoutes: RouterType = Router();
@@ -38,3 +40,10 @@ authRoutes.post(
   auditMiddleware({ action: 'AUTH_PASSWORD_RESET', resource: 'security' }),
   authController.resetPassword,
 );
+
+// 2FA（票 #30）：mfaAuthMiddleware 守卫（aud:'mfa' 挑战 token，login 二段签发）。
+// verify 挂 per-IP 限流（TOTP 爆破节流，libcheck-auth §1）；三端点不挂审计
+// （挑战阶段无 session/无业务写操作，session 建立时点已在 login 审计覆盖之外，票面未要求）。
+authRoutes.post('/mfa/setup', mfaAuthMiddleware, authController.mfaSetup);
+authRoutes.post('/mfa/confirm', mfaAuthMiddleware, authController.mfaConfirm);
+authRoutes.post('/mfa/verify', mfaVerifyLimiter, mfaAuthMiddleware, authController.mfaVerify);
