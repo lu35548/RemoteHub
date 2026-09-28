@@ -25,6 +25,7 @@ model User {
   auditLogs AuditLog[]
   resetTokens PasswordResetToken[]
   recoveryCodes TwoFactorRecoveryCode[]
+  notifications NotificationQueue[]
 
   @@index([role])
   @@map("users")
@@ -159,4 +160,22 @@ model AuditLog {
   @@index([resource, resourceId])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+/// 通知队列（票 #35，design §8.6：离线可达的关键事件通知，#36 事件源经 emitNotification 写入）
+model NotificationQueue {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  type      String // 值域 NOTIFICATION_TYPES（shared enums）
+  // JSON 字符串：整存整取的展示数据。可查询字段（userId/isRead/createdAt）保持独立列
+  //（可查询字段勿藏 JSON 列约定）。
+  payload   String
+  isRead    Boolean  @default(false) @map("is_read")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([createdAt])
+  @@map("notification_queue")
 }

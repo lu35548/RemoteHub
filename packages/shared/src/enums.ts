@@ -56,3 +56,15 @@ export function isAuditResource(value: string): value is AuditResource {
 export function isAuditResult(value: string): value is AuditResult {
   return (AUDIT_RESULTS as readonly string[]).includes(value);
 }
+// 通知类型（票 #35，design §8.4 服务端推送事件全集——NotificationQueue.type 值域）
+export const NOTIFICATION_TYPES = [
+  'FORCE_LOGOUT',
+  'MEMBER_ADDED',
+  'MEMBER_REMOVED',
+  'MEMBER_ROLE_UPDATED',
+  'BACKUP_COMPLETED',
+  'BACKUP_FAILED',
+  'SYSTEM_ALERT',
+  'CONNECTION_UPDATED',
+] as const;
+export type NotificationType = typeof NOTIFICATION_TYPES[number];

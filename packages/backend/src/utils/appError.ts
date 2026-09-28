@@ -47,6 +47,9 @@ export const ERROR_CODES: Record<string, number> = {
   VAL_001: 422,
   SYS_001: 500,
   SYS_002: 404,
+  // 通知（票 #35）：NOTIF_001 资源缺失 404；NOTIF_002 是越权门禁（非本人通知不可读）403
+  NOTIF_001: 404,
+  NOTIF_002: 403,
 };
 
 export const ERROR_MESSAGES: Record<string, string> = {
@@ -79,6 +82,9 @@ export const ERROR_MESSAGES: Record<string, string> = {
   VAL_001: '输入验证失败',
   SYS_001: '内部服务器错误',
   SYS_002: '路由不存在',
+  // 通知（票 #35）
+  NOTIF_001: '通知不存在',
+  NOTIF_002: '无权操作他人通知',
 };
 
 export function createAppError(code: string, details?: Array<{ field: string; message: string }>): AppError {
