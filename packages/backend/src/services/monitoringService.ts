@@ -14,8 +14,8 @@ const round1 = (n: number): number => Math.round(n * 10) / 10;
 const TREND_DAYS = 30;
 const TREND_SCAN_CAP = 10000; // 趋势扫描上限（票面钦定；超限日粒度分桶仍正确，只统计进 cap 的行）
 
-/** readiness 磁盘水位阈值（%）：与 getSystemHealth degraded 矩阵同一魔法数的单一真相源。 */
-export const DISK_USAGE_UNREADY_THRESHOLD = 95;
+/** 磁盘水位阈值（%）：readiness 判定与 getSystemHealth degraded 矩阵共用（中性名，两消费点同一魔法数的单一真相源）。 */
+export const DISK_USAGE_CRITICAL_THRESHOLD = 95;
 
 /** readiness 判定输入：ready=database 可用且磁盘水位未越阈值；diskUsage -1 表示探测失败（未知，不阻断）。 */
 export interface Readiness {
@@ -36,7 +36,7 @@ export async function getReadiness(): Promise<Readiness> {
 
   const diskUsage = disk ? round1(((disk.blocks - disk.bfree) / disk.blocks) * 100) : -1;
 
-  return { ready: database && diskUsage <= DISK_USAGE_UNREADY_THRESHOLD, database, diskUsage };
+  return { ready: database && diskUsage <= DISK_USAGE_CRITICAL_THRESHOLD, database, diskUsage };
 }
 
 /** db 通 + mem ≤90 + disk ≤95 → healthy；任一越界 → degraded（75/80 警告值不进后端状态，前端拿数值自行变色）。 */
@@ -55,7 +55,7 @@ export async function getSystemHealth(): Promise<SystemHealth> {
   const memoryUsage = totalMem > 0 ? round1((1 - freeMem / totalMem) * 100) : 0;
   const diskUsage = disk ? round1(((disk.blocks - disk.bfree) / disk.blocks) * 100) : -1;
 
-  const degraded = !database || memoryUsage > 90 || diskUsage > DISK_USAGE_UNREADY_THRESHOLD;
+  const degraded = !database || memoryUsage > 90 || diskUsage > DISK_USAGE_CRITICAL_THRESHOLD;
 
   return { status: degraded ? 'degraded' : 'healthy', database, diskUsage, memoryUsage, uptime };
 }
