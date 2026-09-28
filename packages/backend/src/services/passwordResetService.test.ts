@@ -79,12 +79,13 @@ describe('passwordResetService', () => {
       expect(createAppError).not.toHaveBeenCalled();
     });
 
-    it('用户存在且低于上限 → 建 token（sha256 落库 + 1h 过期 + ip/ua 存档）', async () => {
+    it('用户存在且低于上限 → 建 token（sha256 落库 + 1h 过期 + ip/ua 存档；isActive 过滤在查询单内）', async () => {
       (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mockUser());
       (prisma.passwordResetToken.count as ReturnType<typeof vi.fn>).mockResolvedValue(2);
 
       await requestPasswordReset('resetuser', '203.0.213.7', 'vitest-agent');
 
+      expect(prisma.user.findUnique).toHaveBeenCalledWith({ where: { username: 'resetuser', isActive: true } });
       expect(generatePasswordResetToken).toHaveBeenCalledTimes(1);
       expect(hashPasswordResetToken).toHaveBeenCalledWith('raw-token-hex');
       expect(prisma.passwordResetToken.create).toHaveBeenCalledWith({
@@ -110,29 +111,52 @@ describe('passwordResetService', () => {
       await expect(requestPasswordReset('resetuser')).resolves.toBeUndefined();
       expect(prisma.passwordResetToken.create).not.toHaveBeenCalled();
     });
+
+    it('缺省 ip/UA → 归一入库 null（截断归一收口 service 单层，controller 原样透传）', async () => {
+      (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mockUser());
+      (prisma.passwordResetToken.count as ReturnType<typeof vi.fn>).mockResolvedValue(0);
+
+      await requestPasswordReset('resetuser');
+
+      expect(prisma.passwordResetToken.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ ip: null, userAgent: null }),
+      });
+    });
   });
 
   // ─── resetPassword（执行重置）────────────────────────────────────
   describe('resetPassword', () => {
-    it('有效 token → 事务[改密 + 标记 usedAt + 撤全部 session]', async () => {
+    it('有效 token → 事务[CAS 占用 + 改密 + 撤全部 session]', async () => {
       (prisma.passwordResetToken.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(activeToken());
       (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mockUser());
+      (prisma.passwordResetToken.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 1 });
 
       await resetPassword('raw-token-hex', 'NewPass123');
 
+      // CAS 守卫等价证据：updateMany 的 where 必带 usedAt:null（并发双请求仅一方 count=1）
+      expect(prisma.passwordResetToken.updateMany).toHaveBeenCalledWith({
+        where: { id: 'prt-1', usedAt: null },
+        data: { usedAt: expect.any(Date) },
+      });
       expect(hashPassword).toHaveBeenCalledWith('NewPass123');
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
       expect(prisma.user.update).toHaveBeenCalledWith({
         where: { id: 'user-1' },
         data: { passwordHash: 'hashed:NewPass123' },
       });
-      expect(prisma.passwordResetToken.update).toHaveBeenCalledWith({
-        where: { id: 'prt-1' },
-        data: { usedAt: expect.any(Date) },
-      });
       expect(prisma.session.deleteMany).toHaveBeenCalledWith({
         where: { userId: 'user-1' },
       });
+    });
+
+    it('CAS 落败（updateMany count=0，token 已被并发请求消费）→ RESET_001 且不改密不撤 session', async () => {
+      (prisma.passwordResetToken.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(activeToken());
+      (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mockUser());
+      (prisma.passwordResetToken.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 0 });
+
+      await expect(resetPassword('raw-token-hex', 'NewPass123')).rejects.toThrow('AppError:RESET_001');
+      expect(prisma.user.update).not.toHaveBeenCalled();
+      expect(prisma.session.deleteMany).not.toHaveBeenCalled();
     });
 
     it('token 不存在 → RESET_001', async () => {
@@ -165,7 +189,7 @@ describe('passwordResetService', () => {
       (prisma.passwordResetToken.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(activeToken());
 
       await expect(resetPassword('raw-token-hex', 'short')).rejects.toThrow('AppError:VAL_001');
-      expect(prisma.passwordResetToken.update).not.toHaveBeenCalled();
+      expect(prisma.passwordResetToken.updateMany).not.toHaveBeenCalled();
       expect(prisma.user.update).not.toHaveBeenCalled();
     });
   });

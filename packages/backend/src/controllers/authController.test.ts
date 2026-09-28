@@ -354,6 +354,14 @@ describe('forgotPassword / resetPassword（票 #28）', () => {
     expect(res.json).toHaveBeenCalledWith({ success: true });
   });
 
+  it('forgotPassword：username 带首尾空白 → 以 trim 后值调 service（与 limiter keyGenerator 口径一致）', async () => {
+    const req = { body: { username: '  alice  ' }, ip: '203.0.113.5', headers: {} } as unknown as Request;
+    const { res, next } = mockReqRes();
+    await authController.forgotPassword(req as Request, res as Response, next as NextFunction);
+
+    expect(passwordResetService.requestPasswordReset).toHaveBeenCalledWith('alice', '203.0.113.5', undefined);
+  });
+
   it('forgotPassword：username 缺失/非字符串 → VAL_001', async () => {
     const { req, res, next } = mockReqRes({ username: 42 });
     await authController.forgotPassword(req, res, next);

@@ -244,10 +244,11 @@ describe('userController', () => {
       (passwordResetService.createResetLink as ReturnType<typeof vi.fn>).mockResolvedValue('http://fe.local/reset-password?token=abc');
       const { req, res, next } = mockReqRes({ id: 'u2' }, undefined, {}, { id: 'u1', role: 'admin' });
       (req as any).headers = { 'user-agent': 'admin-agent' };
+      (req as any).ip = '203.0.113.9';
 
       await userController.createResetLink(req, res, next);
 
-      expect(passwordResetService.createResetLink).toHaveBeenCalledWith('u2', null, 'admin-agent');
+      expect(passwordResetService.createResetLink).toHaveBeenCalledWith('u2', '203.0.113.9', 'admin-agent');
       expect(res.json).toHaveBeenCalledWith({ success: true, data: { resetLink: 'http://fe.local/reset-password?token=abc' } });
       expect(next).not.toHaveBeenCalled();
     });

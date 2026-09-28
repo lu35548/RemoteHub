@@ -147,10 +147,11 @@ export async function forgotPassword(req: Request, res: Response, next: NextFunc
     if (typeof username !== 'string' || username.trim() === '') {
       throw createAppError('VAL_001', [{ field: 'username', message: '用户名不能为空' }]);
     }
+    // ip/UA 原样透传（截断归一收口 service）；username 以 trim 后值查询（与 limiter keyGenerator 口径一致）
     await passwordResetService.requestPasswordReset(
-      username,
-      req.ip?.slice(0, 45) ?? null,
-      (req.headers['user-agent'] || '').slice(0, 500),
+      username.trim(),
+      req.ip,
+      req.headers['user-agent'],
     );
     res.json({ success: true });
   } catch (err) { next(err); }

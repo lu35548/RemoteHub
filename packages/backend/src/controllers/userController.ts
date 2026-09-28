@@ -60,11 +60,8 @@ export async function deleteUser(req: Request, res: Response, next: NextFunction
 export async function createResetLink(req: Request, res: Response, next: NextFunction) {
   try {
     const id = paramId(req, 'id');
-    const resetLink = await passwordResetService.createResetLink(
-      id,
-      req.ip?.slice(0, 45) ?? null,
-      (req.headers['user-agent'] || '').slice(0, 500),
-    );
+    // ip/UA 原样透传（截断归一收口 service，同 forgotPassword）
+    const resetLink = await passwordResetService.createResetLink(id, req.ip, req.headers['user-agent']);
     res.json({ success: true, data: { resetLink } });
   } catch (err) { next(err); }
 }

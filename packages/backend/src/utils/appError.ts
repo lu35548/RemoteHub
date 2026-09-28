@@ -33,9 +33,9 @@ export const ERROR_CODES: Record<string, number> = {
   MEMBER_003: 409,
   AUDIT_001: 400,
   AUDIT_002: 500,
-  // 密码重置（design §16）：RESET_001 鉴权语义（token 无效/过期/复用）401，RESET_002/003 配额语义 429
+  // 密码重置（design §16）：RESET_001 鉴权语义（token 无效/过期/复用）401，RESET_003 配额语义 429
+  // （RESET_002 已删：无 throw 点，限流 429 走 RATE_LIMIT 统一形状）
   RESET_001: 401,
-  RESET_002: 429,
   RESET_003: 429,
   VAL_001: 422,
   SYS_001: 500,
@@ -64,7 +64,6 @@ export const ERROR_MESSAGES: Record<string, string> = {
   AUDIT_002: '审计日志导出失败',
   // 密码重置（design §16）
   RESET_001: '密码重置令牌无效或已过期',
-  RESET_002: '密码重置请求过于频繁，请明天再试',
   RESET_003: '重置请求已达上限，请等待现有令牌过期后再试',
   VAL_001: '输入验证失败',
   SYS_001: '内部服务器错误',
