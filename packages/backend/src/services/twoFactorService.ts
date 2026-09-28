@@ -63,7 +63,7 @@ export async function generateMfaSetup(userId: string) {
   return { secret, otpauthUri: totp.toString() };
 }
 
-/** 绑定流第二步：校验一次 TOTP → secret 密文落库 + 生成恢复码（一次性返回） */
+/** 绑定流第二步：校验一次 TOTP → secret 密文 CAS 条件写落库（事务内守卫）+ 生成恢复码（一次性返回） */
 export async function confirmMfaSetup(userId: string, secret: string, token: string) {
   const user = await loadGuardedUser(userId, false);
   if (!BASE32_PATTERN.test(secret)) {
@@ -73,12 +73,21 @@ export async function confirmMfaSetup(userId: string, secret: string, token: str
   if (delta === null) throw createAppError('MFA_001');
 
   const recoveryCodes = Array.from({ length: RECOVERY_CODE_COUNT }, generateRecoveryCode);
-  await prisma.$transaction([
-    prisma.user.update({ where: { id: user.id }, data: { totpSecret: encrypt(secret) } }),
-    prisma.twoFactorRecoveryCode.createMany({
+  await prisma.$transaction(async (tx) => {
+    // 事务内条件写守卫（CAS，对照批 1 resetPassword `usedAt: null` 先例）：loadGuardedUser 的
+    // 读-验-写非原子，双端点并发 confirm（各持有效 TOTP）可同时过守卫；`totpSecret 仍为 null`
+    // 条件写保证仅一个赢家——输家 count=0 → MFA_003（语义=「已被并发请求绑定」，与 loadGuardedUser
+    // 的已绑定 MFA_003 同状态码），杜绝后写覆盖 secret + 双份恢复码并存。
+    const claimed = await tx.user.updateMany({
+      where: { id: user.id, totpSecret: null },
+      data: { totpSecret: encrypt(secret) },
+    });
+    if (claimed.count !== 1) throw createAppError('MFA_003');
+    // 恢复码创建须在守卫成功路径内、同一事务，与 secret 写入原子
+    await tx.twoFactorRecoveryCode.createMany({
       data: recoveryCodes.map((code) => ({ userId: user.id, codeHash: hashRecoveryCode(code) })),
-    }),
-  ]);
+    });
+  });
   return { recoveryCodes };
 }
 
@@ -88,7 +97,10 @@ export async function verifyMfa(userId: string, input: { token?: string; recover
 
   let verified = false;
   if (input.token) {
-    const totp = buildTotp(decrypt(user.totpSecret!), user.username);
+    // 显式收窄（review note）：loadGuardedUser(requireBound=true) 已保证非 null，此处仅为
+    // 类型系统显式化；null 视为状态异常拒绝，杜绝 `!` 断言喂 null 给 decrypt
+    if (!user.totpSecret) throw createAppError('MFA_002');
+    const totp = buildTotp(decrypt(user.totpSecret), user.username);
     verified = totp.validate({ token: input.token, window: 1 }) !== null;
   }
   if (!verified && input.recoveryCode) {

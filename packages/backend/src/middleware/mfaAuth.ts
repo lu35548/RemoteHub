@@ -25,6 +25,8 @@ export async function mfaAuthMiddleware(req: Request, res: Response, next: NextF
   }
 
   const user = await prisma.user.findUnique({ where: { id: userId } });
+  // review F6：isActive=false 时与 authMiddleware（403 AUTH_005）不同构，统一回 401 MFA_002——
+  // 与「无效 token」同响应形状，避免向持挑战 token 者泄露「账号存在但已被禁用」。
   if (!user || !user.isActive) {
     unauthorized(res);
     return;

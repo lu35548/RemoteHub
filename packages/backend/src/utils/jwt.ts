@@ -16,7 +16,8 @@ export async function signAccessToken(userId: string): Promise<string> {
 export async function verifyAccessToken(token: string): Promise<{ userId: string }> {
   const secret = new TextEncoder().encode(env.JWT_SECRET);
   // 显式 audience:'access'：aud 缺失即抛错；aud='mfa' 的挑战 token 在此被拒收
-  const { payload } = await jose.jwtVerify<{ userId: string; aud?: string | string[] }>(token, secret, { audience: 'access' });
+  // requiredClaims 纵深（review note）：签发端恒 setExpirationTime，防无 exp 的手工 token
+  const { payload } = await jose.jwtVerify<{ userId: string; aud?: string | string[] }>(token, secret, { audience: 'access', requiredClaims: ['exp'] });
   // 多值 aud 拒收：jose any-overlap 语义会放行 ['access','mfa']，双过等于没防——
   // 绝不签发多值 aud，验签侧亦显式拒绝（libcheck-auth §4）
   if (Array.isArray(payload.aud)) {
@@ -41,7 +42,8 @@ export async function signMfaToken(userId: string): Promise<string> {
 
 export async function verifyMfaToken(token: string): Promise<{ userId: string }> {
   const secret = new TextEncoder().encode(env.JWT_SECRET);
-  const { payload } = await jose.jwtVerify<{ userId: string; aud?: string | string[] }>(token, secret, { audience: 'mfa' });
+  // requiredClaims 纵深（review note）：同 verifyAccessToken，exp 缺失即拒
+  const { payload } = await jose.jwtVerify<{ userId: string; aud?: string | string[] }>(token, secret, { audience: 'mfa', requiredClaims: ['exp'] });
   if (Array.isArray(payload.aud)) {
     throw new Error('多值 aud token 拒收（any-overlap 双过=没防）');
   }

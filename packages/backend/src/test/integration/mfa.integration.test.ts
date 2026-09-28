@@ -73,6 +73,8 @@ describe('2FA 集成（票 #30 安全三件套 + 全流程）', () => {
     expect(res.body.data.mfaStage).toBe('setup');
     expect(res.body.data.accessToken).toBeUndefined();
     expect(res.body.data.mfaToken).toBeTruthy();
+    // review F7：挑战阶段绝不建 session——响应无 Set-Cookie（不落 refresh cookie）
+    expect(res.headers['set-cookie']).toBeUndefined();
     mfaToken = res.body.data.mfaToken;
     const sessions = await b.prisma!.session.count({ where: { userId } });
     expect(sessions).toBe(0);

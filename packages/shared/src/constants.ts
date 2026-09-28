@@ -48,4 +48,6 @@ export const ENCRYPTION_VERSION = 'v1';
 // password：decrypt-password 端点响应体含明文密码（票 #16 实施发现，design §3.4 密码类字段脱敏意图）
 // accessToken/refreshToken：/auth/login 响应体整体进 AUTH_LOGIN after 快照（票 #25，Set 精确键名匹配故须逐键列出）
 // resetLink：admin 代重置响应体内嵌一次性重置 token（票 #28，泄漏即等于交出改密权）
-export const SENSITIVE_FIELDS = new Set<string>(['password', 'passwordHash', 'encryptedPass', 'token', 'tokenHash', 'accessToken', 'refreshToken', 'resetLink']);
+// mfaToken：mfaPending 登录响应体进 AUTH_LOGIN after 快照（票 #30 review，15 分钟挑战 JWT 明文落审计）
+// secret/recoveryCode：2FA 绑定密钥/恢复码（票 #30 review 纵深——未来 mfa 端点若挂审计，confirm body 的 TOTP secret 是长期凭证）
+export const SENSITIVE_FIELDS = new Set<string>(['password', 'passwordHash', 'encryptedPass', 'token', 'tokenHash', 'accessToken', 'refreshToken', 'resetLink', 'mfaToken', 'secret', 'recoveryCode']);

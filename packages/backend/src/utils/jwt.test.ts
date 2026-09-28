@@ -73,4 +73,11 @@ describe('jwt aud 双向校验（票 #30 安全核心）', () => {
     const token = await craftToken({ userId: 'user-1', aud: 'mfa' }, '-1s');
     await expect(verifyMfaToken(token)).rejects.toThrow();
   });
+
+  it('无 exp claim 的伪 token → 双 verifier 必拒（requiredClaims 纵深，防手工无过期 token）', async () => {
+    const noExpAccess = await craftToken({ userId: 'user-1', aud: 'access' });
+    await expect(verifyAccessToken(noExpAccess)).rejects.toThrow();
+    const noExpMfa = await craftToken({ userId: 'user-1', aud: 'mfa' });
+    await expect(verifyMfaToken(noExpMfa)).rejects.toThrow();
+  });
 });

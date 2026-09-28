@@ -104,24 +104,33 @@ describe('twoFactorService', () => {
       (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mockUser());
       const bad = wrongCode(SECRET);
       await expect(confirmMfaSetup('user-1', SECRET, bad)).rejects.toMatchObject({ code: 'MFA_001' });
-      expect(prisma.user.update).not.toHaveBeenCalled();
+      expect(prisma.user.updateMany).not.toHaveBeenCalled();
       expect(prisma.twoFactorRecoveryCode.createMany).not.toHaveBeenCalled();
     });
-    it('TOTP 正确 → 密文落库 + 10 组恢复码 + 一次性返回', async () => {
+    it('TOTP 正确 → CAS 条件写密文落库 + 10 组恢复码 + 一次性返回', async () => {
       (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mockUser());
+      (prisma.user.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 1 });
       const code = buildTotp(SECRET).generate();
       const r = await confirmMfaSetup('user-1', SECRET, code);
       expect(r.recoveryCodes).toHaveLength(10);
       expect(r.recoveryCodes[0]!).toMatch(/^[A-Z2-9]{5}-[A-Z2-9]{5}$/);
       for (const c of r.recoveryCodes) expect(c).not.toMatch(/[ILO01]/);
       expect(new Set(r.recoveryCodes).size).toBe(10);
-      expect(prisma.user.update).toHaveBeenCalledWith(expect.objectContaining({
+      expect(prisma.user.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 'user-1', totpSecret: null },
         data: expect.objectContaining({ totpSecret: expect.stringMatching(/^v1:/) }),
       }));
       expect(prisma.twoFactorRecoveryCode.createMany).toHaveBeenCalledTimes(1);
       const call = (prisma.twoFactorRecoveryCode.createMany as ReturnType<typeof vi.fn>).mock.calls[0]![0];
       expect(call.data).toHaveLength(10);
       expect(call.data[0]).toEqual({ userId: 'user-1', codeHash: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    });
+    it('并发双 confirm：CAS 条件写 count=0（secret 已被并发请求绑定）→ MFA_003，零恢复码创建', async () => {
+      (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mockUser());
+      (prisma.user.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 0 });
+      const code = buildTotp(SECRET).generate();
+      await expect(confirmMfaSetup('user-1', SECRET, code)).rejects.toMatchObject({ code: 'MFA_003' });
+      expect(prisma.twoFactorRecoveryCode.createMany).not.toHaveBeenCalled();
     });
   });
 
