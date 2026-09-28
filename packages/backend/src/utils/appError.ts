@@ -33,9 +33,10 @@ export const ERROR_CODES: Record<string, number> = {
   MEMBER_003: 409,
   AUDIT_001: 400,
   AUDIT_002: 500,
-  // 密码重置（design §16）：RESET_001 鉴权语义（token 无效/过期/复用）401，RESET_003 配额语义 429
+  // 密码重置（design §16）：RESET_001 业务校验语义（token 无效/过期/复用）400，RESET_003 配额语义 429
+  // （真机验收修正：401 会触发前端 client 的 refresh 重放，未登录重置流用户被误判会话失效强制登出——T7 AUTH_006 同款）
   // （RESET_002 已删：无 throw 点，限流 429 走 RATE_LIMIT 统一形状）
-  RESET_001: 401,
+  RESET_001: 400,
   RESET_003: 429,
   VAL_001: 422,
   SYS_001: 500,

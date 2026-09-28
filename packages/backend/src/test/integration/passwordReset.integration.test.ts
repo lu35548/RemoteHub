@@ -134,14 +134,14 @@ describe('密码重置集成（票 #28）', () => {
     });
     expect(used).not.toBeNull();
 
-    // token 复用 → 401 RESET_001
+    // token 复用 → 400 RESET_001
     const reuse = await request(b.app).post('/api/v1/auth/reset-password')
       .send({ token, newPassword: 'NewPass789' });
-    expect(reuse.status).toBe(401);
+    expect(reuse.status).toBe(400);
     expect(reuse.body.error.code).toBe('RESET_001');
   });
 
-  it('A6 过期 token → 401 RESET_001（直插过期行）', async () => {
+  it('A6 过期 token → 400 RESET_001（直插过期行）', async () => {
     const user = await b.prisma.user.findUnique({ where: { username: 'resetuser' } });
     await b.prisma.passwordResetToken.create({
       data: {
@@ -152,7 +152,7 @@ describe('密码重置集成（票 #28）', () => {
     });
     const res = await request(b.app).post('/api/v1/auth/reset-password')
       .send({ token: 'expired-raw-token', newPassword: 'Whatever1' });
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('RESET_001');
   });
 
