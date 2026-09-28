@@ -88,6 +88,11 @@ export function useMfaSetup(enabled: boolean) {
     queryFn: () => mfaRequest<MfaSetupResponse>('POST', '/auth/mfa/setup', {}),
     enabled,
     retry: false,
+    // stateless POST（后端每次 new Secret）：窗口回焦/断线重连重取会静默换 secret，
+    // 用户按旧 QR 提交动态码必 MFA_001——三闸全关，secret 仅在挂载时拉取一次（review F1）
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    staleTime: Infinity,
   });
 }
 
@@ -101,11 +106,16 @@ export function useMfaConfirm() {
 
 /** POST /auth/mfa/verify：TOTP 或恢复码 → 换正式 token（成功即持有 access token，同 login 口径） */
 export function useMfaVerify() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (data: MfaVerifyRequest): Promise<LoginResponse> => {
       const result = await mfaRequest<LoginResponse>('POST', '/auth/mfa/verify', data);
       setAccessToken(result.accessToken);
       return result;
+    },
+    onSuccess: () => {
+      // secret 是敏感明文，验证成功即从 QueryClient 缓存移除（不滞留至 gc 5min，review F5）
+      queryClient.removeQueries({ queryKey: ['mfa-setup'] });
     },
   });
 }

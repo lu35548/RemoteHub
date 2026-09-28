@@ -9,6 +9,7 @@ import { ShieldCheck, AlertCircle, Copy } from 'lucide-react';
 import { useUI } from './UIComponents';
 import { useMfaSetup, useMfaConfirm, useMfaVerify } from '../api/queries';
 import { setMfaPending, getMfaPending } from '../api/mfaPending';
+import { errMsg } from '../utils';
 import type { ApiErrorResponse } from '@remotehub/shared';
 
 /** ApiErrorResponse → error.code 提取（非标准形状回落空串） */
@@ -42,6 +43,8 @@ const MfaChallengePage: React.FC = () => {
   if (pending.mfaStage === 'setup' && phase === 'setup' && setupQuery.isError) {
     const code = errCode(setupQuery.error);
     if (code === 'MFA_002' || code === 'MFA_003') {
+      // review F2：与 verify/confirm 同路径对齐——跳登录页前先清内存挑战态
+      setMfaPending(null);
       return <Navigate to="/login" replace />;
     }
   }
@@ -63,7 +66,7 @@ const MfaChallengePage: React.FC = () => {
         navigate('/login');
         return;
       }
-      setError((err as ApiErrorResponse)?.error?.message || '验证失败，请重试');
+      setError(errMsg(err, '验证失败，请重试'));
     }
   };
 
@@ -85,7 +88,7 @@ const MfaChallengePage: React.FC = () => {
         navigate('/login');
         return;
       }
-      setError((err as ApiErrorResponse)?.error?.message || '验证码错误，请重试');
+      setError(errMsg(err, '验证码错误，请重试'));
     }
   };
 
@@ -150,7 +153,33 @@ const MfaChallengePage: React.FC = () => {
 
   // ─── 渲染 ──────────────────────────────────────────────────────
   let body: React.ReactNode;
-  if (phase === 'setup' && setupQuery.data) {
+  if (phase === 'setup' && !setupQuery.data) {
+    // review F3：setup 拉取中/非预期错误不落 else 的挑战表单（绑定标题下闪现动态码表单、
+    // 网络错/SYS_001 永久卡错位表单）。MFA_002/003 已在上方重定向，此处兜底其余情形。
+    if (setupQuery.isError) {
+      body = (
+        <div className="space-y-5">
+          <div className="flex items-center gap-2 text-rose-400 text-xs bg-rose-500/10 p-3 rounded-lg border border-rose-500/20">
+            <AlertCircle size={14} />
+            {errMsg(setupQuery.error, '绑定信息获取失败，请重新登录')}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setMfaPending(null);
+              navigate('/login');
+            }}
+            className="w-full border border-white/10 hover:bg-slate-800 text-slate-200 font-medium py-3 rounded-xl transition-colors"
+          >
+            返回登录
+          </button>
+        </div>
+      );
+    } else {
+      // isPending（含理论缝隙态）一律加载提示，绝不渲染挑战表单
+      body = <p className="py-6 text-center text-sm text-slate-400">正在获取绑定信息…</p>;
+    }
+  } else if (phase === 'setup' && setupQuery.data) {
     body = (
       <form onSubmit={handleConfirm} className="space-y-5">
         <p className="text-sm text-slate-400">使用验证器 App 扫描二维码，或手动输入密钥，然后输入 6 位动态码完成绑定。</p>

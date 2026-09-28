@@ -5,19 +5,25 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { UIProvider } from './UIComponents';
 import MfaChallengePage from './MfaChallengePage';
-import { setMfaPending } from '../api/mfaPending';
+import { setMfaPending, getMfaPending } from '../api/mfaPending';
 
 const { state } = vi.hoisted(() => ({
   state: {
     setupData: undefined as { secret: string; otpauthUri: string } | undefined,
     setupError: null as { error?: { code?: string; message?: string } } | null,
+    setupPending: false,
     confirm: vi.fn(),
     verify: vi.fn(),
   },
 }));
 
 vi.mock('../api/queries', () => ({
-  useMfaSetup: () => ({ data: state.setupData, isError: !!state.setupError, error: state.setupError }),
+  useMfaSetup: () => ({
+    data: state.setupData,
+    isPending: state.setupPending,
+    isError: !!state.setupError,
+    error: state.setupError,
+  }),
   useMfaConfirm: () => ({ mutateAsync: state.confirm, isPending: false }),
   useMfaVerify: () => ({ mutateAsync: state.verify, isPending: false }),
 }));
@@ -48,6 +54,7 @@ describe('MfaChallengePage（票 #31）', () => {
     setMfaPending(null);
     state.setupData = undefined;
     state.setupError = null;
+    state.setupPending = false;
   });
 
   it('无 mfaPending → 重定向 /login（内存态不持久，刷新重走密码）', () => {
@@ -105,6 +112,7 @@ describe('MfaChallengePage（票 #31）', () => {
     fireEvent.click(screen.getByRole('button', { name: '验证并登录' }));
     await waitFor(() => {
       expect(screen.getByTestId('location')).toHaveTextContent('/login');
+      expect(getMfaPending()).toBeNull();
     });
   });
 
@@ -141,6 +149,41 @@ describe('MfaChallengePage（票 #31）', () => {
     renderPage();
     await waitFor(() => {
       expect(screen.getByTestId('location')).toHaveTextContent('/login');
+      expect(getMfaPending()).toBeNull();
     });
+  });
+
+  // ── review F2：confirm 路径的清 pending 也要有锁（第三条清 pending 测试）──
+  it('confirm MFA_002 → 清 pending + 跳 /login（挑战 token 过期重走密码）', async () => {
+    setMfaPending({ mfaPending: true, mfaStage: 'setup', mfaToken: 'mt' });
+    state.setupData = { secret: 'JBSWY3DPEHPK3PXP', otpauthUri: 'otpauth://totp/RemoteHub:mfauser' };
+    state.confirm.mockRejectedValue({ error: { code: 'MFA_002', message: '多因素认证令牌无效或已过期' } });
+    renderPage();
+    fireEvent.change(screen.getByLabelText('验证码确认'), { target: { value: '654321' } });
+    fireEvent.click(screen.getByRole('button', { name: '确认绑定' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('location')).toHaveTextContent('/login');
+      expect(getMfaPending()).toBeNull();
+    });
+  });
+
+  // ── review F3：setup 阶段无数据时的显式分支（不落错位挑战表单）──
+  it('setup 加载中 → 加载提示，不渲染挑战表单', () => {
+    setMfaPending({ mfaPending: true, mfaStage: 'setup', mfaToken: 'mt' });
+    state.setupPending = true;
+    renderPage();
+    expect(screen.getByText('正在获取绑定信息…')).toBeInTheDocument();
+    expect(screen.queryByLabelText('动态验证码')).not.toBeInTheDocument();
+  });
+
+  it('setup 非预期错误（SYS_001）→ 兜底错误 + 返回登录，不渲染错位挑战表单', async () => {
+    setMfaPending({ mfaPending: true, mfaStage: 'setup', mfaToken: 'mt' });
+    state.setupError = { error: { code: 'SYS_001', message: '服务器内部错误' } };
+    renderPage();
+    expect(screen.getByText('服务器内部错误')).toBeInTheDocument();
+    expect(screen.queryByLabelText('动态验证码')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '返回登录' }));
+    expect(screen.getByTestId('location')).toHaveTextContent('/login');
+    expect(getMfaPending()).toBeNull();
   });
 });
