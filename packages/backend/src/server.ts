@@ -3,6 +3,7 @@ import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import cors from 'cors';
+import { createServer } from 'node:http';
 import { env } from './config/env.js';
 import { logger } from './utils/logger.js';
 import { AppError, createAppError } from './utils/appError.js';
@@ -11,9 +12,14 @@ import { startAuditCleaner } from './utils/auditCleaner.js';
 import { checkIpRisk, RATE_LIMIT_SKIP_PATHS } from './utils/ipMonitor.js';
 import { sanitizationMiddleware } from './middleware/sanitization.js';
 import { performanceMonitorMiddleware } from './middleware/performanceMonitor.js';
+import { initWsServer, closeWsServer } from './ws/wsServer.js';
 import type { Request, Response, NextFunction } from 'express';
 
 const app: Express = express();
+
+// #34：http server 实例（ws 库 attach 点 + graceful shutdown 操作对象）。
+// createServer 本身不 listen——「import 不 listen」红线保持（NODE_ENV=test guard 依赖）。
+const server = createServer(app);
 
 // ─── Global middleware stack (in order) ───
 
@@ -194,10 +200,38 @@ async function bootstrap() {
   // 4. audit cleaner（每日 03:30，仅定时——不启动即清）
   startAuditCleaner();
 
-  // 5. listen（DB 就绪后才接请求）
-  app.listen(PORT, () => {
+  // 5. WS 管道（#34：upgrade 鉴权/房间/心跳；noServer 独占 upgrade 监听器）
+  initWsServer(server);
+
+  // 6. listen（DB 就绪后才接请求；http server 实例承接，ws upgrade 同端口复用）
+  server.listen(PORT, () => {
     logger.info(`Server running on port ${PORT} (${env.NODE_ENV})`);
   });
+
+  // 7. SIGTERM 优雅关停（docker stop / K8s 删除 pod）：断 WS → 停接新连接 → 等在途排空。
+  //    注：Node server.close/closeAllConnections 均不断 upgraded socket（libcheck-ws §5），
+  //    WS 必须单独 closeWsServer 处理——时序在 gracefulShutdown 内固化。
+  process.on('SIGTERM', () => {
+    gracefulShutdown()
+      .then(() => { logger.info('优雅关停完成'); process.exit(0); })
+      .catch((err) => {
+        logger.error('优雅关停失败', { error: (err as Error).message });
+        process.exit(1);
+      });
+  });
+}
+
+/**
+ * 优雅关停（#34，可测导出——不 process.exit，退出语义在 SIGTERM handler 层）：
+ * ① 断 WS（closeWsServer：terminate 全部连接 + 停心跳 + 摘 upgrade 监听器）
+ * ② server.close 停止接受新 HTTP 连接并等在途请求排空（closeIdleConnections 清 keep-alive 空闲）
+ */
+export async function gracefulShutdown(): Promise<void> {
+  closeWsServer();
+  if (server.listening) {
+    server.closeIdleConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 }
 
 // 集成测试（supertest）import app 不得触发 listen/seed/cleaner——NODE_ENV guard（票 #16）
@@ -208,4 +242,4 @@ if (process.env.NODE_ENV !== 'test') {
   });
 }
 
-export { app };
+export { app, server };

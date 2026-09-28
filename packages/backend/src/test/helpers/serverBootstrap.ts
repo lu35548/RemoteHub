@@ -2,6 +2,7 @@ import './env.js'; // 环境前置（helper 依赖图中最先执行，供 serve
 import { vi } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
+import type { Server as HttpServer } from 'node:http';
 import type { PrismaClient } from '@prisma/client';
 import { setupTestDb } from './testDb.js';
 import { seedAdmin } from '../../utils/seedAdmin.js';
@@ -16,6 +17,8 @@ import { seedAdmin } from '../../utils/seedAdmin.js';
  */
 export interface ServerBootstrap {
   app: Express;
+  /** #34：底层 http.Server 实例（WS 集成测试 listen(0) 拿真实端口用；import 仍不 listen，红线未破） */
+  server: HttpServer;
   /** 测试自持的 prisma（连临时库，用于造数/断言） */
   prisma: PrismaClient;
   /** server 单例 prisma（连临时库；afterAll 须先断开，Windows 下才能删库文件） */
@@ -33,14 +36,14 @@ export async function setupServerWithDb(): Promise<ServerBootstrap> {
   vi.resetModules();
   (globalThis as Record<string, unknown>).prisma = undefined;
 
-  const server = await import('../../server.js');
+  const serverModule = await import('../../server.js');
   const serverPrisma = (await import('../../utils/prisma.js')).prisma;
 
   await seedAdmin(t.prisma);
-  const res = await request(server.app).post('/api/v1/auth/login').send({ username: 'admin', password: 'Admin123456!' });
+  const res = await request(serverModule.app).post('/api/v1/auth/login').send({ username: 'admin', password: 'Admin123456!' });
   const adminToken = res.body.data.accessToken as string;
 
-  return { app: server.app, prisma: t.prisma, serverPrisma, cleanUp: t.cleanUp, adminToken };
+  return { app: serverModule.app, server: serverModule.server, prisma: t.prisma, serverPrisma, cleanUp: t.cleanUp, adminToken };
 }
 
 /** afterAll 拆卸：server 单例先断开（连临时库），Windows 下先断开才能删库文件 */

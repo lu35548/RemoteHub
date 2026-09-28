@@ -92,7 +92,7 @@ describe('authController', () => {
       expect(res.cookie).toHaveBeenCalledWith('refreshToken', 'refresh-token-456', expect.objectContaining({
         httpOnly: true,
         sameSite: 'strict',
-        path: '/api/v1/auth',
+        path: '/api/v1',
       }));
       expect(res.json).toHaveBeenCalledWith({
         success: true,
@@ -170,7 +170,7 @@ describe('authController', () => {
       expect(res.cookie).toHaveBeenCalledWith('refreshToken', 'new-refresh', expect.objectContaining({
         httpOnly: true,
         sameSite: 'strict',
-        path: '/api/v1/auth',
+        path: '/api/v1',
       }));
       expect(res.json).toHaveBeenCalledWith({ success: true, data: { accessToken: 'new-access' } });
     });

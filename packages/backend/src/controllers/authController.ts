@@ -7,11 +7,15 @@ import { createAppError, shouldClearRefreshCookie } from '../utils/appError.js';
 import { hashRefreshToken } from '../utils/jwt.js';
 import { prisma } from '../utils/prisma.js';
 
+// cookie path 扩到 /api/v1（原 /api/v1/auth）：#34 WS upgrade 请求打 /api/v1/ws，
+// 浏览器只对 path 前缀匹配的 cookie 随请求携带——path 锁在 /api/v1/auth 时 WS 握手永远拿不到
+// refreshToken，upgrade 鉴权通道无从谈起。安全属性（httpOnly/secure/sameSite=strict）不变；
+// 业务 API 不读该 cookie，CSRF 面无变化。
 const REFRESH_COOKIE_OPTIONS = {
   httpOnly: true,
   secure: true,
   sameSite: 'strict' as const,
-  path: '/api/v1/auth',
+  path: '/api/v1',
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 天
 };
 
@@ -19,7 +23,7 @@ const CLEAR_COOKIE_OPTIONS = {
   httpOnly: true,
   secure: true,
   sameSite: 'strict' as const,
-  path: '/api/v1/auth',
+  path: '/api/v1',
   maxAge: 0,
 };
 
