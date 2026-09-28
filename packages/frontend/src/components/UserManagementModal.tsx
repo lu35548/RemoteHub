@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import type { UserListItem, UserPublic } from '@remotehub/shared';
 import { Modal, useUI } from './UIComponents';
-import { UserCog, Plus, Trash2, Key, Shield } from 'lucide-react';
-import { useUsers, useCreateUser, useDeleteUser, useChangePassword, useAdminResetLink } from '../api/queries';
+import { UserCog, Plus, Trash2, Key, Shield, ShieldCheck } from 'lucide-react';
+import { useUsers, useCreateUser, useDeleteUser, useChangePassword, useAdminResetLink, useUpdateUser } from '../api/queries';
 import { errMsg } from '../utils';
 
 /** 重置链接弹窗数据：目标用户 + 一次性链接 */
@@ -32,7 +32,33 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen, onClo
   const deleteUser = useDeleteUser();
   const changePassword = useChangePassword();
   const resetLinkMutation = useAdminResetLink();
+  const updateUser = useUpdateUser();
   const [resetLinkInfo, setResetLinkInfo] = useState<ResetLinkInfo | null>(null);
+
+  /** 票 #31：2FA 开关——开启直接提交；关闭清绑定+恢复码，走危险确认 */
+  const handleToggle2FA = (u: UserListItem) => {
+    const enabling = !u.twoFactorEnabled;
+    if (enabling) {
+      updateUser
+        .mutateAsync({ id: u.id, data: { twoFactorEnabled: true } })
+        .then(() => toast('success', '已开启 2FA', '该用户下次登录将强制绑定验证器'))
+        .catch((err) => toast('error', '操作失败', errMsg(err, '无法更新 2FA 状态')));
+      return;
+    }
+    confirm({
+      title: '关闭双因素认证',
+      message: `关闭后将清除 ${u.nickname || u.username} 的验证器绑定并作废全部恢复码，确定继续？`,
+      variant: 'danger',
+      onConfirm: async () => {
+        try {
+          await updateUser.mutateAsync({ id: u.id, data: { twoFactorEnabled: false } });
+          toast('success', '已关闭 2FA');
+        } catch (err) {
+          toast('error', '操作失败', errMsg(err, '无法更新 2FA 状态'));
+        }
+      },
+    });
+  };
 
   /** 票 #29：假重置换真——调 admin 代重置端点，弹窗展示一次性链接供复制转交 */
   const handleResetLink = async (u: UserListItem) => {
@@ -212,6 +238,15 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen, onClo
                       </div>
                       {u.id !== currentUser.id && (
                         <div className="flex gap-2">
+                          {/* 票 #31：2FA 开关（对齐面板 icon 按钮交互） */}
+                          <button
+                            onClick={() => handleToggle2FA(u)}
+                            disabled={updateUser.isPending}
+                            className={`p-2 hover:bg-slate-800 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed ${u.twoFactorEnabled ? 'text-emerald-400' : 'text-slate-400 hover:text-white'}`}
+                            title={u.twoFactorEnabled ? '关闭双因素认证' : '开启双因素认证'}
+                          >
+                            <ShieldCheck size={16} />
+                          </button>
                           {/* 票 #29 换真：生成一次性重置链接，弹窗展示供 admin 复制转交 */}
                           <button onClick={() => handleResetLink(u)} disabled={resetLinkMutation.isPending} className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed" title="重置密码"><Key size={16} /></button>
                           <button onClick={() => handleDeleteUser(u.id)} className="p-2 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg" title="删除用户"><Trash2 size={16} /></button>

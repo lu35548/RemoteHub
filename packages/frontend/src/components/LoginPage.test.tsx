@@ -97,4 +97,20 @@ describe('LoginPage（T3）', () => {
     });
     expect(screen.getByTestId('location')).toHaveTextContent('/login');
   });
+
+  // 票 #31：enabled 用户登录响应 mfaPending → 存内存态 + 跳 /mfa（不 setAccessToken）
+  it('mfaPending 响应 → 跳 /mfa 挑战页', async () => {
+    const mutateAsync = vi.fn().mockResolvedValue({ mfaPending: true, mfaStage: 'verify', mfaToken: 'mt' });
+    mockedUseLogin.mockReturnValue({ mutateAsync, isPending: false });
+
+    const events = userEvent.setup();
+    renderLogin();
+    await events.type(screen.getByPlaceholderText('请输入用户名'), 'admin');
+    await events.type(screen.getByPlaceholderText('••••••••'), 'Admin123');
+    await events.click(screen.getByRole('button', { name: /安全登录/ }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location')).toHaveTextContent('/mfa');
+    });
+  });
 });

@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { API_BASE, api, ensureRefreshed, getAccessToken, setAccessToken } from './client.js';
+import { API_BASE, api, ensureRefreshed, getAccessToken, setAccessToken, mfaRequest } from './client.js';
 import { downloadBlob } from '../utils';
 import type {
   ApiErrorResponse, AuditLog, AuditLogQuery, LoginRequest, LoginResponse, UserPublic,
@@ -10,16 +10,18 @@ import type {
   MemberListItem, AddMemberRequest, UpdateMemberRoleRequest,
   UserListItem, AdminUpdateUserRequest, UserSearchResult, RegisterRequest,
   PaginatedResponse, ForgotPasswordRequest, ResetPasswordRequest, AdminResetLinkResponse,
+  MfaPendingLoginResponse, MfaSetupResponse, MfaConfirmRequest, MfaConfirmResponse, MfaVerifyRequest,
 } from '@remotehub/shared';
 
 // ─── Auth ───
 
 export function useLogin() {
   return useMutation({
-    mutationFn: async (data: LoginRequest): Promise<LoginResponse> => {
-      const result = await api.post<LoginResponse>('/auth/login', data);
-      // 登录成功即持有内存 access token（refresh 由 httpOnly cookie 承载）
-      if (result.accessToken) setAccessToken(result.accessToken);
+    mutationFn: async (data: LoginRequest): Promise<LoginResponse | MfaPendingLoginResponse> => {
+      const result = await api.post<LoginResponse | MfaPendingLoginResponse>('/auth/login', data);
+      // 登录成功即持有内存 access token（refresh 由 httpOnly cookie 承载）；
+      // mfaPending 响应无 accessToken 字段——挑战 token 走 mfaPending 内存态（票 #31）
+      if ('accessToken' in result && result.accessToken) setAccessToken(result.accessToken);
       return result;
     },
   });
@@ -74,6 +76,37 @@ export function useResetPassword() {
 export function useAdminResetLink() {
   return useMutation({
     mutationFn: (id: string) => api.post<AdminResetLinkResponse>(`/admin/users/${id}/reset-link`),
+  });
+}
+
+// ─── 2FA（票 #31）：三端点走 mfaRequest 专用通道（aud:'mfa' 挑战 token）───
+
+/** POST /auth/mfa/setup：发 secret + otpauth:// URI（绑定 phase 挂载时才拉取，retry 关闭——MFA_002 页面级重定向） */
+export function useMfaSetup(enabled: boolean) {
+  return useQuery({
+    queryKey: ['mfa-setup'],
+    queryFn: () => mfaRequest<MfaSetupResponse>('POST', '/auth/mfa/setup', {}),
+    enabled,
+    retry: false,
+  });
+}
+
+/** POST /auth/mfa/confirm：校验一次 TOTP 落库 + 恢复码一次性返回 */
+export function useMfaConfirm() {
+  return useMutation({
+    mutationFn: (data: MfaConfirmRequest) =>
+      mfaRequest<MfaConfirmResponse>('POST', '/auth/mfa/confirm', data),
+  });
+}
+
+/** POST /auth/mfa/verify：TOTP 或恢复码 → 换正式 token（成功即持有 access token，同 login 口径） */
+export function useMfaVerify() {
+  return useMutation({
+    mutationFn: async (data: MfaVerifyRequest): Promise<LoginResponse> => {
+      const result = await mfaRequest<LoginResponse>('POST', '/auth/mfa/verify', data);
+      setAccessToken(result.accessToken);
+      return result;
+    },
   });
 }
 

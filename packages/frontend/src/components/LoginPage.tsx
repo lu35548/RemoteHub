@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Monitor, Lock, User, ArrowRight, ShieldCheck, AlertCircle } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useLogin } from '../api/queries';
+import { setMfaPending } from '../api/mfaPending';
 import { useUI } from './UIComponents';
 import type { ApiErrorResponse } from '@remotehub/shared';
 
@@ -20,6 +21,13 @@ const LoginPage: React.FC = () => {
 
     try {
       const result = await loginMutation.mutateAsync({ username, password });
+
+      // 票 #31：2FA enabled 用户 → mfaPending，存内存态后进挑战页（不 setAccessToken）
+      if ('mfaPending' in result) {
+        setMfaPending(result);
+        navigate('/mfa');
+        return;
+      }
 
       if (result?.user) {
         toast('success', '欢迎回来', `${result.user.nickname}，系统已准备就绪`);

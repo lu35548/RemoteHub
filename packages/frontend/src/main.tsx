@@ -5,6 +5,7 @@ import { getAccessToken, refreshAccessToken } from './api/client.js';
 import { UIProvider } from './components/UIComponents.js';
 import App from './App.js';
 import LoginPage from './components/LoginPage.js';
+import MfaChallengePage from './components/MfaChallengePage.js';
 import ForgotPasswordPage from './components/ForgotPasswordPage.js';
 import ResetPasswordPage from './components/ResetPasswordPage.js';
 import AdminDashboardPage from './components/AdminDashboardPage.js';
@@ -39,6 +40,9 @@ async function bootstrap() {
   const router = createBrowserRouter([
     { path: '/', loader: requireAuth, element: <App /> },
     { path: '/login', loader: requireUnauth, element: <LoginPage /> },
+    // 2FA 挑战页（票 #31）：requireUnauth 域（挑战期间无 access token）；
+    // mfaPending 内存态丢失（刷新/直达）时页面级弹回 /login 重走密码
+    { path: '/mfa', loader: requireUnauth, element: <MfaChallengePage /> },
     // 密码重置（票 #29）：requireUnauth 域——已登录用户访问弹回主界面
     { path: '/forgot-password', loader: requireUnauth, element: <ForgotPasswordPage /> },
     { path: '/reset-password', loader: requireUnauth, element: <ResetPasswordPage /> },

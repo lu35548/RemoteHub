@@ -1,10 +1,13 @@
 import type { ApiResponse, ApiErrorResponse } from '@remotehub/shared';
+import { getMfaPending } from './mfaPending.js';
 
 /** API 前缀单一真相源（blob 导出等手动 fetch 场景共用，票 #23 review 收敛） */
 export const API_BASE = '/api/v1';
 
 // 401 时不应触发 refresh 的端点（仅认证入口自身；me/change-password 等过期恰恰需要 refresh，
-// 不能按 /auth/ 前缀一刀切排除——否则 token 过期时 me 401 直接报错，App 侧还得兜底清 token）
+// 不能按 /auth/ 前缀一刀切排除——否则 token 过期时 me 401 直接报错，App 侧还得兜底清 token）。
+// 票 #31：mfa 三端点用 aud:'mfa' 挑战 token 走 mfaRequest 专用通道，401 由挑战页自行处理
+// （过期 → 清 pending + 回登录页重走密码），不进通用 refresh/强制登出逻辑。
 const NO_REFRESH_PATHS = ['/auth/login', '/auth/refresh', '/auth/logout', '/auth/register'];
 
 let accessToken: string | null = null;
@@ -127,3 +130,29 @@ export const api = {
   patch: <T>(path: string, body?: unknown) => apiRequest<T>('PATCH', path, body),
   delete: <T>(path: string) => apiRequest<T>('DELETE', path),
 };
+
+/**
+ * 2FA 挑战专用请求通道（票 #31）：Authorization 带 aud:'mfa' 的挑战 token（非 access token），
+ * 401 直接抛 ApiErrorResponse 不触发 refresh——挑战 token 过期属预期路径，
+ * 由 MfaChallengePage 按错误码分路（MFA_002 → 回登录页重走密码）。
+ */
+export async function mfaRequest<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (body) headers['Content-Type'] = 'application/json';
+  const mfaToken = getMfaPending()?.mfaToken;
+  if (mfaToken) headers['Authorization'] = `Bearer ${mfaToken}`;
+
+  const res = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+    credentials: 'include',
+  });
+
+  if (!res.ok) {
+    const err: ApiErrorResponse = await res.json();
+    throw err;
+  }
+  const resBody: ApiResponse<T> = await res.json();
+  return resBody.data;
+}

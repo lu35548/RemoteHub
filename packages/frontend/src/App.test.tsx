@@ -37,6 +37,8 @@ vi.mock('./api/queries', () => ({
   useDeleteUser: vi.fn(() => ({ mutateAsync: vi.fn() })),
   useChangePassword: vi.fn(() => ({ mutateAsync: vi.fn() })),
   useAdminResetLink: vi.fn(() => ({ mutateAsync: vi.fn() })),
+  // 票 #31：UserManagementModal 新增 2FA 开关消费
+  useUpdateUser: vi.fn(() => ({ mutateAsync: vi.fn() })),
 }));
 
 // T8：App 挂载即启动心跳轮询（真定时器/真请求会污染测试环境），mock 成可变状态

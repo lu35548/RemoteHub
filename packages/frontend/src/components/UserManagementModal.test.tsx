@@ -13,6 +13,7 @@ const { state } = vi.hoisted(() => ({
     deleteUser: vi.fn(),
     changePassword: vi.fn(),
     resetLink: vi.fn(),
+    updateUser: vi.fn(),
   },
 }));
 vi.mock('../api/queries', () => ({
@@ -26,6 +27,7 @@ vi.mock('../api/queries', () => ({
   useDeleteUser: () => ({ mutateAsync: state.deleteUser, isPending: false }),
   useChangePassword: () => ({ mutateAsync: state.changePassword, isPending: false }),
   useAdminResetLink: () => ({ mutateAsync: state.resetLink, isPending: false }),
+  useUpdateUser: () => ({ mutateAsync: state.updateUser, isPending: false }),
 }));
 
 // mock 按真实运行时形状造（backend listUsers select 输出：lastActiveAt string|null）
@@ -217,5 +219,34 @@ describe('UserManagementModal（T7）', () => {
     expect(await screen.findByText('请使用新密码重新登录')).toBeInTheDocument();
     await waitFor(() =>
       expect((screen.getByLabelText('当前密码') as HTMLInputElement).value).toBe(''));
+  });
+
+  // 票 #31：2FA 开关——对齐面板交互模式（icon 按钮 + 危险操作 confirm 确认）
+  it('2FA 开启按钮 → updateUser({twoFactorEnabled:true}) + toast', async () => {
+    state.users = [adminUser, userItem()];
+    state.updateUser.mockResolvedValue({});
+    renderModal();
+
+    openUsersTab();
+    fireEvent.click(screen.getByTitle('开启双因素认证'));
+    await waitFor(() => {
+      expect(state.updateUser).toHaveBeenCalledWith({ id: 'u2', data: { twoFactorEnabled: true } });
+    });
+    expect(await screen.findByText('已开启 2FA')).toBeInTheDocument();
+  });
+
+  it('2FA 关闭按钮 → confirm 危险确认 → updateUser({twoFactorEnabled:false})', async () => {
+    state.users = [adminUser, userItem({ id: 'u2', twoFactorEnabled: true })];
+    state.updateUser.mockResolvedValue({});
+    renderModal();
+
+    openUsersTab();
+    fireEvent.click(screen.getByTitle('关闭双因素认证'));
+    expect(screen.getByText('关闭后将清除 张三 的验证器绑定并作废全部恢复码，确定继续？')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '确认' }));
+    await waitFor(() => {
+      expect(state.updateUser).toHaveBeenCalledWith({ id: 'u2', data: { twoFactorEnabled: false } });
+    });
+    expect(await screen.findByText('已关闭 2FA')).toBeInTheDocument();
   });
 });
