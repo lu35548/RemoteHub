@@ -11,6 +11,7 @@ import type {
   UserListItem, AdminUpdateUserRequest, UserSearchResult, RegisterRequest,
   PaginatedResponse, ForgotPasswordRequest, ResetPasswordRequest, AdminResetLinkResponse,
   MfaPendingLoginResponse, MfaSetupResponse, MfaConfirmRequest, MfaConfirmResponse, MfaVerifyRequest,
+  NotificationType,
 } from '@remotehub/shared';
 
 // ─── Auth ───
@@ -383,5 +384,62 @@ export function useProjectStats() {
     queryKey: ['admin-stats-projects'],
     queryFn: () => api.get<ProjectConnectionStat[]>('/admin/stats/projects'),
     staleTime: 5 * 60_000,
+  });
+}
+
+// ─── Notifications（票 #37 通知中心）───────────────────────────────────
+// 两个 API 事实（读后端代码定案，非猜测）：
+// ① PATCH /notifications/:id/read 无 body——notificationController.markRead 不读 req.body；
+// ② GET /notifications 的 payload 是 Prisma String 列直出的 JSON 字符串（WS 推送才是已 parse 对象），
+//    故 queryFn 在此归一化为对象，缓存内只有一种形状（WS 插入项同构）。
+
+/** 通知项（缓存内形状：payload 已 parse；userId 为后端私有字段不入 UI 层） */
+export interface NotificationItem {
+  id: string;
+  type: NotificationType;
+  payload: Record<string, unknown>;
+  isRead: boolean;
+  createdAt: string;
+}
+
+/** REST 原始行形状（notificationService 直出 Prisma 行） */
+interface NotificationRow {
+  id: string;
+  type: NotificationType;
+  payload: string;
+  isRead: boolean;
+  createdAt: string;
+}
+
+/** 通知列表缓存键（WS 派发层与列表 hook 共用，防 key 漂移） */
+export const NOTIFICATION_QUERY_KEY = ['notifications'] as const;
+
+/** REST 行 → 缓存项（payload 字符串 parse；脏数据兜底空对象，不让一条坏记录炸整个列表） */
+function parseNotificationRow(row: NotificationRow): NotificationItem {
+  let payload: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(row.payload);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) payload = parsed as Record<string, unknown>;
+  } catch { /* 脏 payload 兜底空对象 */ }
+  return { id: row.id, type: row.type, payload, isRead: row.isRead, createdAt: row.createdAt };
+}
+
+/** 未读通知列表（分页端点：响应含 pagination，走不剥壳的 getRaw；total 驱动铃铛角标） */
+export function useNotifications() {
+  return useQuery({
+    queryKey: NOTIFICATION_QUERY_KEY,
+    queryFn: async (): Promise<PaginatedResponse<NotificationItem>> => {
+      const raw = await api.getRaw<PaginatedResponse<NotificationRow>>('/notifications?page=1&pageSize=50');
+      return { ...raw, data: raw.data.map(parseNotificationRow) };
+    },
+  });
+}
+
+/** 标记已读（PATCH 无 body）；成功后 invalidate 重拉未读列表（服务端为准） */
+export function useMarkNotificationRead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.patch(`/notifications/${id}/read`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: NOTIFICATION_QUERY_KEY }),
   });
 }

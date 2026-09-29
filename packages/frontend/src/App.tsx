@@ -4,13 +4,16 @@ import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ConnectionDetail, ConnectionListItem, CreateConnectionRequest, ProjectListItem, ProjectDetail, UserPublic } from '@remotehub/shared';
 import { api, setAccessToken } from './api/client';
-import { useMe, useLogout, useProjects, useConnections, useCreateProject, useUpdateProject, useDeleteProject, useCreateConnection, useUpdateConnection, useDeleteConnection } from './api/queries';
+import { useMe, useLogout, useProjects, useConnections, useCreateProject, useUpdateProject, useDeleteProject, useCreateConnection, useUpdateConnection, useDeleteConnection, NOTIFICATION_QUERY_KEY } from './api/queries';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
+import { useWs } from './hooks/useWs';
+import { dispatchWsMessage } from './lib/notificationDispatch';
 import Sidebar from './components/Sidebar';
 import ConnectionCard from './components/ConnectionCard';
 import ConnectionModal from './components/ConnectionModal';
 import ProjectModal, { type ProjectFormInput } from './components/ProjectModal';
 import UserManagementModal from './components/UserManagementModal';
+import NotificationCenter from './components/NotificationCenter';
 import { useUI } from './components/UIComponents';
 
 // Helper for consistent avatar colors based on User ID（v1 原样）
@@ -54,6 +57,13 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
   const [searchQuery, setSearchQuery] = useState('');
   // 在线状态：每 5s 一轮「心跳 → 在线列表」轮询（v1 updateOnlineUsers 等价，登出卸载即停）
   const onlineUsers = useOnlineStatus();
+
+  // #37 通知中心：WS 实时消息 → query 缓存派发（setQueryData 原子插入 + invalidate 重同步）；
+  // 建连（含重连）即 invalidate 通知列表补断线增量。仅在已认证布局挂载（登出态不起 WS）
+  useWs({
+    onMessage: (msg) => dispatchWsMessage(queryClient, toast, msg),
+    onOpen: () => { void queryClient.invalidateQueries({ queryKey: NOTIFICATION_QUERY_KEY }); },
+  });
 
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<ProjectDetail | null>(null);
@@ -271,6 +281,9 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
                     <span className="font-medium text-slate-300">{onlineUsers.length}</span> 人在线
                 </div>
              </div>
+
+            {/* #37 通知中心：铃铛 + 未读角标 + 下拉未读列表 */}
+            <NotificationCenter />
 
             <div className="relative group">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 w-4 h-4 group-focus-within:text-blue-400 transition-colors" />

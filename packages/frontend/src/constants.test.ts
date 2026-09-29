@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { AUDIT_ACTIONS, AUDIT_RESOURCES } from '@remotehub/shared';
-import { AUDIT_ACTION_LABELS, AUDIT_RESOURCE_LABELS } from './constants';
+import { AUDIT_ACTIONS, AUDIT_RESOURCES, NOTIFICATION_TYPES } from '@remotehub/shared';
+import { AUDIT_ACTION_LABELS, AUDIT_RESOURCE_LABELS, NOTIFICATION_TYPE_LABELS } from './constants';
 
 // 票 #22：审计枚举 → 中文标签全量表（P0-9 审计页复用）。
 // Record<AuditAction, string> 类型化让键全量由 tsc 门保证；本文件是运行时防线（防 as 绕过/漏译）。
@@ -14,5 +14,14 @@ describe('审计中文标签表', () => {
   it('AUDIT_RESOURCE_LABELS：6 键全量对齐 AUDIT_RESOURCES，值非空', () => {
     expect(Object.keys(AUDIT_RESOURCE_LABELS).sort()).toEqual([...AUDIT_RESOURCES].sort());
     for (const v of Object.values(AUDIT_RESOURCE_LABELS)) expect(v.trim()).not.toBe('');
+  });
+});
+
+// 票 #37：通知类型标签表（铃铛下拉/toast 共用）；Record<NotificationType, string> 键全量由 tsc 门保证，
+// 此处是运行时防线（防 as 绕过/漏译，照审计标签表同款双保险）
+describe('通知中文标签表', () => {
+  it('NOTIFICATION_TYPE_LABELS：8 键全量对齐 NOTIFICATION_TYPES，值非空', () => {
+    expect(Object.keys(NOTIFICATION_TYPE_LABELS).sort()).toEqual([...NOTIFICATION_TYPES].sort());
+    for (const v of Object.values(NOTIFICATION_TYPE_LABELS)) expect(v.trim()).not.toBe('');
   });
 });

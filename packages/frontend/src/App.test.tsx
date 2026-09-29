@@ -39,11 +39,19 @@ vi.mock('./api/queries', () => ({
   useAdminResetLink: vi.fn(() => ({ mutateAsync: vi.fn() })),
   // 票 #31：UserManagementModal 新增 2FA 开关消费
   useUpdateUser: vi.fn(() => ({ mutateAsync: vi.fn() })),
+  // 票 #37：通知中心消费（铃铛真实渲染，数据层受控）
+  useNotifications: vi.fn(() => ({ data: undefined, isPending: false })),
+  useMarkNotificationRead: vi.fn(() => ({ mutate: vi.fn(), isPending: false, variables: undefined })),
 }));
 
 // T8：App 挂载即启动心跳轮询（真定时器/真请求会污染测试环境），mock 成可变状态
 vi.mock('./hooks/useOnlineStatus', () => ({
   useOnlineStatus: vi.fn(() => state.onlineUsers),
+}));
+
+// 票 #37：App 挂载即起 WS 连接（jsdom 无可控 WS），mock 成固定已连接态
+vi.mock('./hooks/useWs', () => ({
+  useWs: vi.fn(() => 'open'),
 }));
 
 const user = { id: 'u1', nickname: '管理员' };
@@ -89,6 +97,8 @@ describe('App 冒烟（T4）', () => {
     expect(screen.getByRole('button', { name: /VPN 网络管理/ })).toBeInTheDocument();
     expect(screen.getByText('管理员')).toBeInTheDocument();
     expect(screen.getByText('暂无资源配置')).toBeInTheDocument();
+    // 票 #37：顶栏通知铃铛在已认证布局挂载
+    expect(screen.getByRole('button', { name: '通知' })).toBeInTheDocument();
   });
 });
 

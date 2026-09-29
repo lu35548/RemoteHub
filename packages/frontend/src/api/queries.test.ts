@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { useQueryClient } from '@tanstack/react-query';
 
 // mock 数据层与 react-query：捕获 useQuery options 断言（queryKey/URL/staleTime），
 // 不真渲染 Provider——hooks 层契约测试（票 #22：staleTime 5min 覆盖默认 30s）
@@ -22,7 +23,7 @@ vi.mock('react-router-dom', () => ({
 }));
 
 vi.mock('./client.js', () => ({
-  api: { get: vi.fn(), getRaw: vi.fn(), post: vi.fn() },
+  api: { get: vi.fn(), getRaw: vi.fn(), post: vi.fn(), patch: vi.fn() },
   setAccessToken: vi.fn(),
   API_BASE: '/api/v1',
   // 导出走手动 fetch，token 从内存取；401 走 ensureRefreshed 重试（票 #23 review 采纳）
@@ -30,7 +31,7 @@ vi.mock('./client.js', () => ({
   ensureRefreshed: vi.fn().mockResolvedValue(null),
 }));
 
-import { exportAuditLogsCsv, useAuditLogs, useDashboard, useForgotPassword, useProjectStats, useResetPassword, useAdminResetLink, useUserStats } from './queries';
+import { exportAuditLogsCsv, useAuditLogs, useDashboard, useForgotPassword, useProjectStats, useResetPassword, useAdminResetLink, useUserStats, useNotifications, useMarkNotificationRead, NOTIFICATION_QUERY_KEY } from './queries';
 import { api, ensureRefreshed } from './client.js';
 import type { AuditLogQuery } from '@remotehub/shared';
 
@@ -223,5 +224,49 @@ describe('密码重置 hooks（票 #29）', () => {
     useAdminResetLink();
     (mutationCaptured!.mutationFn as (d: unknown) => unknown)('u2');
     expect(api.post).toHaveBeenCalledWith('/admin/users/u2/reset-link');
+  });
+});
+
+// ── 通知 hooks（票 #37）──
+// 两个 API 事实的测试锁：① 列表是分页端点须走 getRaw（不剥壳，total 驱动角标）；
+// ② PATCH 已读无 body（notificationController.markRead 不读 req.body，design §8.6 勘误）
+describe('通知 hooks（票 #37）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    captured = undefined;
+    mutationCaptured = undefined;
+  });
+
+  it('useNotifications：getRaw /notifications 分页端点，queryFn 把 payload JSON 字符串归一化为对象', async () => {
+    useNotifications();
+    expect(captured).toMatchObject({ queryKey: NOTIFICATION_QUERY_KEY });
+    (captured!.queryFn as () => unknown)();
+    expect(api.getRaw).toHaveBeenCalledWith('/notifications?page=1&pageSize=50');
+
+    // queryFn 归一化：REST payload 是 Prisma String 列直出的 JSON 字符串
+    const getRawMock = api.getRaw as ReturnType<typeof vi.fn>;
+    const rawBody = {
+      success: true as const,
+      data: [
+        { id: 'n1', type: 'MEMBER_ADDED', payload: '{"message":"张三加入了项目"}', isRead: false, createdAt: '2026-09-29T00:00:00.000Z' },
+        { id: 'n2', type: 'SYSTEM_ALERT', payload: 'not-json', isRead: false, createdAt: '2026-09-29T00:00:01.000Z' }, // 脏数据兜底
+      ],
+      pagination: { page: 1, pageSize: 50, total: 2 },
+    };
+    getRawMock.mockResolvedValueOnce(rawBody);
+    const normalized = await (captured!.queryFn as () => Promise<typeof rawBody>)();
+    expect(normalized.data[0]!.payload).toEqual({ message: '张三加入了项目' }); // 字符串 → 对象
+    expect(normalized.data[1]!.payload).toEqual({}); // 脏 payload 不炸列表
+    expect(normalized.pagination.total).toBe(2);
+  });
+
+  it('useMarkNotificationRead：PATCH /notifications/:id/read 且无 body；成功后 invalidate 通知缓存', () => {
+    const invalidate = vi.fn();
+    (useQueryClient as ReturnType<typeof vi.fn>).mockReturnValueOnce({ invalidateQueries: invalidate } as never);
+    useMarkNotificationRead();
+    (mutationCaptured!.mutationFn as (d: unknown) => unknown)('n9');
+    expect(api.patch).toHaveBeenCalledWith('/notifications/n9/read'); // 单参数 = 无 body
+    (mutationCaptured!.onSuccess as () => void)();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: NOTIFICATION_QUERY_KEY });
   });
 });
