@@ -16,6 +16,114 @@
 - [ ] **首个 SQLite 方言 migration vs project.md「MySQL 统一」约定**——已移交 P1 #52（ADR 豁免 + project.md 四处订正，spec D6 裁决）。
 - [ ] **净化豁免清单未含 Project `description`**——已裁决（P1 spec D6）：接受误杀面并明示边界，随 #52 ADR 固化。
 - [ ] **AUTH_LOGIN 审计行操作人恒为「系统」**（票 #22 Spec 轴 review 发现）：login 未认证 userId=null 是 P0-5 spec 口径，但登录人信息（IP/UA）其实已记录，是否让 login 审计带 userId 待裁决。
+- [ ] **mfa 二段流审计口径**（批 2 #30 review + 未决①）：mfa/verify 成功/失败零审计（2FA 爆破不可见）；mfaPending 第一段被记 AUTH_LOGIN success 但无 session 建立语义失真。修复需新增审计 action 枚举（跨 shared AUDIT_ACTIONS + 前端 #23 标签映射）+ 恢复码使用事件可见性（OWASP 建议），属契约变更交用户裁决。
+- [ ] **WS 协议 shared 常量化收口**（批 4 遗留）：#37 为并行零相交将 WS 协议常量落在前端本地 `lib/wsProtocol.ts`，原计划两票合流后 lead 统一迁移 shared（防漂移，#34 review 记账）——批 4 未做，下批开工前收口。
+
+---
+
+## [2026-09-29] P1 批 4：#36 ∥ #37 事件源接线 + 前端通知中心 ✅
+
+团队形态：2 implementer 真并行（A=#36 backend / B=#37 frontend，零文件相交各一 commit）+ lead（4 份双轴 review 裁决 + 真机双用户验收 + push/关票）+ 2 fixer 按域并行。质量门终值 **714** = backend 511（487+24）/ shared 37 / frontend 166（133+33）；lint/tsc 全 0；4 commits（2 feat + 2 fix）；#36/#37 关票带证据。
+
+### Design decisions
+- [2026-09-29] 决策：**六类事件全部走 sendToUser 直推**（notificationService 新增 emitToAdmins / emitToProjectMembers：查目标集合 → 逐个 emitNotification）而非房间广播——比 join 房间语义更强（无需 join 即达 + 离线 Queue 兜底），与 #37 前端「不 join」决策互恰；票面「admin 房间/项目房间」按送达语义等价满足（Spec review 核通过）。
+- [2026-09-29] 决策：六类全部落 Queue（票面 AC 字面）；design §8.5「关键事件落 Queue」按**下限非排他**解读——连接变更亦离线可达，04:00 清理 cron 兜底。
+- [2026-09-29] 决策：WS 协议常量本批**前端本地定义**（lib/wsProtocol.ts）防并行 shared dist 竞争——shared 常量化留合流后收口（挂顶部 OQ，未做）。
+- [2026-09-29] 决策：payload 契约——FORCE_LOGOUT `{reason,message}` / CONNECTION_UPDATED `{projectId,connectionId,action,name}` / MEMBER_* `{projectId,userId[,username][,role]}` / SYSTEM_ALERT `{message,ip,requestCount,window}`；WS 对象 vs REST JSON 字符串双轨，前端 queryFn parse 归一为单一对象形状。
+- [2026-09-29] 决策：PATCH /notifications/:id/read **无 body**（controller 实测不读 req.body；design §8.6 的 `{isRead:true}` 说法不实）——挂 spec 修正表随 #16。
+- [2026-09-29] 决策：成员快照后置——MEMBER_REMOVED 被移除者零打扰、MEMBER_ADDED 含新成员本人（集成测试锁死）。
+
+### Deviations
+- **首登后第一轮可疑 IP 触发时 toast 未弹**（hook 首连 401 处于退避循环，后自愈；console 有一次 401）——第二/三轮连接稳定后 toast 均即时弹出。观察项：useWs enabled 时序 vs cookie 就绪的窄窗口（自愈不阻塞，挂账不修）。
+- 整页 reload 后落 /login（token 内存态，恢复流未自动跑/当时代码被 429 限流拦截）——非本批引入；断线重连场景（SPA 内存 token 在）不受影响，记观察不修。
+- **rtk 假象 +3 新实例**：①`npx vite` 长驻进程被 rtk 改写层卡死（零输出不监听，TaskStop + `rtk proxy` 重起秒好）②npx spawn 报「batch file arguments are invalid」两连（proxy 也挂，换 `pnpm exec` 绕行）③rtk grep 连续 exit 1 假失败（cat 小文件替代）。结论：长驻 dev server 一律 `rtk proxy` 起、脚本执行用 `pnpm exec`。
+- B 自报「165/165 绿」被 Standards reviewer 揭穿：vitest 真实退出码 1（unhandled rejection 被管道尾命令吃码）——**agent 亲测数字也须重定向取码复验**（EXIT=0 才算数）。
+
+### Tradeoffs
+- 不修挂账：连接 updated/deleted 集成测试补强（~20 行，#38 顺带）；reconnect_required 语义未与后端定案（后端未发，前端已备 handler，将来补发票锁定）；App 层 dispatch 接线单行 lambda 无单测（真机 toast 实证覆盖）；notify.emit 负向断言 400ms 窗口（同文件自证 ~1ms 达）；MEMBER_* payload 无 message 字段前端显「暂无详情」（兜底正常，可读性 nit）。
+- 采纳修复：performanceMonitor.test env 前置（**#32 遗留 CI 必崩**——本地 @prisma/client 自动加载 .env 掩盖，CI checkout 无 .env collect 即崩；`beedd3a` 一行修）；循环依赖环注释备案（authService→notificationService→wsServer→authService：ESM 函数声明提升安全的三不变量 + 守护规则入注释）；utils→services 反向分层备选弃由备案（内聚性优先，组合根方案弃由记录）。
+- review 战果：双轴 8 份报告共 1 blocker + 1 major + 3 minor + 5 nit，全部处置（修 4 + 挂账 5）；blocker（退出码 1）与 major（CI 必崩）均非票面功能缺陷而是工程链路陷阱——三方会合（implementer + reviewer + lead 真机）模式再次验证有效。
+
+### Open questions
+- WS 协议 shared 常量化收口（挂顶部清单）。
+
+---
+
+## [2026-09-28] P1 批 3：#34→#35 WS 基建 + 通知 API ✅
+
+团队形态：1 implementer 串行（#34→#35，server.ts 独占——交接表钦定串行，双票均动 server.ts）+ lead（4 份双轴 review 裁决 + dev/compose 双栈真机 + push/关票）+ 1 fixer（backend 域 7 项）。质量门终值 **657** = backend 487（430+26(#34)+19(#35)+12(fix)）/ shared 37 / frontend 133；lint/tsc 全 0；已推 origin（3 commits：2 feat + 1 fix）；#34/#35 关票带证据。
+
+### Design decisions
+- [2026-09-28] 决策：**refresh cookie path `/api/v1/auth`→`/api/v1`**——RFC 6265 path-match 语义下 path 锁 auth 时浏览器对 /api/v1/ws 握手不带 cookie，upgrade 鉴权通道无法建立（reviewer 核验必要性成立）；安全属性三件不动 + 全仓零消费路径 grep 佐证无实质变化。**挂 #16 清理票补 ADR/spec 修正表记录**。
+- [2026-09-28] 决策：noServer 模式替代票面 {server,path} 字面——双监听器竞态防线（libcheck §1 注意#2）+ design §8.2.1 原文即 noServer；路径自过滤未匹配 destroy（官方防悬置）。
+- [2026-09-28] 决策：**consumedAt 修复走「抽 authService.validateRefreshSession 共用」**——WS 通道漏查 consumedAt 会旁路 REST 重用检测的报警器语义（双轴交叉阻塞级），复制校验正是漂移根因，抽取一石二鸟；严格拒绝口径（非 refresh 的 30s 宽容）注释声明理由。
+- [2026-09-28] 决策：admin 全局可入 project 房间（三层权限链 admin 绕过先例对齐）；emit 挂点做最小实现而非空接口（双轴裁不越界——#36 直调免重写）。
+
+### Deviations
+- **dev.db migration 未应用被真机首验抓到**：#35 端点 500 → migrate status 实证 pending——implementer 遭 DLL 锁时只建了 migration 文件没应用 dev.db，集成测试（全新临时库）掩盖。教训：**agent 报「migration 已建」≠ dev.db 已应用，真机首验必查 `prisma migrate status`**（dev.db/集成临时库/CI 库三态独立）。另：migrate dev 被 dev server 持锁——先停栈再 migrate。
+- compose build 卡 5 分钟无产出（TaskStop 重跑全 CACHED 秒完——卡住那次实际已建完层，卡的可能是 up 阶段）；rtk 压缩层吞 build 输出，`rtk proxy` 复跑才见全貌（假象家族第 4 实例）。
+- implementer 403 测试方向虚报（自报「admin 标记他人」实测是普通用户标记 admin 的）——review 用例名/实体比对抓出，补真 admin 方向用例。
+- **lead prompt 转述票面有误**（「进程级或 server 级模拟」非 #34 票面原文，reviewer grep 票面实证）——implementer 实现实质满足 AC；教训：reviewer prompt 里的票面引述要逐字核对 issue body，不自造宽松条款。
+- IDE 诊断 LSP 伪影全程伴随（prisma 类型陈旧/占位符鬼影/已删目录），tsc/vitest 实测裁决，零误伤。
+
+### Tradeoffs
+- 不修挂账：upgrade 防滥用（无限速/连接上限——backlog 独立票，ipMonitor 思路）；gracefulShutdown 无 force-exit 超时（docker SIGKILL 兜底，记账）；sendToUser 调用侧 catch（#36 衔接）；WS 消息协议 shared 常量化（#37 衔接）；PATCH body 忽略/VarChar 省略（备案）。
+
+### Open questions
+- （无新增挂起）
+
+---
+
+## [2026-09-28] P1 批 2：#30→#31 2FA 域 + #32 性能监控 ✅
+
+团队形态：2 implementer 并行（A=#30→#31 域内串行、B=#32 先 commit）+ lead（6 份双轴 review 裁决 + 真机验收 + push/关票）+ 2 fixer 按域并行（backend+shared / frontend，批 1 单 fixer 的拆分变体首验）。质量门终值 **600** = backend 430（361+18(#32)+48(#30)+3(fix)）/ shared 37 / frontend 133（114+11(#31)+8(fix)）；lint 0 / tsc 0；已推 origin（6 commits：3 feat + 3 fix）；#30/#31/#32 关票带证据评论。
+
+### Design decisions
+- [2026-09-28] 决策：jose 多值 aud 拒收**自实现**（jwtVerify 后 Array.isArray(payload.aud) 即拒，verifyAccessToken/verifyMfaToken 两入口）——jose any-overlap 语义会放行 ['access','mfa'] 双过，spec 红线③由此闭合；安全三件套测试真断言状态码+DB session 数（非形状）。
+- [2026-09-28] 决策：setup stateless（发 secret+URI 不落库，confirm 校验一次 TOTP 才落库）——绑定中途放弃零脏状态；admin 关闭 2FA = 清 totpSecret + 事务作废全部恢复码（绑定死局/恢复码耗尽的管理员逃生通道）。
+- [2026-09-28] 决策：admin 开关复用 PATCH /users/:id 白名单（对齐既有更新链路与 USER_UPDATE 审计）；恢复码状态码 MFA_001=400 码错（RESET_001 教训——真机验证 401 拦截器不误触发）/ MFA_002=401 / MFA_003=400。
+- [2026-09-28] 决策：性能中间件挂净化后/路由前（429/422 快速拒绝不进业务延迟分布——research §三.9 未决项自拍板，双轴 review 裁「合理裁量」）；路由模板 req.baseUrl+req.route.path（finish 时刻已填充）。
+- [2026-09-28] 决策：SENSITIVE_FIELDS 补 mfaToken/secret/recoveryCode——真机实锤 mfaPending 登录行 mfaToken 明文（192 字符 JWT ×6 行）落审计表，修复后 [REDACTED] 真机复验（批 1 #25 同款漏洞形态第二实例）。
+
+### Deviations
+- otpauth 前端 devDep 删除（spec L139 预期新增；实际测试走 mock 零 import，死重——偏离记档）。
+- 真机 + review 双通道抓真问题 4 个：①mfaToken 审计泄漏（真机+双轴交叉）②useMfaSetup refetchOnWindowFocus 失焦换 secret 静默失败（major，stateless POST 包 useQuery 的幂等性陷阱）③带参挂载点 baseUrl 是实际解析值 → Map 无界增长（reviewer 最小 Express 5.2.1 脚本实测落锤，「模板集合天然有界」设计前提证伪）④confirm 并发双写窗口（CAS 守卫修复，批 1 resetPassword 同型洞）。
+- 伪影 3 起全实测裁决零误伤：IDE 诊断 LSP 陈旧视图×N 波（含已删目录 RemoteNotAProject 鬼影，tsc 实测三包全 0 为准）；CDP click confirm 假成功第三实例（evaluate 内联点击解）；verify 字段名脑补 code（实为 token|recoveryCode，第一嫌疑定律）。
+- **shared dist × backend 测试坑**（fixer 发现）：backend 经 main:dist 消费 shared 构建产物——改 shared/src 后必须先 pnpm --filter shared build，backend 测试才能看到，否则持续假红/假绿。
+
+### Tradeoffs
+- 不修挂账：mfa/verify 审计口径（OQ 顶部，契约变更跨枚举+前端映射）；TOTP 同窗口重放（backlog：per-user 内存 last-used counter 可防，无需 schema 列）；mfaRequest 三度复制（无测试网核心通道不做非必要重构，通道层 5 测已补，未来第四处或补齐测试后收敛）。
+- 采纳修复但轻量：requiredClaims:['exp'] 纵深；setup/confirm 共享 5/min limiter 实例（合计配额更紧，正常绑定流 2 次/min 余量足）。
+
+### Open questions
+- mfa 二段流审计口径（挂顶部清单，含 AUTH_LOGIN 语义失真 + 恢复码使用事件可见性）。
+
+---
+
+## [2026-09-28] P1 批 1：#28+#29 密码重置域 + #33 K8s 探针（agent 委派模式首跑）✅
+
+团队形态：2 implementer 并行（A=#28→#29 域内串行、B=#33 独立）+ 主会话 lead（6 份双轴 review 派发与处置 + 真机验收 + push/关票/记档）+ 1 fixer（13 项 review-fix）。质量门终值 **512** = backend 361（312+14+32+3）/ shared 37 / frontend 114（99+15）；lint 0 / tsc 0；`feat/phase2-p1` 已推 origin（7 commits：3 feat + 3 fix + 1 真机发现修复）；#28/#29/#33 已关带证据评论。
+
+### Design decisions
+- [2026-09-28] 决策：并行 agent 的 commit 边界 = 文件所有权纪律（prompt 钦定精确 add 禁 -A；server.ts 等潜在共享文件要求 commit 前 diff 核查）——B 先完成先 commit，A 后续质量门在含 B 成果的树上跑 = 自动集成验证，零裹挟零冲突。
+- [2026-09-28] 决策：**RESET_001 状态码 401→400**（`abbafde`，真机发现）——401 触发 client.ts 401 拦截器 refresh 重放 → 未登录重置流用户被误判会话失效强制登出，看不到「令牌无效」错误（T7 AUTH_006 同款）；业务校验失败 ≠ 认证失败。修复后真机复验：toast 展示 + 停留原页。
+- [2026-09-28] 决策：resetPassword 加 **CAS 原子守卫**（事务内 `updateMany({usedAt:null})` count===1 才推进）——review 抓出 findFirst→事务的并发双成功洞（顺序复用已锁 401）。
+- [2026-09-28] 决策：RESET_002 死码删除（全仓无 throw 点）——429 统一走 RATE_LIMIT 形状是正确选择，双轴认可；保留 RESET_001/003。
+- [2026-09-28] 决策：admin reset-link 维持挂 monitoringRoutes——Spec 轴裁「可接受」（/api/v1/admin 前缀路径契约不变，controller 域归属正确）；admin 域出现第二处写端点再抽独立 adminRoutes。
+
+### Deviations
+- agent 自报质量门与主会话独立复验全部吻合；IDE 诊断两次推送「语法错误/枚举缺值」全为 LSP 编辑中间态伪影（提交版 tsc 实测干净）——诊断推送不可作裁决依据。
+- rtk 压缩层新假象：`prisma migrate status/deploy` 被压成「Migrations: 0 applied, 0 pending」**错误摘要**（实况 No pending = 已全应用）；`find -exec` 被 rtk 拒绝致「dev.db 不存在」误判——两起均靠 `rtk proxy` 复跑/内置 Glob 裁决反转。
+- fixer 纠正 lead prompt 两处：project.md 无具体错误码清单（子项不存在）；ip/UA 截断长度写反（45/500）。
+
+### Tradeoffs
+- 不抽（第三处再抽）：onSuccess 三行×2；hashPasswordResetToken ≡ hashRefreshToken（域分离可辩护）；(ip,userAgent) Data Clumps；env parseInt NaN（既有病不跨票修）。
+- 改密空窗未单独真机实测——重置流已实证同构 hook 路径（useResetPassword/useChangePassword 同 onSuccess 模式）+ jsdom 行为级锁死，降级合理。
+- FRONTEND_URL 未配置退化相对路径（跨机粘贴不可用）——已文档化（.env.example 注释），生产配置后消失。
+- 已登录用户手点重置链接被 requireUnauth 弹回——既有守卫语义，票面未要求处理，备查。
+
+### Open questions
+- （无新增挂起）备查：重置成功 toast 与 navigate 的时序（组件卸载后 toast 闭包仍生效但未测）。
 
 ---
 
