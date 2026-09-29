@@ -6,11 +6,20 @@ vi.mock('../utils/prisma.js', async () => {
   return { prisma: createPrismaMock() };
 });
 
+// #36：可疑 IP 告警 emit 全体 admin——mock 收口保持单测隔离（工厂 mockResolvedValue，
+// ipMonitor 侧对返回值直接挂 .catch）。与 prisma mock 同理：resetModules 不重跑工厂，跨用例单例。
+vi.mock('../services/notificationService.js', () => ({
+  emitNotification: vi.fn().mockResolvedValue(undefined),
+  emitToAdmins: vi.fn().mockResolvedValue(undefined),
+  emitToProjectMembers: vi.fn().mockResolvedValue(undefined),
+}));
+
 // ipMonitor 持模块级 per-IP 计数 Map：每用例 resetModules 重建模块，计数互不渗透。
 // logger 未被 mock，resetModules 后同样重建——须动态 import 拿同代实例，spy 才落在
 // ipMonitor 实际调用的那个 logger 上（静态 import 是上一代实例，spy 恒 0 调用）。
 let checkIpRisk!: typeof import('./ipMonitor.js').checkIpRisk;
 let logger!: typeof import('./logger.js').logger;
+let emitToAdmins!: typeof import('../services/notificationService.js').emitToAdmins;
 let prisma: ReturnType<typeof import('../test/helpers/prismaMock.js').createPrismaMock>;
 
 beforeEach(async () => {
@@ -20,6 +29,7 @@ beforeEach(async () => {
   vi.resetModules();
   ({ checkIpRisk } = await import('./ipMonitor.js'));
   ({ logger } = await import('./logger.js')); // 与 ipMonitor 同代（resetModules 后同一注册表）
+  ({ emitToAdmins } = await import('../services/notificationService.js'));
   ({ prisma } = await import('../utils/prisma.js') as unknown as { prisma: typeof prisma });
   prisma.auditLog.create.mockResolvedValue({});
 });
@@ -50,6 +60,32 @@ describe('SECURITY_SUSPICIOUS_IP 触发', () => {
         ip: '203.0.113.7',
       },
     });
+  });
+
+  it('#36 阈值触发 → emit SYSTEM_ALERT 全体 admin（payload 含 ip/requestCount，一窗一次）', () => {
+    for (let i = 0; i < 1001; i++) checkIpRisk('203.0.113.21', '/api/v1/projects');
+
+    expect(emitToAdmins).toHaveBeenCalledTimes(1);
+    expect(emitToAdmins).toHaveBeenCalledWith({
+      type: 'SYSTEM_ALERT',
+      payload: expect.objectContaining({ ip: '203.0.113.21', requestCount: 1001, window: '60s' }),
+    });
+    // 第 1002 次起不再 emit（alerted 标志一窗一次，与审计同拍）
+    checkIpRisk('203.0.113.21', '/api/v1/projects');
+    expect(emitToAdmins).toHaveBeenCalledTimes(1);
+  });
+
+  it('#36 白名单打满 → 不 emit（NAT 误报防线同步覆盖通知通道）', () => {
+    for (let i = 0; i < 2000; i++) checkIpRisk('198.51.100.9', '/api/v1/health');
+    expect(emitToAdmins).not.toHaveBeenCalled();
+  });
+
+  it('#36 emit 失败不破检测主流程：审计落库照常（fire-and-forget 调用侧收口）', async () => {
+    vi.mocked(emitToAdmins).mockRejectedValueOnce(new Error('notify down'));
+    for (let i = 0; i < 1001; i++) checkIpRisk('192.0.2.21', '/api/v1/projects');
+
+    expect(prisma.auditLog.create).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(0); // flush microtask 让 .catch 跑完（无 unhandled rejection）
   });
 
   it('同窗口第 1002 次起不再记录（每 IP 每窗口最多 1 条，防告警刷屏）', () => {

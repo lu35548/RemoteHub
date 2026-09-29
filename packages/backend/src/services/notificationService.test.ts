@@ -1,6 +1,7 @@
 // packages/backend/src/services/notificationService.test.ts
 // #35 通知 service unit：分页 clamp / 403 门禁 / emit 挂点形状（mock prisma + mock ws 广播）。
 // 端到端真库走 notification.api 集成。
+import '../test/helpers/env.js'; // 环境前置必须第一个 import（#36 起文件直引 logger→config/env，CI 无 .env 必崩）
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 vi.mock('../utils/prisma.js', async () => {
@@ -15,8 +16,9 @@ vi.mock('../ws/wsServer.js', () => ({
 }));
 
 import { prisma as _prisma } from '../utils/prisma.js';
+import { logger } from '../utils/logger.js';
 import { sendToUser } from '../ws/wsServer.js';
-import { listUnreadNotifications, markNotificationRead, emitNotification } from './notificationService.js';
+import { listUnreadNotifications, markNotificationRead, emitNotification, emitToAdmins, emitToProjectMembers } from './notificationService.js';
 
 const prisma = _prisma as any;
 
@@ -93,5 +95,62 @@ describe('emitNotification（#36 事件源接线挂点）', () => {
     });
     expect(sendToUser).toHaveBeenCalledWith('u1', { type: 'FORCE_LOGOUT', payload: { reason: 'password_changed' } });
     expect(row.id).toBe('n9');
+  });
+});
+
+describe('emitToAdmins（#36 多目标辅助）', () => {
+  it('查全体 admin → 逐个写队列 + WS 推（type/payload 全目标一致）', async () => {
+    prisma.user.findMany.mockResolvedValue([{ id: 'admin-1' }, { id: 'admin-2' }]);
+    prisma.notificationQueue.create.mockResolvedValue({ id: 'n1' });
+
+    await emitToAdmins({ type: 'SYSTEM_ALERT', payload: { ip: '203.0.113.7' } });
+
+    expect(prisma.user.findMany).toHaveBeenCalledWith({ where: { role: 'admin' }, select: { id: true } });
+    expect(prisma.notificationQueue.create).toHaveBeenCalledTimes(2);
+    expect(prisma.notificationQueue.create).toHaveBeenCalledWith({
+      data: { userId: 'admin-1', type: 'SYSTEM_ALERT', payload: JSON.stringify({ ip: '203.0.113.7' }) },
+    });
+    expect(sendToUser).toHaveBeenCalledTimes(2);
+    expect(sendToUser).toHaveBeenCalledWith('admin-1', { type: 'SYSTEM_ALERT', payload: { ip: '203.0.113.7' } });
+    expect(sendToUser).toHaveBeenCalledWith('admin-2', { type: 'SYSTEM_ALERT', payload: { ip: '203.0.113.7' } });
+  });
+
+  it('单目标写队列失败 → 其余目标照常下发 + logger.error（allSettled 不中断）', async () => {
+    prisma.user.findMany.mockResolvedValue([{ id: 'admin-1' }, { id: 'admin-2' }]);
+    prisma.notificationQueue.create
+      .mockRejectedValueOnce(new Error('db down'))
+      .mockResolvedValue({ id: 'n2' });
+    const errorSpy = vi.spyOn(logger, 'error');
+
+    await emitToAdmins({ type: 'SYSTEM_ALERT', payload: {} });
+
+    expect(prisma.notificationQueue.create).toHaveBeenCalledTimes(2);
+    // 失败目标不再推 WS（emitNotification 内 create 在 sendToUser 之前 await）
+    expect(sendToUser).toHaveBeenCalledTimes(1);
+    expect(sendToUser).toHaveBeenCalledWith('admin-2', expect.anything());
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it('目标集合查询失败 → 整体 reject（调用侧 catch 收口，见各 service 挂点测试）', async () => {
+    prisma.user.findMany.mockRejectedValue(new Error('db down'));
+    await expect(emitToAdmins({ type: 'SYSTEM_ALERT', payload: {} })).rejects.toThrow('db down');
+  });
+});
+
+describe('emitToProjectMembers（#36 多目标辅助）', () => {
+  it('查项目成员快照 → 逐个写队列 + WS 推', async () => {
+    prisma.projectMember.findMany.mockResolvedValue([{ userId: 'm1' }, { userId: 'm2' }]);
+    prisma.notificationQueue.create.mockResolvedValue({ id: 'n3' });
+
+    await emitToProjectMembers('p1', { type: 'MEMBER_ADDED', payload: { projectId: 'p1' } });
+
+    expect(prisma.projectMember.findMany).toHaveBeenCalledWith({ where: { projectId: 'p1' }, select: { userId: true } });
+    expect(prisma.notificationQueue.create).toHaveBeenCalledTimes(2);
+    expect(prisma.notificationQueue.create).toHaveBeenCalledWith({
+      data: { userId: 'm1', type: 'MEMBER_ADDED', payload: JSON.stringify({ projectId: 'p1' }) },
+    });
+    expect(sendToUser).toHaveBeenCalledWith('m1', { type: 'MEMBER_ADDED', payload: { projectId: 'p1' } });
+    expect(sendToUser).toHaveBeenCalledWith('m2', { type: 'MEMBER_ADDED', payload: { projectId: 'p1' } });
   });
 });

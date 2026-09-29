@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import '../test/helpers/env.js'; // 环境前置（#36 起 connectionService 经 logger 拉起 config/env，CI 无 .env 必崩）
 
 // ── Mock 外部依赖 ──
 
@@ -10,6 +11,14 @@ vi.mock('../utils/prisma.js', async () => {
 vi.mock('../utils/encryption.js', () => ({
   encrypt: vi.fn((p: string) => `encrypted:${p}`),
   decrypt: vi.fn((p: string) => p.replace('encrypted:', '')),
+}));
+
+// #36：连接三操作成功路径 emit 项目成员通知（fire-and-forget）——mock 收口保持单测隔离。
+// 工厂必须 mockResolvedValue：service 侧对返回值直接挂 .catch，undefined.catch 会同步炸。
+vi.mock('./notificationService.js', () => ({
+  emitNotification: vi.fn().mockResolvedValue(undefined),
+  emitToAdmins: vi.fn().mockResolvedValue(undefined),
+  emitToProjectMembers: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../utils/appError.js', async (importOriginal) => {
@@ -43,6 +52,7 @@ import {
   listConnections,
   getConnection,
 } from './connectionService.js';
+import { emitToProjectMembers } from './notificationService.js';
 
 // ── Helpers ──
 
@@ -281,6 +291,28 @@ describe('connectionService', () => {
       expect(result).not.toHaveProperty('encryptedPass');
     });
 
+    it('#36 创建成功 → emit CONNECTION_UPDATED action=created', async () => {
+      (prisma.connection.create as MockFn).mockResolvedValue({
+        ...mockConnection,
+        id: 'conn-new',
+        name: 'MyConn',
+      });
+
+      await createConnection('user-1', {
+        projectId: 'proj-1',
+        name: 'MyConn',
+        host: '10.0.0.1',
+        port: 22,
+        protocol: 'SSH',
+      });
+
+      expect(emitToProjectMembers).toHaveBeenCalledTimes(1);
+      expect(emitToProjectMembers).toHaveBeenCalledWith('proj-1', {
+        type: 'CONNECTION_UPDATED',
+        payload: { projectId: 'proj-1', connectionId: 'conn-new', action: 'created', name: 'MyConn' },
+      });
+    });
+
     it('验证失败（无效字段）', async () => {
       await expect(
         createConnection('user-1', {
@@ -491,6 +523,27 @@ describe('connectionService', () => {
 
       await expect(deleteConnection('nonexistent')).rejects.toThrow('AppError:CONN_002');
       expect(createAppError).toHaveBeenCalledWith('CONN_002');
+    });
+
+    it('#36 删除成功 → emit CONNECTION_UPDATED action=deleted（projectId 取自删除前快照）', async () => {
+      setupFindUnique({ ...mockConnection, dependents: [] });
+      (prisma.connection.delete as MockFn).mockResolvedValue(mockConnection);
+
+      await deleteConnection('conn-1');
+
+      expect(emitToProjectMembers).toHaveBeenCalledTimes(1);
+      expect(emitToProjectMembers).toHaveBeenCalledWith('proj-1', {
+        type: 'CONNECTION_UPDATED',
+        payload: { projectId: 'proj-1', connectionId: 'conn-1', action: 'deleted', name: 'TestConn' },
+      });
+    });
+
+    it('#36 emit 失败不破主流程：删除照常返回（调用侧 catch 收口）', async () => {
+      setupFindUnique({ ...mockConnection, dependents: [] });
+      (prisma.connection.delete as MockFn).mockResolvedValue(mockConnection);
+      (emitToProjectMembers as MockFn).mockRejectedValueOnce(new Error('notify down'));
+
+      await expect(deleteConnection('conn-1')).resolves.toEqual({ id: 'conn-1' });
     });
   });
 

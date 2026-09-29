@@ -3,6 +3,8 @@ import { prisma } from '../utils/prisma.js';
 import type { Prisma } from '@prisma/client';
 import { createAppError, handlePrismaUniqueViolation, hasErrorCode } from '../utils/appError.js';
 import { encrypt, decrypt } from '../utils/encryption.js';
+import { logger } from '../utils/logger.js';
+import { emitToProjectMembers } from './notificationService.js';
 import {
   validateConnectionName, validateHost, validatePort,
   validateProtocol, validateVpnType, validateTags,
@@ -136,6 +138,12 @@ export async function createConnection(userId: string, data: ConnectionCreateDat
 
   try {
     const connection = await prisma.connection.create({ data: createData });
+    // #36：创建成功后通知项目全体成员（事务外 fire-and-forget；连接三操作统一
+    // CONNECTION_UPDATED 以 action 区分，design §8.4；失败只记日志不破主流程）
+    void emitToProjectMembers(data.projectId, {
+      type: 'CONNECTION_UPDATED',
+      payload: { projectId: data.projectId, connectionId: connection.id, action: 'created', name: connection.name },
+    }).catch((err: Error) => logger.error('连接创建通知下发失败（不传播）', { projectId: data.projectId, connectionId: connection.id, error: err.message }));
     const userMap = await resolveUserRefs([connection.createdBy, connection.updatedBy]);
     return toDetail(connection, false, userMap);
   } catch (error) {
@@ -257,6 +265,11 @@ export async function updateConnection(userId: string, connectionId: string, dat
       where: { id: connectionId },
       data: updateData,
     });
+    // #36：更新成功后通知项目全体成员（fire-and-forget，失败只记日志）
+    void emitToProjectMembers(connection.projectId, {
+      type: 'CONNECTION_UPDATED',
+      payload: { projectId: connection.projectId, connectionId, action: 'updated', name: connection.name },
+    }).catch((err: Error) => logger.error('连接更新通知下发失败（不传播）', { projectId: connection.projectId, connectionId, error: err.message }));
     const userMap = await resolveUserRefs([connection.createdBy, connection.updatedBy]);
     return toDetail(connection, false, userMap);
   } catch (error) {
@@ -283,6 +296,12 @@ export async function deleteConnection(connectionId: string) {
   }
 
   await prisma.connection.delete({ where: { id: connectionId } });
+  // #36：删除成功后通知项目全体成员（projectId/name 取自删除前快照——删除后已不可查；
+  // fire-and-forget，失败只记日志）
+  void emitToProjectMembers(connection.projectId, {
+    type: 'CONNECTION_UPDATED',
+    payload: { projectId: connection.projectId, connectionId, action: 'deleted', name: connection.name },
+  }).catch((err: Error) => logger.error('连接删除通知下发失败（不传播）', { projectId: connection.projectId, connectionId, error: err.message }));
   return { id: connectionId };
 }
 

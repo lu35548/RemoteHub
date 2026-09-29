@@ -2,9 +2,13 @@
 // IP 风险检测（P0-5，票 #19）：per-IP 60s 窗口内存计数，超阈值记 SECURITY_SUSPICIOUS_IP
 // 审计（仅告警不阻断）。计数豁免限流白名单端点（NAT 单出口下全员心跳即触阈值的误报防线，
 // 与 generalLimiter skip 共用 RATE_LIMIT_SKIP_PATHS 单一真相源）。
+// #36：同一判定处追加 emit SYSTEM_ALERT 全体 admin（NotificationQueue 落行 + WS 直推，
+// alerted 标志保证一窗一次）。emit 走 services/notificationService（唯一入口裁决）——
+// utils→services 的反向引用是挂点钦定的取舍，此处不复制 emit 逻辑。
 import type { AuditAction, AuditResource } from '@remotehub/shared';
 import { prisma } from './prisma.js';
 import { logger } from './logger.js';
+import { emitToAdmins } from '../services/notificationService.js';
 
 export const RATE_LIMIT_SKIP_PATHS = ['/health', '/auth/heartbeat', '/auth/online', '/healthz', '/readyz'] as const;
 
@@ -59,5 +63,16 @@ export function checkIpRisk(ip: string | undefined, path: string): void {
         },
       })
       .catch((err: Error) => logger.error('可疑 IP 审计落库失败（不传播）', { ip, error: err.message }));
+    // #36：可疑 IP 告警（最高优先）——全体 admin 直推（SYSTEM_ALERT），与审计同拍一窗一次；
+    // fire-and-forget，失败只记日志不破检测主流程（参照上方审计 .catch 先例）
+    void emitToAdmins({
+      type: 'SYSTEM_ALERT',
+      payload: {
+        message: `可疑 IP 高频请求：${ip} 60 秒内 ${win.count} 次`,
+        ip,
+        requestCount: win.count,
+        window: '60s',
+      },
+    }).catch((err: Error) => logger.error('可疑 IP 告警通知下发失败（不传播）', { ip, error: err.message }));
   }
 }

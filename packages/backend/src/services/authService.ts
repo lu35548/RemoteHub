@@ -3,6 +3,8 @@ import { prisma } from '../utils/prisma.js';
 import { verifyPassword, hashPassword } from '../utils/password.js';
 import { signAccessToken, signMfaToken, generateRefreshToken, hashRefreshToken } from '../utils/jwt.js';
 import { createAppError, handlePrismaUniqueViolation } from '../utils/appError.js';
+import { logger } from '../utils/logger.js';
+import { emitNotification } from './notificationService.js';
 import { validateUsername, validateNickname, validatePassword as validatePwd, validateRole } from '@remotehub/shared';
 import { REFRESH_CONCURRENT_WINDOW_SEC } from '@remotehub/shared';
 import type { UserPublic } from '@remotehub/shared';
@@ -223,6 +225,15 @@ export async function changePassword(userId: string, oldPassword: string, newPas
     prisma.user.update({ where: { id: userId }, data: { passwordHash } }),
     prisma.session.deleteMany({ where: { userId } }),
   ]);
+
+  // #36 强制登出通知：改密撤 session 后按已知 userId 直推（无需查列表）。
+  // 事务外 fire-and-forget（WS 推送不进事务）；WS 连接 upgrade 时已鉴权不受撤 session
+  // 影响，FORCE_LOGOUT 直达在线客户端；失败只记日志不破改密主流程。
+  void emitNotification({
+    userId,
+    type: 'FORCE_LOGOUT',
+    payload: { reason: 'password_changed', message: '密码已修改，请重新登录' },
+  }).catch((err: Error) => logger.error('强制登出通知下发失败（不传播）', { userId, error: err.message }));
 }
 
 /** 获取当前用户信息 */

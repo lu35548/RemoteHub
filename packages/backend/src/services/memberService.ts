@@ -1,6 +1,8 @@
 // packages/backend/src/services/memberService.ts
 import { prisma } from '../utils/prisma.js';
 import { createAppError, handlePrismaUniqueViolation, hasErrorCode } from '../utils/appError.js';
+import { logger } from '../utils/logger.js';
+import { emitToProjectMembers } from './notificationService.js';
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, validateMemberRole } from '@remotehub/shared';
 
 /** 成员列表 §4 */
@@ -47,6 +49,13 @@ export async function addMember(projectId: string, userId: string, role: string)
       });
     });
 
+    // #36：添加成功后通知项目全体成员（事务外 fire-and-forget；helper 成员快照后置，
+    // 新成员本人含在通知目标内；失败只记日志不破主流程）
+    void emitToProjectMembers(projectId, {
+      type: 'MEMBER_ADDED',
+      payload: { projectId, userId, username: user.username, role },
+    }).catch((err: Error) => logger.error('成员添加通知下发失败（不传播）', { projectId, userId, error: err.message }));
+
     return { id: member.id, userId, role, addedAt: member.addedAt.toISOString() };
   } catch (error) {
     if (hasErrorCode(error, 'MEMBER_001')) throw error;
@@ -60,7 +69,7 @@ export async function updateMemberRole(projectId: string, targetUserId: string, 
   const v = validateMemberRole(newRole);
   if (!v.valid) throw createAppError('VAL_001', [{ field: 'role', message: v.message }]);
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const member = await tx.projectMember.findUnique({
       where: { projectId_userId: { projectId, userId: targetUserId } },
     });
@@ -81,6 +90,14 @@ export async function updateMemberRole(projectId: string, targetUserId: string, 
 
     return { id: updated.id, userId: targetUserId, role: updated.role };
   });
+
+  // #36：角色变更成功后通知项目全体成员（事务外 fire-and-forget，失败只记日志）
+  void emitToProjectMembers(projectId, {
+    type: 'MEMBER_ROLE_UPDATED',
+    payload: { projectId, userId: targetUserId, role: newRole },
+  }).catch((err: Error) => logger.error('角色变更通知下发失败（不传播）', { projectId, userId: targetUserId, error: err.message }));
+
+  return result;
 }
 
 /** 移除成员/退出 §4.2（事务：owner count 检查 + delete） */
@@ -96,7 +113,7 @@ export async function removeMember(projectId: string, targetUserId: string, call
     }
   }
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const member = await tx.projectMember.findUnique({
       where: { projectId_userId: { projectId, userId: targetUserId } },
     });
@@ -113,4 +130,13 @@ export async function removeMember(projectId: string, targetUserId: string, call
     await tx.projectMember.delete({ where: { id: member.id } });
     return { id: member.id };
   });
+
+  // #36：移除成功后通知剩余成员（helper 成员快照后置——被移除者零打扰；
+  // 事务外 fire-and-forget，失败只记日志不破主流程）
+  void emitToProjectMembers(projectId, {
+    type: 'MEMBER_REMOVED',
+    payload: { projectId, userId: targetUserId },
+  }).catch((err: Error) => logger.error('成员移除通知下发失败（不传播）', { projectId, userId: targetUserId, error: err.message }));
+
+  return result;
 }
