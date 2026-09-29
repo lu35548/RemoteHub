@@ -1,5 +1,6 @@
 // 票 #32 P1-5 unit：性能监控中间件（小 express app + supertest，不连 DB）。
 // 重点断言「路由模板聚合」与「零业务侵入」：模板化防高基数、白名单豁免、unmatched 固定桶。
+import '../test/helpers/env.js'; // 环境前置必须先于其余 import（performanceMonitor → ipMonitor → prisma → config/env.ts，vitest 不加载 .env，CI 必崩；照 ipMonitor.test.ts 先例）
 import express from 'express';
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';

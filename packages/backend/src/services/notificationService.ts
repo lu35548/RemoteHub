@@ -5,6 +5,13 @@ import { createAppError } from '../utils/appError.js';
 import { logger } from '../utils/logger.js';
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '@remotehub/shared';
 import type { NotificationType } from '@remotehub/shared';
+// 循环依赖环备案（有意保留，勿"顺手断环"）：authService → 本文件(:8 sendToUser) → wsServer(:21
+// validateRefreshSession) → authService。安全性依赖三个不变量：① 三方对环内 import 的调用全在
+// 函数体内（authService emitNotification / notificationService sendToUser(:49) / wsServer
+// validateRefreshSession），首次调用时三方模块均已初始化完毕；② 环内三文件模块顶层无交叉副作用
+// （顶层只有常量/单例构造，不互相调用）；③ 函数声明提升 + ESM live binding 保证运行期解析到最终实现。
+// 守护规则：环内文件不得新增模块顶层交叉调用或副作用，否则此环立即变危险。
+// 弃用 DI/晚绑定断环备选：单一环不值得引入注入复杂度（构造注入或 setter 晚绑定会污染三处签名与测试）。
 import { sendToUser } from '../ws/wsServer.js';
 
 /** GET /notifications：当前用户未读列表，createdAt desc，分页 clamp 照 userService/auditService 先例 */

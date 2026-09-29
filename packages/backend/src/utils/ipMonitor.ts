@@ -5,6 +5,9 @@
 // #36：同一判定处追加 emit SYSTEM_ALERT 全体 admin（NotificationQueue 落行 + WS 直推，
 // alerted 标志保证一窗一次）。emit 走 services/notificationService（唯一入口裁决）——
 // utils→services 的反向引用是挂点钦定的取舍，此处不复制 emit 逻辑。
+// 弃用组合根挂点备选（checkIpRisk 返回触发信号、server.ts 组合 emit/事件订阅解耦）：
+// alerted 判定与审计/告警同拍一窗一次的内聚性优先于分层方向，且 checkIpRisk 是同步签名、
+// 改返回信号需动调用方语义。
 import type { AuditAction, AuditResource } from '@remotehub/shared';
 import { prisma } from './prisma.js';
 import { logger } from './logger.js';
