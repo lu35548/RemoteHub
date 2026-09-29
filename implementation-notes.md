@@ -40,7 +40,7 @@
 - B 自报「165/165 绿」被 Standards reviewer 揭穿：vitest 真实退出码 1（unhandled rejection 被管道尾命令吃码）——**agent 亲测数字也须重定向取码复验**（EXIT=0 才算数）。
 
 ### Tradeoffs
-- 不修挂账：连接 updated/deleted 集成测试补强（~20 行，#38 顺带）；reconnect_required 语义未与后端定案（后端未发，前端已备 handler，将来补发票锁定）；App 层 dispatch 接线单行 lambda 无单测（真机 toast 实证覆盖）；notify.emit 负向断言 400ms 窗口（同文件自证 ~1ms 达）；MEMBER_* payload 无 message 字段前端显「暂无详情」（兜底正常，可读性 nit）。
+- 不修挂账：连接 updated/deleted 集成测试补强（~20 行，#38 顺带）；reconnect_required 语义未与后端定案（后端未发，前端已备 handler，将来补发票锁定）；App 层 dispatch 接线单行 lambda 无单测（真机 toast 实证覆盖）；notify.emit 负向断言 400ms 窗口（同文件自证 ~1ms 达）；MEMBER_* payload 无 message 字段前端显「暂无详情」（兜底正常，可读性 nit）；**通知容量与 UX 补强（列表加载更多/全部已读/未读保留上限）→ #54**（用户拍板挂 backlog，2026-09-29）。
 - 采纳修复：performanceMonitor.test env 前置（**#32 遗留 CI 必崩**——本地 @prisma/client 自动加载 .env 掩盖，CI checkout 无 .env collect 即崩；`beedd3a` 一行修）；循环依赖环注释备案（authService→notificationService→wsServer→authService：ESM 函数声明提升安全的三不变量 + 守护规则入注释）；utils→services 反向分层备选弃由备案（内聚性优先，组合根方案弃由记录）。
 - review 战果：双轴 8 份报告共 1 blocker + 1 major + 3 minor + 5 nit，全部处置（修 4 + 挂账 5）；blocker（退出码 1）与 major（CI 必崩）均非票面功能缺陷而是工程链路陷阱——三方会合（implementer + reviewer + lead 真机）模式再次验证有效。
 
