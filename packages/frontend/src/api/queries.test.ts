@@ -240,10 +240,10 @@ describe('通知 hooks（票 #37）', () => {
   it('useNotifications：getRaw /notifications 分页端点，queryFn 把 payload JSON 字符串归一化为对象', async () => {
     useNotifications();
     expect(captured).toMatchObject({ queryKey: NOTIFICATION_QUERY_KEY });
-    (captured!.queryFn as () => unknown)();
-    expect(api.getRaw).toHaveBeenCalledWith('/notifications?page=1&pageSize=50');
 
-    // queryFn 归一化：REST payload 是 Prisma String 列直出的 JSON 字符串
+    // queryFn 归一化：REST payload 是 Prisma String 列直出的 JSON 字符串。
+    // 先 mock 再唯一一次调用并 await——裸调用时 mock 返回 undefined，raw.data.map 抛出的
+    // rejected promise 无人接收，会以 unhandled error 把 vitest 退出码顶成 1（CI 必红）
     const getRawMock = api.getRaw as ReturnType<typeof vi.fn>;
     const rawBody = {
       success: true as const,
@@ -255,6 +255,7 @@ describe('通知 hooks（票 #37）', () => {
     };
     getRawMock.mockResolvedValueOnce(rawBody);
     const normalized = await (captured!.queryFn as () => Promise<typeof rawBody>)();
+    expect(getRawMock).toHaveBeenCalledWith('/notifications?page=1&pageSize=50');
     expect(normalized.data[0]!.payload).toEqual({ message: '张三加入了项目' }); // 字符串 → 对象
     expect(normalized.data[1]!.payload).toEqual({}); // 脏 payload 不炸列表
     expect(normalized.pagination.total).toBe(2);

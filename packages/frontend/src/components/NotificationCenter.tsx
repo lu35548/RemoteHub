@@ -2,13 +2,15 @@
 // 实时增量由 AppContent 的 useWs → dispatchWsMessage 写入同一缓存键）。
 import React, { useEffect, useRef, useState } from 'react';
 import { Bell, Check, Inbox } from 'lucide-react';
+import type { NotificationType } from '@remotehub/shared';
 import { useNotifications, useMarkNotificationRead } from '../api/queries';
 import { NOTIFICATION_TYPE_LABELS } from '../constants';
 import { payloadMessage } from '../lib/notificationDispatch';
 import { formatTime } from '../utils';
 
-// 告警/失败类用暖色徽章，其余蓝灰（深色 slate 风格内的小幅语义分色）
-const ALERT_TYPES = new Set(['SYSTEM_ALERT', 'BACKUP_FAILED', 'FORCE_LOGOUT']);
+// 告警/失败类用暖色徽章，其余蓝灰（深色 slate 风格内的小幅语义分色）；
+// Set<NotificationType> 键拼错由 tsc 门保证（constants.test.ts 的 Record 先例）
+const ALERT_TYPES = new Set<NotificationType>(['SYSTEM_ALERT', 'BACKUP_FAILED', 'FORCE_LOGOUT']);
 
 const NotificationCenter: React.FC = () => {
   const [open, setOpen] = useState(false);

@@ -42,6 +42,8 @@ vi.mock('./api/queries', () => ({
   // 票 #37：通知中心消费（铃铛真实渲染，数据层受控）
   useNotifications: vi.fn(() => ({ data: undefined, isPending: false })),
   useMarkNotificationRead: vi.fn(() => ({ mutate: vi.fn(), isPending: false, variables: undefined })),
+  // App.tsx 值导入 NOTIFICATION_QUERY_KEY（WS 派发写缓存键）：factory 缺 key 会炸 "No export defined on the mock"
+  NOTIFICATION_QUERY_KEY: ['notifications'],
 }));
 
 // T8：App 挂载即启动心跳轮询（真定时器/真请求会污染测试环境），mock 成可变状态

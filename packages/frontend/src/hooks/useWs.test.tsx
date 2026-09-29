@@ -72,6 +72,23 @@ describe('useWs（#37 自写 WS hook 状态机）', () => {
     expect(MockWebSocket.instances).toHaveLength(0);
   });
 
+  // useWs 核心设计契约（useWs.ts「回调走 ref」注释的测试锁）：
+  // effect 依赖只有 enabled，回调身份变化不触发重连，且派发永远走最新回调
+  it('回调走 ref：rerender 换全新回调身份不重拨，消息派发走最新回调', () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    const { rerender } = renderHook(({ cb }) => useWs({ onMessage: cb }), { initialProps: { cb: first } });
+    expect(MockWebSocket.instances).toHaveLength(1);
+
+    rerender({ cb: second }); // 全新回调身份
+    expect(MockWebSocket.instances).toHaveLength(1); // 不重拨号
+
+    act(() => openSocket(latest()));
+    act(() => serverMessage(latest(), { type: 'MEMBER_ADDED', payload: { projectName: 'P1' } }));
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledTimes(1); // ref 已指向最新回调，无过期闭包
+  });
+
   it('onopen → 状态 open + onOpen 回调（invalidate 挂点）+ 退避计数清零', () => {
     vi.spyOn(Math, 'random').mockReturnValue(0);
     const onOpen = vi.fn();
