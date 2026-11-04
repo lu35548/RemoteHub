@@ -23,6 +23,28 @@
 
 ---
 
+## [2026-11-04] P1 批 6：#39 备份前端 ∥ #41 连接金矿后端 ✅
+
+团队形态：2 implementer 并行（A=#39 frontend 独占不 commit / B=#41 backend+shared 独占唯一 commit）+ **#39 完工即提前 spawn 其双轴 reviewer**（与 #41 实现并行，域隔离零相交，省一轮串行等待）+ **#41 修复派回原 implementer**（上下文复用，一轮过，未另开 fixer）+ lead 真机双用户验收 + 统一 push/关票。质量门终值 lead 亲测 **backend 577（548→577）/ shared 41 / frontend 202（183→202）** 全 EXIT=0，lint/tsc 全 0；3 commits（2 feat + 1 fix）全推 origin；#39/#41 关票带证据评论。
+
+### Design decisions
+- [2026-11-04] 决策：#39 备份类型前端本地镜像（不碰 shared）——shared 本批归 B 独占，本地声明 + 「合流后可迁 shared」注释，规避并行编辑冲突。
+- [2026-11-04] 决策：#41 tag 包夹法走 Prisma 四条件 OR（equals / startsWith 'tag,' / endsWith ',tag' / contains ',tag,'）而非 raw SQL——逻辑等价 SQL 包夹，且 findMany/count 共用同一 where（total 一致性构造性保证）+ unit 可断言 where 形状。reviewer 亲读 v1 `RemoteConnectionRepository.ts:256` 实锤 v1 是 `LIKE '%tag%'` 子串匹配 bug——票面以 v1 为「参照」但 spec 包夹法优于 v1，偏离成立。
+- [2026-11-04] 决策：#41 双轨类型用 `ConnectionListFilters extends Pick<ConnectionListQuery,'tag'|'q'|'sort'>` 中间态——完全并轨会把 wire 形（含 projectId/page/pageSize）与 service 内构 where 形两种生命周期耦合；纯双轨则 shared 改字段名无编译期信号。Pick 锁字段级同步、职责分离保留。
+- [2026-11-04] 决策：q 大小写语义借 SQLite LIKE 固有 ASCII 不敏感对齐 v1 ILIKE（Prisma SQLite 不支持 mode:'insensitive'，也无需用）；sort 未知值宽容回退不 400（spec 只定义一个显式值）。
+
+### Deviations
+- 真机下载验证配方升级：CDP 对下载流存不出响应 body（responseFilePath 落空文件）——改**三方对账**坐实字节一致：列表 sizeBytes = 响应 content-length = 服务端磁盘 stat（245760）。
+- 真机第二用户配方：userRoutes 无 POST（admin 不能 API 建用户）、register 是 admin 门禁（authRoutes.ts:19）——admin 登录拿 token 走 register 造 viewer39（nickname 必填），浏览器 isolatedContext 登录验证直捣重定向。
+- IDE 诊断面板两度过期快照误导（前端红阶段中间态报缺模块 / ConnectionStats import 误报 unused）——一律以质量门 EXIT=0 亲跑为准，诊断不可作实时真相。
+
+### Tradeoffs
+- review 战果：4 份双轴报告 **0 blocker / 0 major / 3 minor / 7 nit**；采纳修复 9 项（#41：integration 三段串 seed 补齐——包夹 `contains ',test,'` 中段分支首获真 SQLite 行为级执行、sort trim 归一、`Promise<ConnectionStats>` 返回标注、注释补大小写语义、Filters extends Pick；#39 的 4 nit 全挂账）+ 挂账 7 项（#39：403 toast 一闪=守卫先例同构代价、cron 备份不自动刷列表=裁决直接语义、BACKUP_QUERY_KEY export 取舍、DataTable 单页 footer 冗余、admin 三页无互跳导航；#41：tag 等值 BINARY vs LIKE 系大小写行为混合、stats JS 分键 vs 列表 LIKE 口径差、LIKE 通配符 `%`/`_` 匹配放宽 [v1 同，参数化非注入]）。
+- #39 真机 console 双页各 1 条预期错误（admin 页 401=批 4 挂账 WS 首连退避观察项；viewer 页 403=守卫设计依赖），无新增脏错误。
+
+### Open questions
+- 无需用户裁决项。挂账移交：**tags 写入侧规范化**（validateTags 禁逗号入本体 / 片段 trim / 去空）待后续票——包夹法字面语义与之耦合（impl-41 提出，票面明示本票不扩校验）。
+
 ## [2026-11-04] P1 批 5：WS 协议收口 + #38 备份后端 ∥ #40 members UI ✅
 
 团队形态：lead 亲自前置收口（WS 协议常量化迁 shared，批 4 遗留 OQ 清账，commit `740ff88`）→ 2 implementer 并行（A=#38 backend+compose+docs+shared 唯一写者 / B=#40 frontend 独占不 commit）→ 4 份双轴 review（2 reviewer × 2 票）→ 2 fixer 按域并行 → lead 真机双用户验收 + 统一 commit/push/关票。质量门终值 **769** = backend 548（511+36+1）/ shared 41（37+4）/ frontend 183（166+17）；lint/tsc 全 0；5 commits（1 refactor 收口 + 2 feat + 1 fix + 1 docs——#40 review 修复随 feat 合并未独立成 commit）；#38/#40 关票带证据。
