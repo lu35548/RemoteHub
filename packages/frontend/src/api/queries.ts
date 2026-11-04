@@ -7,6 +7,7 @@ import type {
   Dashboard, DailyActivityStat, ProjectConnectionStat,
   ProjectListItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
   ConnectionListItem, ConnectionDetail, CreateConnectionRequest, UpdateConnectionRequest,
+  ConnectionListQuery, ConnectionStats,
   MemberListItem, AddMemberRequest, UpdateMemberRoleRequest,
   UserListItem, AdminUpdateUserRequest, UserSearchResult, RegisterRequest,
   PaginatedResponse, ForgotPasswordRequest, ResetPasswordRequest, AdminResetLinkResponse,
@@ -181,12 +182,38 @@ export function useDeleteProject() {
 
 // ─── Connections ───
 
-export function useConnections(projectId?: string, page = 1, pageSize = 100) {
+/** #42 连接列表 URL 拼 query：只拼已设置项，键序固定（projectId→tag→q→sort，对齐审计页 auditLogParams 模式） */
+function connectionListParams(
+  filters: Omit<ConnectionListQuery, 'page' | 'pageSize'>,
+  page: number,
+  pageSize: number,
+): string {
   const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
-  if (projectId) params.set('projectId', projectId);
+  for (const key of ['projectId', 'tag', 'q', 'sort'] as const) {
+    const v = filters[key];
+    if (v) params.set(key, v);
+  }
+  return params.toString();
+}
+
+/** 连接列表（#41 服务端过滤：tag 精确 / q 三字段模糊 / sort=lastAccessed）。
+ * queryKey 用结构化 filters 对象——#49 分页票在此形状上追加 page/pageSize 即可，无破坏性改 key。 */
+export function useConnections(filters: Omit<ConnectionListQuery, 'page' | 'pageSize'> = {}, page = 1, pageSize = 100) {
   return useQuery({
-    queryKey: ['connections', projectId, page],
-    queryFn: () => api.getRaw<PaginatedResponse<ConnectionListItem>>(`/connections?${params}`),
+    queryKey: ['connections', filters, page, pageSize],
+    queryFn: () => api.getRaw<PaginatedResponse<ConnectionListItem>>(`/connections?${connectionListParams(filters, page, pageSize)}`),
+  });
+}
+
+/** #42 项目连接统计（#41 落地端点）：协议分布 + tag 计数。
+ * data 壳端点走 api.get（与分页 getRaw 相反）；projectId 空（全局视图）停查——端点是 per-project。
+ * staleTime 5 分钟与 /admin 监控端点同口径；连接 CRUD 后由 mutation onSuccess invalidate。 */
+export function useConnectionStats(projectId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['connection-stats', projectId],
+    queryFn: () => api.get<ConnectionStats>(`/projects/${projectId}/connections/stats`),
+    enabled: !!projectId,
+    staleTime: 5 * 60_000,
   });
 }
 
@@ -198,11 +225,17 @@ export function useConnection(id: string) {
   });
 }
 
+/** 连接 CRUD 成功后统一失效：列表 + 项目统计（协议/tag 计数随增删改变） */
+function invalidateConnectionCaches(qc: ReturnType<typeof useQueryClient>) {
+  void qc.invalidateQueries({ queryKey: ['connections'] });
+  void qc.invalidateQueries({ queryKey: ['connection-stats'] });
+}
+
 export function useCreateConnection() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: CreateConnectionRequest) => api.post<ConnectionDetail>('/connections', data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['connections'] }),
+    onSuccess: () => invalidateConnectionCaches(qc),
   });
 }
 
@@ -211,7 +244,7 @@ export function useUpdateConnection() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: UpdateConnectionRequest }) =>
       api.patch<ConnectionDetail>(`/connections/${id}`, data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['connections'] }),
+    onSuccess: () => invalidateConnectionCaches(qc),
   });
 }
 
@@ -219,7 +252,7 @@ export function useDeleteConnection() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.delete(`/connections/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['connections'] }),
+    onSuccess: () => invalidateConnectionCaches(qc),
   });
 }
 

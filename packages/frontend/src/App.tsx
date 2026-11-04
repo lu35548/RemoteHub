@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Search, Plus, Layout, Network, Server } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import type { ConnectionDetail, ConnectionListItem, CreateConnectionRequest, ProjectListItem, ProjectDetail, UserPublic } from '@remotehub/shared';
+import type { ConnectionDetail, ConnectionListItem, ConnectionListQuery, CreateConnectionRequest, ProjectListItem, ProjectDetail, UserPublic } from '@remotehub/shared';
 import { api, setAccessToken } from './api/client';
-import { useMe, useLogout, useProjects, useConnections, useCreateProject, useUpdateProject, useDeleteProject, useCreateConnection, useUpdateConnection, useDeleteConnection, NOTIFICATION_QUERY_KEY } from './api/queries';
+import { useMe, useLogout, useProjects, useConnections, useConnectionStats, useCreateProject, useUpdateProject, useDeleteProject, useCreateConnection, useUpdateConnection, useDeleteConnection, NOTIFICATION_QUERY_KEY } from './api/queries';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { useWs } from './hooks/useWs';
 import { dispatchWsMessage } from './lib/notificationDispatch';
@@ -15,8 +15,23 @@ import ProjectModal, { type ProjectFormInput } from './components/ProjectModal';
 import ProjectMembersModal from './components/ProjectMembersModal';
 import UserManagementModal from './components/UserManagementModal';
 import NotificationCenter from './components/NotificationCenter';
+import ConnectionFilterBar, { type TagOption, type ConnectionSortTarget } from './components/ConnectionFilterBar';
 import { useUI } from './components/UIComponents';
 import { getAvatarColor } from './utils/avatar';
+
+// ── #42 工作台过滤 URL 联动 ──
+// URL（q/tag/sort）是过滤态唯一真相源：刷新/分享进入即还原（AC），交互 replace 写入
+// 不产生历史条目（搜索/过滤非导航语义）；空值不拼、键序固定（对齐审计页 auditLogParams 模式）
+const WORKBENCH_SEARCH_DEBOUNCE_MS = 400;
+
+/** 过滤三参 → URL query（q→tag→sort 键序固定） */
+function buildWorkbenchParams(q: string, tag: string, sort: string): URLSearchParams {
+  const params = new URLSearchParams();
+  if (q) params.set('q', q);
+  if (tag) params.set('tag', tag);
+  if (sort) params.set('sort', sort);
+  return params;
+}
 
 const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
   const { toast, confirm } = useUI();
@@ -32,13 +47,56 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
 
   // 大 pageSize 一次拉全（后端 MAX_PAGE_SIZE=100 上限，spec 决策 3 的「200」勘误为上限值；个人项目量级足够）
   const { data: projectsPage } = useProjects(1, 100);
-  const { data: connectionsPage } = useConnections(undefined, 1, 100);
   const projects = useMemo(() => projectsPage?.data ?? [], [projectsPage]);
-  const connections = useMemo(() => connectionsPage?.data ?? [], [connectionsPage]);
 
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'all' | 'vpn'>('all');
-  const [searchQuery, setSearchQuery] = useState('');
+
+  // #42 过滤态从 URL 还原（q/tag/sort）：URL 是唯一真相源，无本地镜像态
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlTag = searchParams.get('tag') ?? '';
+  const urlSort = searchParams.get('sort') === 'lastAccessed' ? 'lastAccessed' : '';
+  const urlQ = searchParams.get('q') ?? '';
+
+  // 搜索框本地态即时回显，400ms 防抖后提交进 URL（服务端 q 只覆盖 name/host/username；
+  // tags 检索由 chips 精确过滤承接——搜索范围收窄是 #42 的有意演进，见完工报告）
+  const [searchInput, setSearchInput] = useState(urlQ);
+  useEffect(() => {
+    if (searchInput === urlQ) return;
+    const timer = setTimeout(() => {
+      setSearchParams(buildWorkbenchParams(searchInput, urlTag, urlSort), { replace: true });
+    }, WORKBENCH_SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [searchInput, urlQ, urlTag, urlSort, setSearchParams]);
+
+  /** tag chip 单选切换：点未选中 tag 生效，再点当前 tag 取消（后端 tag 是单值参数，#41 契约） */
+  const toggleTag = (tag: string) => {
+    setSearchParams(buildWorkbenchParams(urlQ, urlTag === tag ? '' : tag, urlSort), { replace: true });
+  };
+  /** 排序切换（'default' 移除 sort 参数 = 服务端缺省 updatedAt desc） */
+  const changeSort = (sort: ConnectionSortTarget) => {
+    setSearchParams(buildWorkbenchParams(urlQ, urlTag, sort === 'lastAccessed' ? 'lastAccessed' : ''), { replace: true });
+  };
+
+  // #42 展示列表：服务端过滤（q 模糊/tag 精确/sort=lastAccessed，项目视图叠加 projectId）。
+  // queryKey 是结构化 filters 对象，#49 分页票在此形状上追加 page/pageSize 即可
+  const listQuery = useMemo<Omit<ConnectionListQuery, 'page' | 'pageSize'>>(() => ({
+    projectId: activeProjectId ?? undefined,
+    tag: urlTag || undefined,
+    q: urlQ || undefined,
+    sort: urlSort || undefined,
+  }), [activeProjectId, urlTag, urlQ, urlSort]);
+  const { data: connectionsPage } = useConnections(listQuery);
+  const connections = useMemo(() => connectionsPage?.data ?? [], [connectionsPage]);
+
+  // #42 全量底表（无过滤）：ConnectionModal 依赖下拉 + Via 依赖查找 + 全局视图 chips 聚合源。
+  // 与展示列表在「全局无过滤」时 queryKey 相同 → react-query 自动去重为单请求
+  const { data: allConnectionsPage } = useConnections({});
+  const allConnections = useMemo(() => allConnectionsPage?.data ?? [], [allConnectionsPage]);
+
+  // #42 项目统计（协议分布 + chips 候选）：仅项目视图消费（stats 是 per-project 端点，全局停查）
+  const statsQuery = useConnectionStats(activeProjectId);
+
   // 在线状态：每 5s 一轮「心跳 → 在线列表」轮询（v1 updateOnlineUsers 等价，登出卸载即停）
   const onlineUsers = useOnlineStatus();
 
@@ -57,30 +115,32 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
   // #40 成员管理弹窗：目标项目（Sidebar 项目菜单进入）
   const [membersProject, setMembersProject] = useState<ProjectListItem | null>(null);
 
-  // 过滤 + 分组（v1 行为：项目视图显示项目全部；全局视图 vpn/all 互斥过滤；搜索覆盖 username/tags）
+  // 分组（#42 后：tag/q 过滤与项目范围已由服务端完成，客户端只保留全局视图 vpn/all 互斥分组）
   const { hosts, vpns } = useMemo(() => {
-    let list = connections;
-    if (activeProjectId) {
-      list = list.filter(c => c.projectId === activeProjectId);
-    } else if (viewMode === 'vpn') {
-      list = list.filter(c => c.protocol === 'VPN');
-    } else {
-      list = list.filter(c => c.protocol !== 'VPN');
-    }
-    if (searchQuery) {
-      const searchLower = searchQuery.toLowerCase();
-      list = list.filter(conn =>
-        conn.name.toLowerCase().includes(searchLower) ||
-        conn.host.toLowerCase().includes(searchLower) ||
-        (conn.username ?? '').toLowerCase().includes(searchLower) ||
-        (conn.tags ?? '').toLowerCase().includes(searchLower)
-      );
-    }
+    const list = activeProjectId
+      ? connections
+      : viewMode === 'vpn'
+        ? connections.filter(c => c.protocol === 'VPN')
+        : connections.filter(c => c.protocol !== 'VPN');
     return {
       hosts: list.filter(c => c.protocol !== 'VPN'),
       vpns: list.filter(c => c.protocol === 'VPN'),
     };
-  }, [connections, activeProjectId, searchQuery, viewMode]);
+  }, [connections, activeProjectId, viewMode]);
+
+  // #42 chips 候选：项目视图用 stats.tags（服务端权威，字面键不 trim）；全局视图从全量底表
+  // 客户端聚合（过滤不收缩候选集）。均按计数降序（高频 tag 靠前）
+  const tagOptions = useMemo<TagOption[]>(() => {
+    const counts = activeProjectId
+      ? new Map(Object.entries(statsQuery.data?.tags ?? {}))
+      : allConnections.reduce((m, c) => {
+          for (const t of (c.tags ?? '').split(',').filter(Boolean)) m.set(t, (m.get(t) ?? 0) + 1);
+          return m;
+        }, new Map<string, number>());
+    return [...counts.entries()]
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => b.count - a.count);
+  }, [activeProjectId, statsQuery.data, allConnections]);
 
   const handleSaveProject = async (input: ProjectFormInput) => {
     try {
@@ -283,9 +343,9 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 w-4 h-4 group-focus-within:text-blue-400 transition-colors" />
               <input
                 type="text"
-                placeholder="搜索主机, IP, 标签..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="搜索名称, 主机, 用户名..."
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
                 className="bg-slate-900 border border-slate-800 rounded-lg pl-10 pr-4 py-2 text-sm w-64 focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none transition-all"
               />
             </div>
@@ -299,6 +359,18 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
           </div>
         </header>
 
+        {/* #42 过滤栏：tag chips（单选切换）+ 最近访问排序切换 + 项目视图协议分布 */}
+        <div className="px-8 border-b border-slate-800/50">
+          <ConnectionFilterBar
+            tagOptions={tagOptions}
+            activeTag={urlTag}
+            onToggleTag={toggleTag}
+            sortByLastAccessed={urlSort === 'lastAccessed'}
+            onSortChange={changeSort}
+            protocolStats={activeProjectId ? statsQuery.data?.protocols : undefined}
+          />
+        </div>
+
         <div className="flex-1 overflow-y-auto p-8 custom-scrollbar scroll-smooth">
           {hosts.length === 0 && vpns.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-slate-500 pb-20 animate-in zoom-in-95 duration-500">
@@ -306,12 +378,18 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
                 {viewMode === 'vpn' ? <Network size={40} className="opacity-30" /> : <Layout size={40} className="opacity-30" />}
               </div>
               <p className="text-lg font-medium text-slate-400">
-                {searchQuery ? '未找到匹配的资源' : '暂无资源配置'}
+                {urlQ || urlTag ? '未找到匹配的资源' : '暂无资源配置'}
               </p>
               <p className="text-sm opacity-60 mt-2">点击右上角新建按钮开始添加</p>
             </div>
           )}
           <div className="max-w-[1920px] mx-auto space-y-10">
+            {/* #42 截断态提示：单页上限 100（完整分页由 #49 接手，当前口径） */}
+            {connectionsPage && connectionsPage.pagination.total > connections.length && (
+              <div className="text-xs text-amber-400/80 bg-amber-500/5 border border-amber-500/20 rounded-lg px-4 py-2.5">
+                已显示前 {connections.length} 条，共 {connectionsPage.pagination.total} 条（超过单页上限 100 条）
+              </div>
+            )}
             {vpns.length > 0 && (
               <section className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                 {activeProjectId && (
@@ -348,7 +426,7 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
                     <ConnectionCard
                       key={conn.id}
                       connection={conn}
-                      vpnDependency={connections.find(c => c.id === conn.requiredVpnId) ?? undefined}
+                      vpnDependency={allConnections.find(c => c.id === conn.requiredVpnId) ?? undefined}
                       onEdit={handleEditConnection}
                       onDelete={handleDeleteConnection}
                     />
@@ -372,7 +450,7 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
         onClose={() => setIsConnectionModalOpen(false)}
         onSave={handleSaveConnection}
         projects={projects}
-        connections={connections}
+        connections={allConnections}
         editingConnection={editingConnection}
         activeProjectId={activeProjectId}
         onAddProjectRequest={() => { setEditingProject(null); setIsProjectModalOpen(true); }}

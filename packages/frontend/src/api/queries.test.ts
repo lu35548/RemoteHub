@@ -23,7 +23,7 @@ vi.mock('react-router-dom', () => ({
 }));
 
 vi.mock('./client.js', () => ({
-  api: { get: vi.fn(), getRaw: vi.fn(), post: vi.fn(), patch: vi.fn() },
+  api: { get: vi.fn(), getRaw: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
   setAccessToken: vi.fn(),
   API_BASE: '/api/v1',
   // 导出走手动 fetch，token 从内存取；401 走 ensureRefreshed 重试（票 #23 review 采纳）
@@ -31,7 +31,7 @@ vi.mock('./client.js', () => ({
   ensureRefreshed: vi.fn().mockResolvedValue(null),
 }));
 
-import { exportAuditLogsCsv, useAuditLogs, useDashboard, useForgotPassword, useProjectStats, useResetPassword, useAdminResetLink, useUserStats, useNotifications, useMarkNotificationRead, NOTIFICATION_QUERY_KEY, useAdminBackups, useTriggerBackup, downloadBackup, BACKUP_QUERY_KEY } from './queries';
+import { exportAuditLogsCsv, useAuditLogs, useDashboard, useForgotPassword, useProjectStats, useResetPassword, useAdminResetLink, useUserStats, useNotifications, useMarkNotificationRead, NOTIFICATION_QUERY_KEY, useAdminBackups, useTriggerBackup, downloadBackup, BACKUP_QUERY_KEY, useConnections, useConnectionStats, useDeleteConnection } from './queries';
 import { api, ensureRefreshed } from './client.js';
 import type { AuditLogQuery } from '@remotehub/shared';
 
@@ -299,6 +299,59 @@ describe('备份 hooks（#39）', () => {
     expect(api.post).toHaveBeenCalledWith('/admin/backups'); // 单参数 = 无 body
     (mutationCaptured!.onSuccess as () => void)();
     expect(invalidate).toHaveBeenCalledWith({ queryKey: BACKUP_QUERY_KEY });
+  });
+});
+
+// ── 连接金矿 hooks（#42）──
+// 列表是分页端点（响应含 pagination → getRaw）；stats 是 data 壳端点（controller 包 { success, data }
+// → api.get 剥壳）——壳选择相反，双双锁死（frontend-api-get-vs-getraw 教训）
+describe('连接金矿 hooks（#42）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    captured = undefined;
+    mutationCaptured = undefined;
+  });
+
+  it('useConnections：filters 全量 → queryKey 携带结构化 filters（#49 分页参数预留），URL 按键序拼 projectId/tag/q/sort', () => {
+    useConnections({ projectId: 'p1', tag: 'prod', q: 'web', sort: 'lastAccessed' }, 2, 50);
+
+    expect(captured).toMatchObject({
+      queryKey: ['connections', { projectId: 'p1', tag: 'prod', q: 'web', sort: 'lastAccessed' }, 2, 50],
+    });
+    (captured!.queryFn as () => unknown)();
+    expect(mockedGetRaw).toHaveBeenCalledWith('/connections?page=2&pageSize=50&projectId=p1&tag=prod&q=web&sort=lastAccessed');
+  });
+
+  it('useConnections：空 filters → URL 只带默认分页（undefined 不拼，与审计页同口径）', () => {
+    useConnections();
+
+    expect(captured).toMatchObject({ queryKey: ['connections', {}, 1, 100] });
+    (captured!.queryFn as () => unknown)();
+    expect(mockedGetRaw).toHaveBeenCalledWith('/connections?page=1&pageSize=100');
+  });
+
+  it('useConnectionStats：GET /projects/:id/connections/stats（api.get 剥壳），projectId 空停查', () => {
+    useConnectionStats('p1');
+
+    expect(captured).toMatchObject({ queryKey: ['connection-stats', 'p1'] });
+    (captured!.queryFn as () => unknown)();
+    expect(mockedGet).toHaveBeenCalledWith('/projects/p1/connections/stats');
+
+    useConnectionStats(null);
+    expect(captured).toMatchObject({ enabled: false });
+  });
+
+  it('useDeleteConnection：成功后 invalidate 连接列表与统计两族缓存（stats 随 CRUD 失效）', () => {
+    const invalidate = vi.fn();
+    (useQueryClient as ReturnType<typeof vi.fn>).mockReturnValueOnce({ invalidateQueries: invalidate } as never);
+    useDeleteConnection();
+
+    (mutationCaptured!.mutationFn as (d: unknown) => unknown)('c1');
+    expect(api.delete).toHaveBeenCalledWith('/connections/c1');
+
+    (mutationCaptured!.onSuccess as () => void)();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['connections'] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['connection-stats'] });
   });
 });
 

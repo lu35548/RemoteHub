@@ -1,15 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { UIProvider } from './components/UIComponents';
 import App from './App';
+import { useConnections, useConnectionStats } from './api/queries';
 
 // mock 可变状态（vi.hoisted 供 vi.mock 工厂在提升作用域引用）
 const state = vi.hoisted(() => ({
   connections: [] as Array<Record<string, unknown>>,
+  // 底表（全局无过滤全量）独立引用：mock 区分底表/展示两调用，「chips 聚合源=底表」才可锁（review 修复 2）
+  allConnections: undefined as Array<Record<string, unknown>> | undefined,
   onlineUsers: [] as Array<Record<string, unknown>>,
+  projects: [] as Array<Record<string, unknown>>,
+  stats: undefined as { protocols: Record<string, number>; tags: Record<string, number> } | undefined,
+  paginationTotal: undefined as number | undefined,
 }));
 const connMutations = vi.hoisted(() => ({
   createAsync: vi.fn(),
@@ -20,8 +26,16 @@ const connMutations = vi.hoisted(() => ({
 // mock 数据层：useMe 返回 admin，列表 hooks 返回扁平分页 body（真实运行时形状，T4 教训）
 vi.mock('./api/queries', () => ({
   useMe: vi.fn(() => ({ data: { id: 'u1', username: 'admin', nickname: '管理员', role: 'admin', isActive: true, lastActiveAt: null, createdAt: '2026-01-01' }, isPending: false, isError: false })),
-  useProjects: vi.fn(() => ({ data: { success: true as const, data: [], pagination: { page: 1, pageSize: 200, total: 0 } }, isPending: false })),
-  useConnections: vi.fn(() => ({ data: { success: true as const, data: state.connections, pagination: { page: 1, pageSize: 20, total: state.connections.length } }, isPending: false })),
+  useProjects: vi.fn(() => ({ data: { success: true as const, data: state.projects, pagination: { page: 1, pageSize: 200, total: state.projects.length } }, isPending: false })),
+  // 空 filters = 底表调用（返回独立底表数组）；带 q/tag/sort/projectId = 展示列表调用（过滤后列表）。
+  // 两引用分离——若 mock 对两调用返回同一引用，聚合源错误（用了过滤后列表）在测试下不可检出
+  useConnections: vi.fn((filters: Record<string, unknown> = {}) => {
+    const isBaseTable = !('q' in filters || 'tag' in filters || 'sort' in filters || 'projectId' in filters);
+    const data = isBaseTable ? (state.allConnections ?? state.connections) : state.connections;
+    return { data: { success: true as const, data, pagination: { page: 1, pageSize: 100, total: state.paginationTotal ?? data.length } }, isPending: false };
+  }),
+  // #42 项目连接统计（仅项目视图消费；全局视图 enabled false → data undefined）
+  useConnectionStats: vi.fn(() => ({ data: state.stats })),
   useCreateProject: vi.fn(() => ({ mutateAsync: vi.fn() })),
   useUpdateProject: vi.fn(() => ({ mutateAsync: vi.fn() })),
   useDeleteProject: vi.fn(() => ({ mutateAsync: vi.fn() })),
@@ -79,11 +93,11 @@ const vpnConn = {
   createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
 };
 
-const renderApp = () =>
+const renderApp = (initialEntry = '/') =>
   render(
     <UIProvider>
       <QueryClientProvider client={new QueryClient()}>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={[initialEntry]}>
           <App />
         </MemoryRouter>
       </QueryClientProvider>
@@ -94,7 +108,11 @@ const renderApp = () =>
 beforeEach(() => {
   vi.clearAllMocks();
   state.connections = [];
+  state.allConnections = undefined;
   state.onlineUsers = [];
+  state.projects = [];
+  state.stats = undefined;
+  state.paginationTotal = undefined;
 });
 
 describe('App 冒烟（T4）', () => {
@@ -178,5 +196,113 @@ describe('在线状态显示（T8）', () => {
     expect(screen.getByText('张')).toBeInTheDocument(); // 头像首字母（「管」与 Sidebar footer 头像重复，不单独断言）
     // 「{n} 人在线」横跨 span + 文本节点，按徽章容器整体 textContent 匹配
     expect(screen.getByText((_, el) => el?.classList.contains('rounded-full') === true && el.textContent === '2 人在线')).toBeInTheDocument();
+  });
+});
+
+// ── #42 工作台过滤栏 + URL 联动 ──
+// URL（q/tag/sort）是唯一真相源：进入还原 + 交互写入 + 防抖提交均以 mock 的
+// useConnections 调用参数为断言面（服务端过滤委托证明，客户端不再自行过滤）
+describe('工作台过滤栏与 URL 联动（#42）', () => {
+  const useConnectionsMock = useConnections as ReturnType<typeof vi.fn>;
+  const useConnectionStatsMock = useConnectionStats as ReturnType<typeof vi.fn>;
+
+  /** 展示列表调用 = filters 对象携带 q/tag/sort/projectId 任一键（底表调用是空对象 {}） */
+  const displayFilterCalls = () =>
+    useConnectionsMock.mock.calls
+      .map((c) => c[0] as Record<string, unknown> | undefined)
+      .filter((f) => !!f && ('q' in f || 'tag' in f || 'sort' in f || 'projectId' in f));
+  const lastDisplayFilters = () => displayFilterCalls()[displayFilterCalls().length - 1];
+
+  it('URL 携带 q/tag/sort 进入（刷新态还原）：filters 透传服务端 + 搜索框回显 + chip/排序态还原', () => {
+    state.connections = [hostConn];
+    renderApp('/?q=web&tag=生产环境&sort=lastAccessed');
+
+    expect(displayFilterCalls()[0]).toMatchObject({ tag: '生产环境', q: 'web', sort: 'lastAccessed' });
+    // 「搜索」会同时命中 Sidebar 项目搜索框（「搜索客户...」），收窄到连接搜索框专属前缀
+    expect(screen.getByPlaceholderText(/搜索名称/)).toHaveValue('web');
+    expect(screen.getByRole('button', { name: /#生产环境/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: '最近访问' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('全局视图 chips 从底表聚合；点击 chip → 服务端调用携带 tag，再点取消（单选切换）', async () => {
+    state.connections = [hostConn, vpnConn];
+    const events = userEvent.setup();
+    renderApp();
+
+    await events.click(screen.getByRole('button', { name: /#生产环境/ }));
+    expect(lastDisplayFilters()).toMatchObject({ tag: '生产环境' });
+
+    await events.click(screen.getByRole('button', { name: /#生产环境/ }));
+    expect(lastDisplayFilters()?.tag).toBeUndefined();
+  });
+
+  it('排序切换：最近访问 → sort=lastAccessed；切回最近更新 → 移除', async () => {
+    state.connections = [hostConn];
+    const events = userEvent.setup();
+    renderApp();
+
+    await events.click(screen.getByRole('button', { name: '最近访问' }));
+    expect(lastDisplayFilters()).toMatchObject({ sort: 'lastAccessed' });
+
+    await events.click(screen.getByRole('button', { name: '最近更新' }));
+    expect(lastDisplayFilters()?.sort).toBeUndefined();
+  });
+
+  it('搜索框 400ms 防抖：输入不即时提交，静默后 q 进服务端调用', async () => {
+    state.connections = [hostConn];
+    const events = userEvent.setup();
+    renderApp();
+
+    await events.type(screen.getByPlaceholderText(/搜索名称/), 'web');
+
+    // 防抖窗口内不提交（type 返回后同步断言，q 仍是 undefined）
+    expect(lastDisplayFilters()?.q).toBeUndefined();
+
+    await waitFor(() => {
+      expect(lastDisplayFilters()?.q).toBe('web');
+    }, { timeout: 3000 });
+  });
+
+  it('项目视图：display 调用叠加 projectId + 统计块消费 stats 端点；全局视图统计隐藏', async () => {
+    state.connections = [hostConn];
+    state.projects = [{ id: 'p1', name: '默认项目' }];
+    state.stats = { protocols: { RDP: 3, SSH: 1 }, tags: { 生产环境: 2 } };
+    const events = userEvent.setup();
+    renderApp();
+
+    expect(screen.queryByLabelText('协议分布')).not.toBeInTheDocument();
+
+    // 项目按钮 accessible name 以项目名开头（内嵌「项目操作 …」省略号按钮另算），锚定前缀避免双命中
+    await events.click(screen.getByRole('button', { name: /^默认项目/ }));
+    expect(lastDisplayFilters()).toMatchObject({ projectId: 'p1' });
+    expect(useConnectionStatsMock).toHaveBeenCalledWith('p1');
+    // 断言收进「协议分布」容器：RDP 徽章渲染中文「桌面远程」，与 RDP 卡片文案同词会双命中
+    expect(within(screen.getByLabelText('协议分布')).getByText('桌面远程')).toBeInTheDocument();
+  });
+
+  it('截断态：total 超单页上限 → 「已显示前 N 条，共 M 条」提示', () => {
+    state.connections = [hostConn];
+    state.paginationTotal = 150;
+    renderApp();
+
+    expect(screen.getByText(/已显示前 1 条，共 150 条/)).toBeInTheDocument();
+  });
+
+  it('过滤空态：URL q 生效 + 结果为空 → 「未找到匹配的资源」（区别于无资源空态）', () => {
+    state.connections = [];
+    renderApp('/?q=web');
+
+    expect(screen.getByText('未找到匹配的资源')).toBeInTheDocument();
+  });
+
+  it('全局 chips 聚合源 = 底表：展示列表被 q 过滤收缩后，候选集仍含底表全部 tag（review 修复 2）', () => {
+    // 展示列表（q=web 过滤后）只剩 hostConn；底表另含带「备份」tag 的 VPN 项
+    state.connections = [hostConn];
+    state.allConnections = [hostConn, { ...vpnConn, tags: '备份' }];
+    renderApp('/?q=web');
+
+    // 候选集来自底表：「生产环境」（hostConn）与「备份」（仅底表有）都在
+    expect(screen.getByRole('button', { name: /#生产环境/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /#备份/ })).toBeInTheDocument();
   });
 });

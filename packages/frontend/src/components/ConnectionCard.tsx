@@ -396,10 +396,15 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({ connection, vpnDependen
           )}
         </button>
 
-        {/* 审计脚注 */}
+        {/* 审计脚注（#42：增 lastAccessed 相对时间，null 显「未访问」占位） */}
         <div className="mt-4 pt-3 border-t border-white/5 flex items-center justify-between text-[10px] text-slate-500 font-medium">
           <div className="flex items-center gap-1.5"><UserIcon size={12} className="opacity-70" /> {connection.updatedBy.nickname}</div>
-          <div className="flex items-center gap-1.5"><Clock size={12} className="opacity-70" /> {getRelativeTime(connection.updatedAt)}</div>
+          <div className="flex items-center gap-1.5" title={connection.lastAccessed ? '上次访问 · 上次更新' : '上次更新'}>
+            <Clock size={12} className="opacity-70" />
+            <span>{connection.lastAccessed ? `访问 ${getRelativeTime(connection.lastAccessed)}` : '未访问'}</span>
+            <span className="opacity-40">·</span>
+            <span>{`更新 ${getRelativeTime(connection.updatedAt)}`}</span>
+          </div>
         </div>
       </div>
     </div>

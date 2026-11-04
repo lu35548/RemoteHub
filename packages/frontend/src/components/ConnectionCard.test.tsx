@@ -124,6 +124,35 @@ describe('ConnectionCard（T5）', () => {
   });
 });
 
+describe('ConnectionCard lastAccessed 脚注（#42）', () => {
+  beforeEach(() => {
+    decryptMock.mockReset();
+    decryptMock.mockResolvedValue({ password: 'S3cret!' });
+  });
+
+  it('lastAccessed 有值 → 脚注含「访问 <相对时间>」与「更新 <相对时间>」', () => {
+    const now = Date.now();
+    renderCard({
+      connection: hostItem({
+        lastAccessed: new Date(now - 3 * 3600_000).toISOString(),
+        updatedAt: new Date(now - 5 * 24 * 3600_000).toISOString(),
+      }),
+    });
+
+    expect(screen.getByText(/访问 3小时前/)).toBeInTheDocument();
+    expect(screen.getByText(/更新 5天前/)).toBeInTheDocument();
+  });
+
+  it('lastAccessed 为 null → 「未访问」中文占位（更新时间仍展示）', () => {
+    renderCard({
+      connection: hostItem({ lastAccessed: null, updatedAt: new Date(Date.now() - 2 * 3600_000).toISOString() }),
+    });
+
+    expect(screen.getByText(/未访问/)).toBeInTheDocument();
+    expect(screen.getByText(/更新 2小时前/)).toBeInTheDocument();
+  });
+});
+
 describe('ConnectionCard 动作系统（T6）', () => {
   beforeEach(() => {
     decryptMock.mockReset();
