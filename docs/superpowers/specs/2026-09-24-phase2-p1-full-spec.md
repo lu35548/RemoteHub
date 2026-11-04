@@ -97,6 +97,8 @@ P0 交付审计/监控/安全三模块后，系统仍存三类缺口：
 
 > **[2026-11-04 实装订正 #38 review]** 下载端点防遍历实装形态：白名单正则 + `path.resolve` 前缀校验 + **绝对路径 `res.download`（不带 root 选项）**。libcheck-backup.md §4 曾荐「root 选项防遍历」——实测绝对路径 + root 组合会被 send 库把绝对路径当相对路径与 root 再拼接，产出坏路径恒 500；root 仅适用于相对路径场景，绝对路径场景必须省略。原文见 research/2026-09-24-p1-libcheck-backup.md §4（已同步加订正标注）。
 
+> **[2026-11-04 元数据口径裁决（用户拍板）]** 备份元数据采「**文件即真相**」：大小/时间走列表端点（filename/sizeBytes/createdAt，stat 实时读）；时长走 POST 触发响应 `durationMs` 与 BACKUP_COMPLETED 通知 payload；状态走通知+审计双通道（成功 BACKUP_COMPLETED / 失败 BACKUP_FAILED，cron 失败亦有通知），**不落 manifest、列表端点无状态字段**。W2-6「备份元数据（大小/时长/状态）」按此口径理解；#39 备份前端页按「列表第一行 + 通知历史」消费。retention 删文件后无第二真相源同步负担。
+
 ### W3 协作与金矿
 
 **7. members 管理 UI**（后端零改动——4 端点 + 4 hooks 已备）

@@ -19,7 +19,7 @@
 - [x] **#40 真机四操作验收**（2026-11-04 implementer 挂）——✅ 同日 lead 真机双用户全过（添加/改角色/移除/自离 + viewer 三层遮蔽 + onLeft 缓存失效双实证），证据贴 #40 关票评论。
 - [ ] **mfa 二段流审计口径**（批 2 #30 review + 未决①）：mfa/verify 成功/失败零审计（2FA 爆破不可见）；mfaPending 第一段被记 AUTH_LOGIN success 但无 session 建立语义失真。修复需新增审计 action 枚举（跨 shared AUDIT_ACTIONS + 前端 #23 标签映射）+ 恢复码使用事件可见性（OWASP 建议），属契约变更交用户裁决。
 - [x] **WS 协议 shared 常量化收口**（批 4 遗留）——✅ 批 5 开工前 lead 收口（commit `740ff88`）：契约迁 shared `wsProtocol.ts`，前端 re-export 门面，backend sendTo 系列 WsServerMessage 类型锚定（当场抓 3 处测试小写枚举脑补）。
-- [ ] **备份元数据「时长/状态」口径**（批 5 R2 minor-1，需用户裁决）：现状 = 大小/时间走列表（文件即真相），时长走触发响应，状态走通知+审计（列表端点无字段）。推荐：接受该口径并回写 spec W2-6（retention 删文件后 manifest 同步是持续负担）；备选：列表端点补「最近一次结果」聚合字段（从 NotificationQueue 最近 BACKUP_* 行推导）。
+- [x] **备份元数据「时长/状态」口径**（批 5 R2 minor-1）——✅ 用户拍板「文件即真相」（2026-11-04）：大小/时间走列表，时长走触发响应+通知 payload，状态走通知+审计，不落 manifest；已回写 spec W2-6（元数据口径裁决 blockquote），#39 备份前端按「列表第一行 + 通知历史」消费。
 
 ---
 
