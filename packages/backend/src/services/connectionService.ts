@@ -169,7 +169,8 @@ export async function createConnection(userId: string, data: ConnectionCreateDat
     await validateVpnDependency(data.requiredVpnId, data.projectId);
   }
 
-  // 构建创建数据（#45：port 缺省填 registry 默认——SSH 22 / HTTPS 443 / RDP 3389 等；显式 null = 明确留空不填）
+  // 构建创建数据（#45：port 缺省填 registry 默认——SSH 22 / HTTPS 443 / RDP 3389 等；
+  // null/undefined 统一视为缺省填充，spec W3-11 钦定口径，测试锚定）
   const createData: Prisma.ConnectionUncheckedCreateInput = {
     projectId: data.projectId,
     name: data.name,
@@ -220,15 +221,7 @@ export async function getConnection(connectionId: string, userId: string, userGl
   }
 
   // C5: lastAccessed 节流更新
-  const now = Date.now();
-  const lastUpdate = lastAccessedUpdates.get(connectionId);
-  if (!lastUpdate || now - lastUpdate > LAST_ACCESSED_THROTTLE_MS) {
-    lastAccessedUpdates.set(connectionId, now);
-    prisma.connection.update({
-      where: { id: connectionId },
-      data: { lastAccessed: new Date() },
-    }).catch(() => {}); // fire-and-forget
-  }
+  touchLastAccessed(connectionId);
 
   const userMap = await resolveUserRefs([connection.createdBy, connection.updatedBy]);
   return toDetail(connection, includeEncryptedPass, userMap);
@@ -273,6 +266,16 @@ export async function updateConnection(userId: string, connectionId: string, dat
   });
   if (registryErrors.length > 0) {
     throw createAppError('VAL_001', registryErrors);
+  }
+
+  // #45 review 修复 4：显式切到 port:none 协议（设备码四协议/VNC）时强制清 port——设备码协议
+  // port 无意义，清脏数据；限定「显式传 protocol」才触发（局部更新不动 client 未触碰的字段，
+  // 存量行改 notes 不因此被写 port）。有 port 协议间切换（SSH→RDP 等）的残留维持 OQ1 交用户。
+  if (updatePayload.protocol !== undefined) {
+    const targetEntry = getProtocolRegistryEntry(merged.protocol);
+    if (targetEntry?.fields.port === 'none') {
+      updatePayload.port = null;
+    }
   }
 
   // VPN 一致性检查
@@ -403,15 +406,7 @@ export async function decryptPassword(connectionId: string) {
   if (!connection) throw createAppError('CONN_002');
 
   // C5: lastAccessed 节流更新
-  const now = Date.now();
-  const lastUpdate = lastAccessedUpdates.get(connectionId);
-  if (!lastUpdate || now - lastUpdate > LAST_ACCESSED_THROTTLE_MS) {
-    lastAccessedUpdates.set(connectionId, now);
-    prisma.connection.update({
-      where: { id: connectionId },
-      data: { lastAccessed: new Date() },
-    }).catch(() => {}); // fire-and-forget
-  }
+  touchLastAccessed(connectionId);
 
   if (!connection.encryptedPass) {
     return { password: '' };

@@ -1212,6 +1212,7 @@ CONN_002  连接不存在                → 404 Not Found
 CONN_003  VPN 依赖循环              → 400 Bad Request
 CONN_004  VPN 仍被其他连接依赖       → 409 Conflict
 CONN_005  同项目内连接名称已存在       → 409 Conflict
+CONN_006  该协议不支持直连            → 400 Bad Request  # #45 协议注册表：launch 分派 unsupported（如 VNC）
 PROJ_001  项目名称冲突              → 409 Conflict
 PROJ_002  项目不存在                → 404 Not Found
 MEMBER_001 成员已存在于项目中        → 409 Conflict

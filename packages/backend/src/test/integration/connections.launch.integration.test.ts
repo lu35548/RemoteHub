@@ -81,6 +81,7 @@ describe('GET /api/v1/connections/:id/launch — RDP .rdp 文件流', () => {
     expect(disposition).toContain('attachment');
     // RFC 5987：filename* UTF-8 编码中文名；filename ASCII 兜底（中文名降级 connection-<id>.rdp）
     expect(disposition).toContain(`filename*=UTF-8''${encodeURIComponent('中文跳板机.rdp')}`);
+    expect(disposition).toContain(`filename="connection-${id}.rdp"`); // review 修复 6：非 ASCII 名 ASCII 兜底分支
     // 字节级：BOM FF FE + UTF-16 LE 回读 full address
     const body = res.body as Buffer;
     expect(body[0]).toBe(0xff);
@@ -268,5 +269,29 @@ describe('launch 审计', () => {
     });
     expect(accessLogs.length).toBeGreaterThan(0);
     expect(accessLogs.some((l) => l.userId === adminId)).toBe(true);
+  });
+
+  it('RDP launch（res.send 文件流路径）→ CONNECTION_ACCESS 审计行存在（review 修复 1 回归锚：审计须覆盖 Buffer 直发）', async () => {
+    const created = await apiCreate(b.adminToken, {
+      name: '审计RDP机', host: 'audit-rdp.example.com', port: 3389, username: 'admin', protocol: 'RDP',
+    });
+    const id = created.body.data.id as string;
+    const res = await request(b.app)
+      .get(`/api/v1/connections/${id}/launch`)
+      .set('Authorization', `Bearer ${b.adminToken}`)
+      .parse((stream, cb) => {
+        const chunks: Buffer[] = [];
+        stream.on('data', (c: Buffer) => chunks.push(c));
+        stream.on('end', () => cb(null, Buffer.concat(chunks)));
+      });
+    expect(res.status).toBe(200);
+    expect((res.body as Buffer).length).toBeGreaterThan(0);
+
+    // resourceId 精确过滤该连接自己的 CONNECTION_ACCESS 行
+    const logs = await b.prisma.auditLog.findMany({
+      where: { action: 'CONNECTION_ACCESS', resource: 'connection', resourceId: id },
+    });
+    expect(logs.length).toBeGreaterThan(0);
+    expect(logs[0]!.result).toBe('success');
   });
 });

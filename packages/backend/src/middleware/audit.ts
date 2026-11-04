@@ -129,12 +129,28 @@ export function auditMiddleware(config: AuditConfig): RequestHandler {
       }
     }
 
-    // res.json patch：捕获响应体 → setImmediate 异步落库 → 透传原调用
+    // res.json + res.send 双 patch（#45 review 修复 1）：Buffer 响应（res.send 直发，如 .rdp 文件流）
+    // 不经 res.json——审计须覆盖；幂等标记防双写（res.json 内部透传 res.send 会二次触发，
+    // 先触发的一方记账后标记，另一方直通）。send 直发形态（Buffer/CSV）无 JSON envelope 可提取，
+    // body 传 undefined → envelope 空（result 由 statusCode 判定不受影响）。
+    let auditWritten = false;
+    const writeOnce = (body: unknown) => {
+      if (auditWritten) return;
+      auditWritten = true;
+      writeAuditLog(config, req, res, before, body);
+    };
+
     const originalJson = res.json;
     res.json = ((body?: unknown) => {
-      writeAuditLog(config, req, res, before, body);
+      writeOnce(body);
       return (originalJson as (b?: unknown) => unknown).call(res, body);
     }) as typeof res.json;
+
+    const originalSend = res.send;
+    res.send = ((body?: unknown) => {
+      writeOnce(typeof body === 'object' && body !== null && !Buffer.isBuffer(body) ? body : undefined);
+      return (originalSend as (b?: unknown) => Response).call(res, body);
+    }) as typeof res.send;
 
     next();
   };

@@ -1042,9 +1042,20 @@ describe('#45 updateConnection - registry 宽松兼容（存量数据零破坏 A
     );
   });
 
-  it('SSH→TODESK 切协议但不传 port → 通过（宽松：client 未传 port 不校验；存量 port 残留无害，OQ 挂报告）', async () => {
+  it('SSH→TODESK 切协议但不传 port → 通过且强制清 port（review 修复 4：port:none 目标协议清脏数据）', async () => {
     setupFindUnique({ ...mockConnection, protocol: 'SSH', port: 22 });
     await expect(updateConnection('user-1', 'conn-1', { protocol: 'TODESK' })).resolves.toBeTruthy();
+    expect(prisma.connection.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ port: null, protocol: 'TODESK' }) }),
+    );
+  });
+
+  it('TODESK 存量行改 notes（protocol 未传）→ 不触发 port 强制清（局部更新不动未触碰字段）', async () => {
+    setupFindUnique({ ...mockConnection, protocol: 'TODESK', port: null });
+    await updateConnection('user-1', 'conn-1', { notes: 'x' });
+    expect(prisma.connection.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.not.objectContaining({ port: expect.anything() }) }),
+    );
   });
 
   it('SSH→TODESK 切协议同时传 port → VAL_001（合并后协议无端口概念）', async () => {
