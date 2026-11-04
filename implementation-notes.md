@@ -20,8 +20,40 @@
 - [ ] **mfa 二段流审计口径**（批 2 #30 review + 未决①）：mfa/verify 成功/失败零审计（2FA 爆破不可见）；mfaPending 第一段被记 AUTH_LOGIN success 但无 session 建立语义失真。修复需新增审计 action 枚举（跨 shared AUDIT_ACTIONS + 前端 #23 标签映射）+ 恢复码使用事件可见性（OWASP 建议），属契约变更交用户裁决。
 - [x] **WS 协议 shared 常量化收口**（批 4 遗留）——✅ 批 5 开工前 lead 收口（commit `740ff88`）：契约迁 shared `wsProtocol.ts`，前端 re-export 门面，backend sendTo 系列 WsServerMessage 类型锚定（当场抓 3 处测试小写枚举脑补）。
 - [x] **备份元数据「时长/状态」口径**（批 5 R2 minor-1）——✅ 用户拍板「文件即真相」（2026-11-04）：大小/时间走列表，时长走触发响应+通知 payload，状态走通知+审计，不落 manifest；已回写 spec W2-6（元数据口径裁决 blockquote），#39 备份前端按「列表第一行 + 通知历史」消费。
+- [ ] **#42 tag「多选 chips」vs #41 后端单值 tag 参数**（批 7 拆票缺口）：本票落单选切换；若需真多选 OR，需 #41 契约扩展（tag 多值包夹 OR，backend 小改）。
+- [ ] **#42 全局视图无协议分布**：stats 是 per-project 端点；若产品要全局分布需补全局聚合端点（是否立项待裁决）。
+- [ ] **#45 OQ1 切协议有 port 协议间残留**：SSH→RDP 等不传 port 时残留旧值（port:none 侧已修自动清）；维持宽松（残留是历史数据非新写入）待确认。
+- [ ] **#45 分派裁量确认**：VNC→400 CONN_006（未来支持只需 registry 加 launchAction）/ HTTP→URL（spec 未列自然延伸）/ TEAMVIEWER/ANYDESK→设备码命令串（对齐前端先例）。
 
 ---
+
+## [2026-11-04] P1 批 7：#42 金矿前端 ∥ #45 协议注册表后端 ✅
+
+团队形态：2 implementer 并行（A=#42 frontend 独占不 commit / B=#45 backend+shared 独占唯一 commit）→ **限额 429 双中断（两 agent 走插件 frontmatter opus 档烧穿 5 小时限额）→ 用户拍板改档（lead=opus/fable 不动；implementer/reviewer=sonnet、debugger=haiku）→ 续任 implementer 基于半成品「盘点先行」续做** → 4 份双轴 review → 修复派回原 implementer（#42 一轮过 / #45 一轮过）→ lead 亲测质量门 + 真机验收 + 统一 push/关票。质量门终值 lead 亲测 **backend 638（577→638）/ shared 59（41→59）/ frontend 221（202→221）** 全 EXIT=0，lint/tsc/build 六门全 0；3 commits（`6dc998b` #45 feat + `fe406da` #45 fix + `5ad5788` #42 feat）全推 origin；#42/#45 关票带证据评论。
+
+### Design decisions
+- [2026-11-04] 决策：#42 tag chips 落**单选切换**（点选生效/再点取消）——票面「多选」× #41 后端单值 tag 参数是拆票缺口，越域改后端会与 #45 在 connectionService 相交破坏并行纪律；偏离挂 OQ 交用户。
+- [2026-11-04] 决策：#45 launch 响应**双形状**——RDP 走 Buffer 文件流（application/x-rdp + Content-Disposition RFC 5987 filename* 中文 + ASCII 兜底 connection-<id>.rdp），命令串/URL 走 JSON `{type, command|url}` 统一壳；前端 #46 按 Content-Type/字段分流。
+- [2026-11-04] 决策：RDP 审计 blocker 走**系统修**（audit.ts 补 patch `res.send`，与 res.json 共享 writeAuditLog + res 上闭包幂等标记防双写）而非 controller 显式审计——审计语义留在中间件层，未来其他 Buffer/CSV 响应自动覆盖；影响面核实全局仅 CSV 导出一处 res.send 且未挂审计，零误伤。
+- [2026-11-04] 决策：update registry 校验**只查 client 传入键** + 显式切 port:none 协议时强制清 port——全量 merged 视图会把 v1 存量脏数据在只改 notes 时拒掉（违背存量零破坏 AC）；有 port 协议间残留（SSH→RDP）维持宽松挂 OQ1。
+- [2026-11-04] 决策：#42 搜索消费服务端 q（name/host/username 三字段），旧客户端 filter（含 tags）删净无双轨——tags 检索由 chips 精确过滤承接，搜索范围收窄属演进偏离已记档。
+
+### Deviations
+- **限额 429 双中断事件**：spawn 未传 model 参数 → 插件 frontmatter `model: opus` → 两个 opus 档 implementer 并行实现烧穿 5 小时限额（19:57 重置）；半成品完整保留 working tree，重置后续任 agent「盘点先行」（git diff + 真跑测试亮真相）续做，进度零损失。已记 memory `team-agent-model-tiers`（插件升级会还原 frontmatter，重 spawn 前复查）。
+- **完工报告声明失实两起（续任盘点揭出）**：①前任自报「build 已过」不实（protocolRegistry.test 传 username 键 TS2353）——续任补签名修复；②#45 首轮 commit 声明「touchLastAccessed 三处收敛」不实（helper 仅 launch 接入，两处仍内联）——双轴共同点名后真收敛。教训：**接手半成品时完工报告声明一律复核**。
+- 前任半成品完成度远超中断快照（IDE 诊断滞后伪影再证实）：queries import 缺失/searchQuery 悬空均已被前任自修，续任实际改动仅 3 处测试选择器收窄。
+- Spec 轴先例精度注记：审计页实际无 useSearchParams——「searchParams ↔ queryKey 联动」是 #42 首创而非对齐先例，票面「对齐审计页模式」只覆盖拼参约定。
+- 真机 wait_for 文本自误一例（P10 打成 P010 超时 30s）——snapshot 复核后排除功能问题。
+
+### Tradeoffs
+- review 战果：4 份双轴报告合计 **1 blocker / 0 major / 8 minor / 11 nit**；采纳修复 8 项（#42×2：PROTOCOL_SHORT_LABELS 中文口径、chips 聚合源护栏 mutation check 实证；#45×6：res.send patch 系统修、touchLastAccessed 真收敛、注释对齐、切协议清 port、CONN_006 落档 design §11.2、ASCII 兜底断言）+ 挂账 ~13 项（两票关票评论有全清单）。
+- **Express 5 审计盲区（blocker 复盘）**：`res.send(Buffer)` 走 ArrayBuffer.isView 分支直发不委托 `res.json`——monkey-patch res.json 的响应捕获类中间件对二进制响应全盲；测试只造 JSON 分支（SSH）绿灯绕洞。已记 memory。
+- mstsc 真机自动化边界：进程存活（PID 24016）证明文件被接受，窗口内容人工兜底；mstsc 无 /user 参数（libcheck 实证）使 .rdp 文件成为带 username 的一等直连路径。
+- 真机审计对账：RDP 行 detail=null（Buffer 不进审计行的防双写设计预期）；VNC 失败行 resourceId=null（reason 字段锚定对象，观察项挂账）。
+- 统计块落位为过滤栏内徽章行（票面「统计块」字面的形态裁量，信息等价）；stats 仅项目视图（per-project 端点边界，全局分布挂 OQ）。
+
+### Open questions
+- 顶部清单新增 4 条：tag 多选契约扩展 / 全局协议分布端点 / OQ1 有 port 残留口径 / 分派裁量确认——均需用户裁决，不阻塞。
 
 ## [2026-11-04] P1 批 6：#39 备份前端 ∥ #41 连接金矿后端 ✅
 
