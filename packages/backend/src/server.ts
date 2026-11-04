@@ -10,6 +10,7 @@ import { AppError, createAppError } from './utils/appError.js';
 import { startSessionCleaner } from './utils/sessionCleaner.js';
 import { startAuditCleaner } from './utils/auditCleaner.js';
 import { startNotificationCleaner } from './utils/notificationCleaner.js';
+import { startBackupScheduler } from './utils/backupService.js';
 import { checkIpRisk, RATE_LIMIT_SKIP_PATHS } from './utils/ipMonitor.js';
 import { sanitizationMiddleware } from './middleware/sanitization.js';
 import { performanceMonitorMiddleware } from './middleware/performanceMonitor.js';
@@ -127,6 +128,7 @@ import { connectionRoutes } from './routes/connectionRoutes.js';
 import { auditRoutes } from './routes/auditRoutes.js';
 import { monitoringRoutes } from './routes/monitoringRoutes.js';
 import { notificationRoutes } from './routes/notificationRoutes.js';
+import { backupRoutes } from './routes/backupRoutes.js';
 
 // K8s 探针（票 #33）：挂 app 根（K8s 惯例路径 /healthz /readyz，无 /api/v1 前缀）。
 // 探针路径已入 RATE_LIMIT_SKIP_PATHS 白名单：ipMonitor 根挂载处计数豁免 + generalLimiter skip 同源；
@@ -140,6 +142,7 @@ app.use('/api/v1/projects/:id/members', memberRoutes);
 app.use('/api/v1/connections', connectionRoutes);
 app.use('/api/v1/audit-logs', auditRoutes);
 app.use('/api/v1/admin', monitoringRoutes);
+app.use('/api/v1/admin/backups', backupRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
 
 // ─── 404 ───
@@ -205,6 +208,9 @@ async function bootstrap() {
 
   // 4.5 通知已读清理（#35，每日 04:00 错峰，仅定时——不启动即清）
   startNotificationCleaner();
+
+  // 4.6 数据备份（#38，每日 02:00 与 03:00/03:30/04:00 错峰，仅定时——不启动即备）
+  startBackupScheduler();
 
   // 5. WS 管道（#34：upgrade 鉴权/房间/心跳；noServer 独占 upgrade 监听器）
   initWsServer(server);

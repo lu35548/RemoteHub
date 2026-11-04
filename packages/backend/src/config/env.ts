@@ -35,6 +35,11 @@ export const env = {
   RATE_LIMIT_MFA_VERIFY_MAX: Math.max(1, parseInt(process.env.RATE_LIMIT_MFA_VERIFY_MAX || '5', 10)),
   // 已读通知保留期（票 #35，design §8.6 写死 7d；env 化照 AUDIT_RETENTION_DAYS 下界保护同款）
   NOTIFICATION_READ_RETENTION_DAYS: Math.max(1, parseInt(process.env.NOTIFICATION_READ_RETENTION_DAYS || '7', 10)),
+  // 备份目录（票 #38）：相对路径锚定 backend 根（resolveBackupDir，不随 CWD 漂移）；
+  // compose 显式设 /data/backups（backup-data 独立卷）
+  BACKUP_DIR: process.env.BACKUP_DIR || './backups',
+  // 下界 1：0/负保留数会让 retention 删光全部备份（AUDIT_RETENTION_DAYS 同款下界保护）
+  BACKUP_RETENTION_COUNT: Math.max(1, parseInt(process.env.BACKUP_RETENTION_COUNT || '30', 10)),
 } as const;
 
 // 密钥格式校验（fail-fast，启动时即暴露配置错误，避免运行时才报 ERR_CRYPTO_INVALID_KEYLEN）

@@ -25,8 +25,11 @@ services:
     env_file: .env
     environment:
       - DATABASE_URL=file:/data/prod.db
+      # 备份目录指向独立卷（#38：与 sqlite-data 生命周期解耦——删库卷不连带备份）
+      - BACKUP_DIR=/data/backups
     volumes:
       - sqlite-data:/data
+      - backup-data:/data/backups
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3001/api/v1/health').then(r => r.ok ? process.exit(0) : process.exit(1))"]
       interval: 30s
@@ -36,3 +39,4 @@ services:
 
 volumes:
   sqlite-data:
+  backup-data:

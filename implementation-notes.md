@@ -930,3 +930,24 @@ D1–D10 全部拍板；剩余见顶部「待办」。
 - Plan B Step5 `git push` 触发 CI（待用户在有远端的仓库执行）。
 - Plan A Task8 docker build/load 验证（本环境无 Docker 守护进程）—— D7 plan 验证项未实际执行。
 - D7 终验依赖 docker build。
+
+## [2026-11-04] #38 备份后端（W2-6）：VACUUM INTO + cron 02:00 + 手动触发 + retention + compose 卷
+
+### Design decisions
+- 单文件 `utils/backupService.ts`（createBackup/listBackups/applyRetention/startBackupScheduler 同文件）——与三 cleaner（session/audit/notification）同族先例；controller 消费 utils 无障碍（ipMonitor 先例）。
+- 源库路径推导强制过 `resolveSqliteUrl`（防「备到空库」）+ 备份前 fail-fast 存在性校验；备份目录相对路径锚定 backend 根（参照 SCHEMA_DIR 模式）。
+- 通知在 service 层接线（非 libcheck 建议的「调用侧」）：两入口（cron/手动）DRY，「备份结果必通知」是不变量；emit 失败只记日志不传播。
+- 下载三重防线：白名单正则（先于 fs）→ path.resolve+startsWith 前缀校验 → 绝对路径 res.download。
+- retention 挂在每次备份成功后顺带执行（非独立 cron），顺带清 *.tmp 中断残留。
+
+### Deviations
+- **不落 backup_manifest.json（design §7.4 偏离）**：文件即真相（文件名时间戳 + stat），失败记录走通知+审计双通道；manifest 会引入与实际文件不一致的第二真相源。
+- **cron 触发的备份不落 SYSTEM_BACKUP 审计**（无 req 语境，auditMiddleware 不可用；通知+logger 已是记录通道）；手动触发挂审计（reset-link 先例）。
+- res.download 不带 `{root}` 选项（libcheck §4 「root 双保险」建议的反向修正）：send 库对 root 内路径做 join 拼接，**绝对路径+root 组合拼出坏路径**（实测 500 Forbidden/ENOENT）；绝对路径场景 root 应省略。
+
+### Tradeoffs
+- 同秒双触发 = 同名覆盖（秒级时间戳文件名）：不引入毫秒/序号后缀（白名单契约 `backup-YYYYMMDD-HHmmss.db` 是下载防线一部分）；并发竞争失败者有 BACKUP_FAILED 通知兜底。
+- 备份产物验证用 PrismaBetterSQLite3 只读打开（测试侧），不新增 better-sqlite3 直接依赖（pnpm 严格隔离下 import 传递依赖不可靠）。
+
+### Open questions
+- 备份**下载**动作是否需要专属审计 action（如 BACKUP_DOWNLOAD，需扩 shared AUDIT_ACTIONS）——数据外带属敏感操作，票面未要求，挂账后续票。

@@ -50,6 +50,11 @@ export const ERROR_CODES: Record<string, number> = {
   // 通知（票 #35）：NOTIF_001 资源缺失 404；NOTIF_002 是越权门禁（非本人通知不可读）403
   NOTIF_001: 404,
   NOTIF_002: 403,
+  // 备份（票 #38）：BACKUP_001 文件名不在白名单（下载防遍历第一道防线）400；
+  // BACKUP_002 备份文件不存在 404；BACKUP_003 手动触发执行失败 500
+  BACKUP_001: 400,
+  BACKUP_002: 404,
+  BACKUP_003: 500,
 };
 
 export const ERROR_MESSAGES: Record<string, string> = {
@@ -85,6 +90,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
   // 通知（票 #35）
   NOTIF_001: '通知不存在',
   NOTIF_002: '无权操作他人通知',
+  // 备份（票 #38）
+  BACKUP_001: '备份文件名非法',
+  BACKUP_002: '备份文件不存在',
+  BACKUP_003: '备份执行失败',
 };
 
 export function createAppError(code: string, details?: Array<{ field: string; message: string }>): AppError {
