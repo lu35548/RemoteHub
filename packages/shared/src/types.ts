@@ -279,6 +279,26 @@ export interface ConnectionStats {
   tags: Record<string, number>;
 }
 
+// ─── 协议注册表直连（票 #45 后端 launch 分派，#46 前端消费）───
+
+/** GET /connections/:id/launch 的 JSON 响应 data：命令串形态（SSH / 设备码协议）。
+ * 设备码协议的 command 即设备码本身（host 列复用存设备 ID）；验证码不入本响应
+ * （密码域，走 decrypt-password 独立通道）。 */
+export interface LaunchCommandResponse {
+  type: 'command';
+  command: string;
+}
+
+/** GET /connections/:id/launch 的 JSON 响应 data：URL 形态（VPN/HTTP/HTTPS）。
+ * VPN 取 vpnLoginUrl（无 scheme 时补 https://），缺省回退 https://host[:port]。 */
+export interface LaunchUrlResponse {
+  type: 'url';
+  url: string;
+}
+
+/** launch JSON 两形态联合（RDP 为 .rdp 文件流，不在此类型内——响应无统一壳） */
+export type LaunchJsonResponse = LaunchCommandResponse | LaunchUrlResponse;
+
 export interface AuditLogDetail {
   before?: Record<string, unknown>;
   after?: Record<string, unknown>;

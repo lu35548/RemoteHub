@@ -52,6 +52,7 @@ import {
   listConnections,
   getConnection,
   getConnectionStats,
+  launchConnection,
 } from './connectionService.js';
 import { emitToProjectMembers } from './notificationService.js';
 
@@ -900,5 +901,307 @@ describe('getConnection - B-4 encryptedPass 权限', () => {
   it('连接不存在抛 CONN_002', async () => {
     (prisma.connection.findUnique as MockFn).mockResolvedValue(null);
     await expect(getConnection('nope', 'u1', 'user')).rejects.toMatchObject({ code: 'CONN_002' });
+  });
+});
+
+// ────────────────────────────────────────────────
+// #45 协议注册表：create 默认端口填充 + port:none 拒绝
+// ────────────────────────────────────────────────
+
+describe('#45 createConnection - registry 默认端口填充', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (prisma.user.findMany as MockFn).mockResolvedValue([]);
+    // create mock 回显入参 data——默认端口填充经 create 收到的 data 断言（写入侧真相）
+    (prisma.connection.create as MockFn).mockImplementation(({ data }: any) =>
+      Promise.resolve({ ...mockConnection, ...data }),
+    );
+  });
+
+  it.each([
+    ['SSH', 22],
+    ['HTTPS', 443],
+    ['RDP', 3389],
+    ['HTTP', 80],
+    ['VNC', 5900],
+  ] as const)('protocol=%s 不传 port → 填 registry 默认 %i（lead 预裁决 #4：填充只在 create 写入侧）', async (protocol, port) => {
+    await createConnection('user-1', {
+      projectId: 'proj-1', name: `c-${protocol}`, host: 'h.example.com', protocol,
+    });
+    expect(prisma.connection.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ port }) }),
+    );
+  });
+
+  it.each([
+    ['VPN'], ['TODESK'], ['SUNLOGIN'], ['TEAMVIEWER'], ['ANYDESK'],
+  ] as const)('protocol=%s 不传 port → 保持 null（registry 无默认）', async (protocol) => {
+    await createConnection('user-1', {
+      projectId: 'proj-1', name: `c-${protocol}`, host: '123456789', protocol,
+      ...(protocol === 'VPN' ? { vpnType: 'OPENVPN' } : {}), // 既有 VPN 一致性链：VPN 必须 vpnType
+    });
+    expect(prisma.connection.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ port: null }) }),
+    );
+  });
+
+  it('显式传 port → 不被默认值覆盖（SSH 传 2222 落库 2222）', async () => {
+    await createConnection('user-1', {
+      projectId: 'proj-1', name: 'c', host: 'h.example.com', protocol: 'SSH', port: 2222,
+    });
+    expect(prisma.connection.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ port: 2222 }) }),
+    );
+  });
+
+  it('显式传 port=null → 同样填默认（票面钦定缺省语义：null/undefined 统一视为缺省填充，spec W3-11）', async () => {
+    await createConnection('user-1', {
+      projectId: 'proj-1', name: 'c', host: 'h.example.com', protocol: 'SSH', port: null,
+    });
+    expect(prisma.connection.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ port: 22 }) }),
+    );
+  });
+});
+
+describe('#45 createConnection - registry port:none 拒绝（每协议一反）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (prisma.user.findMany as MockFn).mockResolvedValue([]);
+  });
+
+  it.each([
+    ['TODESK'], ['SUNLOGIN'], ['TEAMVIEWER'], ['ANYDESK'],
+  ] as const)('protocol=%s 传非 null port → VAL_001（field=port，协议无端口概念）', async (protocol) => {
+    await expect(createConnection('user-1', {
+      projectId: 'proj-1', name: 'c', host: '123456789', protocol, port: 3389,
+    })).rejects.toMatchObject({
+      code: 'VAL_001',
+      details: expect.arrayContaining([expect.objectContaining({ field: 'port' })]),
+    });
+    expect(prisma.connection.create).not.toHaveBeenCalled();
+  });
+
+  it('TODESK 传 port=null → 通过（显式留空合规）', async () => {
+    (prisma.connection.create as MockFn).mockImplementation(({ data }: any) =>
+      Promise.resolve({ ...mockConnection, ...data }),
+    );
+    await expect(createConnection('user-1', {
+      projectId: 'proj-1', name: 'c', host: '123456789', protocol: 'TODESK', port: null,
+    })).resolves.toBeTruthy();
+  });
+
+  it('设备码协议 host 空 → validateHost 通用校验先行拦截（防御层关系：registry host 校验为冗余兜底）', async () => {
+    await expect(createConnection('user-1', {
+      projectId: 'proj-1', name: 'c', host: '', protocol: 'TODESK',
+    })).rejects.toMatchObject({
+      code: 'VAL_001',
+      details: expect.arrayContaining([expect.objectContaining({ field: 'host' })]),
+    });
+  });
+});
+
+describe('#45 updateConnection - registry 宽松兼容（存量数据零破坏 AC）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (prisma.user.findMany as MockFn).mockResolvedValue([]);
+    (prisma.connection.update as MockFn).mockImplementation(({ data }: any) =>
+      Promise.resolve({ ...mockConnection, ...data }),
+    );
+  });
+
+  it('老连接（TODESK 存量）只改 notes → 通过（registry 不因存量形状拒局部更新）', async () => {
+    setupFindUnique({ ...mockConnection, id: 'conn-todesk', protocol: 'TODESK', host: '123456789', port: null, username: null });
+    const r = await updateConnection('user-1', 'conn-todesk', { notes: '新备注' });
+    expect(r.notes).toBe('新备注');
+  });
+
+  it('老连接（SSH 存量 port=null）只改 name → 通过（不因元数据不全被拒）', async () => {
+    setupFindUnique({ ...mockConnection, protocol: 'SSH', port: null });
+    const r = await updateConnection('user-1', 'conn-1', { name: '改名' });
+    expect(r.name).toBe('改名');
+    // update 不做默认值填充：port 保持 null 不被回填（lead 预裁决 #4：存量行不回填）
+    expect(prisma.connection.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.not.objectContaining({ port: expect.anything() }) }),
+    );
+  });
+
+  it('TODESK 连接显式传非 null port → VAL_001（field=port）', async () => {
+    setupFindUnique({ ...mockConnection, protocol: 'TODESK', host: '123456789', port: null });
+    await expect(updateConnection('user-1', 'conn-1', { port: 3389 })).rejects.toMatchObject({
+      code: 'VAL_001',
+      details: expect.arrayContaining([expect.objectContaining({ field: 'port' })]),
+    });
+  });
+
+  it('SSH 存量 port=22 传 port=2222 → 通过（address 形态协议端口自由）', async () => {
+    setupFindUnique({ ...mockConnection, protocol: 'SSH', port: 22 });
+    await updateConnection('user-1', 'conn-1', { port: 2222 });
+    expect(prisma.connection.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ port: 2222 }) }),
+    );
+  });
+
+  it('SSH→TODESK 切协议但不传 port → 通过（宽松：client 未传 port 不校验；存量 port 残留无害，OQ 挂报告）', async () => {
+    setupFindUnique({ ...mockConnection, protocol: 'SSH', port: 22 });
+    await expect(updateConnection('user-1', 'conn-1', { protocol: 'TODESK' })).resolves.toBeTruthy();
+  });
+
+  it('SSH→TODESK 切协议同时传 port → VAL_001（合并后协议无端口概念）', async () => {
+    setupFindUnique({ ...mockConnection, protocol: 'SSH', port: 22 });
+    await expect(updateConnection('user-1', 'conn-1', { protocol: 'TODESK', port: 22 })).rejects.toMatchObject({
+      code: 'VAL_001',
+    });
+  });
+});
+
+// ────────────────────────────────────────────────
+// #45 launch：直连三类分派（rdp_file / command / url）+ .rdp 字节级
+// ────────────────────────────────────────────────
+
+describe('#45 launchConnection - 直连分派矩阵', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (prisma.user.findMany as MockFn).mockResolvedValue([]);
+  });
+
+  /** 造指定形态连接 + launch 便捷函数 */
+  const launchWith = (overrides: Record<string, unknown>) => {
+    (prisma.connection.findUnique as MockFn).mockReset();
+    (prisma.connection.findUnique as MockFn).mockResolvedValue({ ...mockConnection, ...overrides });
+    return launchConnection('conn-1');
+  };
+
+  // ── RDP → .rdp 文件 ──
+
+  it('RDP → rdp_file：返回 Buffer 文件体 + 连接名文件名', async () => {
+    const r = await launchWith({ protocol: 'RDP', host: '192.168.1.100', port: 3389, username: 'admin', name: '跳板机' });
+    expect(r.type).toBe('rdp_file');
+    if (r.type !== 'rdp_file') return;
+    expect(r.filename).toBe('跳板机.rdp');
+    expect(Buffer.isBuffer(r.body)).toBe(true);
+  });
+
+  it('.rdp 字节级：BOM FF FE + UTF-16 LE 回读内容 + full address host:port + CRLF 行尾 + 最小集（libcheck §3-§5）', async () => {
+    const r = await launchWith({ protocol: 'RDP', host: '192.168.1.100', port: 3389, username: 'admin', name: '跳板机' });
+    if (r.type !== 'rdp_file') throw new Error('期望 rdp_file');
+    // BOM：UTF-16 LE BOM = FF FE
+    expect(r.body[0]).toBe(0xff);
+    expect(r.body[1]).toBe(0xfe);
+    // UTF-16 LE 回读（跳过 BOM 2 字节）
+    const text = r.body.subarray(2).toString('utf16le');
+    // 行级断言（CRLF 惯例——Windows 工具链格式）
+    expect(text).toBe(
+      'screen mode id:i:1\r\n' +
+      'desktopwidth:i:1280\r\n' +
+      'desktopheight:i:800\r\n' +
+      'full address:s:192.168.1.100:3389\r\n' +
+      'username:s:admin\r\n',
+    );
+  });
+
+  it('.rdp port null（存量行未存端口）→ full address 裸 host（mstsc 自默认 3389）', async () => {
+    const r = await launchWith({ protocol: 'RDP', host: '10.0.0.5', port: null, username: null });
+    if (r.type !== 'rdp_file') throw new Error('期望 rdp_file');
+    const text = r.body.subarray(2).toString('utf16le');
+    expect(text).toContain('full address:s:10.0.0.5\r\n');
+    expect(text).not.toContain('username:s:'); // username null → 无该行
+  });
+
+  it('.rdp port 非 3389 → full address 显式 host:port', async () => {
+    const r = await launchWith({ protocol: 'RDP', host: '10.0.0.5', port: 3390, username: null });
+    if (r.type !== 'rdp_file') throw new Error('期望 rdp_file');
+    expect(r.body.subarray(2).toString('utf16le')).toContain('full address:s:10.0.0.5:3390\r\n');
+  });
+
+  it('.rdp 内容纯 ASCII（中文名只进 Content-Disposition，不进文件体）', async () => {
+    const r = await launchWith({ protocol: 'RDP', name: '中文跳板', host: '10.0.0.5', port: null, username: null });
+    if (r.type !== 'rdp_file') throw new Error('期望 rdp_file');
+    const text = r.body.subarray(2).toString('utf16le');
+    expect(text).not.toMatch(/[\u0080-￿]/); // 全 ASCII
+    expect(r.filename).toBe('中文跳板.rdp'); // 中文只在文件名
+  });
+
+  // ── SSH → 命令串 ──
+
+  it('SSH + username + port 22 → ssh root@host（默认端口省略 -p，libcheck 钦定）', async () => {
+    const r = await launchWith({ protocol: 'SSH', host: 'srv.example.com', port: 22, username: 'root' });
+    expect(r).toEqual({ type: 'command', command: 'ssh root@srv.example.com' });
+  });
+
+  it('SSH + port 2222 → ssh root@host -p 2222（非默认端口加 -p）', async () => {
+    const r = await launchWith({ protocol: 'SSH', host: 'srv.example.com', port: 2222, username: 'root' });
+    expect(r).toEqual({ type: 'command', command: 'ssh root@srv.example.com -p 2222' });
+  });
+
+  it('SSH + username null → ssh host（无 user 形态）', async () => {
+    const r = await launchWith({ protocol: 'SSH', host: 'srv.example.com', port: null, username: null });
+    expect(r).toEqual({ type: 'command', command: 'ssh srv.example.com' });
+  });
+
+  // ── 设备码四协议 → 命令串（command = 设备码本身，shared types 注释钦定）──
+
+  it.each([['TODESK'], ['SUNLOGIN'], ['TEAMVIEWER'], ['ANYDESK']] as const)(
+    '%s → command = 设备码（host 列复用存设备 ID）',
+    async (protocol) => {
+      const r = await launchWith({ protocol, host: '123 456 789', port: null, username: null });
+      expect(r).toEqual({ type: 'command', command: '123 456 789' });
+    },
+  );
+
+  // ── URL 类 ──
+
+  it('VPN + vpnLoginUrl → url = vpnLoginUrl 原样', async () => {
+    const r = await launchWith({ protocol: 'VPN', host: 'vpn.example.com', port: null, vpnLoginUrl: 'https://portal.example.com/login' });
+    expect(r).toEqual({ type: 'url', url: 'https://portal.example.com/login' });
+  });
+
+  it('VPN + vpnLoginUrl 无 scheme → 补 https://', async () => {
+    const r = await launchWith({ protocol: 'VPN', host: 'vpn.example.com', port: null, vpnLoginUrl: 'portal.example.com/login' });
+    expect(r).toEqual({ type: 'url', url: 'https://portal.example.com/login' });
+  });
+
+  it('VPN 无 vpnLoginUrl → 回退 https://host:port（port 有值拼接）', async () => {
+    const r = await launchWith({ protocol: 'VPN', host: 'vpn.example.com', port: 4430, vpnLoginUrl: null });
+    expect(r).toEqual({ type: 'url', url: 'https://vpn.example.com:4430' });
+  });
+
+  it('VPN 无 vpnLoginUrl + port null → https://host', async () => {
+    const r = await launchWith({ protocol: 'VPN', host: 'vpn.example.com', port: null, vpnLoginUrl: null });
+    expect(r).toEqual({ type: 'url', url: 'https://vpn.example.com' });
+  });
+
+  it('HTTP port null → http://host；port 80 省略；port 8080 拼接（默认端口省略规则）', async () => {
+    expect(await launchWith({ protocol: 'HTTP', host: 'web.example.com', port: null })).toEqual({ type: 'url', url: 'http://web.example.com' });
+    expect(await launchWith({ protocol: 'HTTP', host: 'web.example.com', port: 80 })).toEqual({ type: 'url', url: 'http://web.example.com' });
+    expect(await launchWith({ protocol: 'HTTP', host: 'web.example.com', port: 8080 })).toEqual({ type: 'url', url: 'http://web.example.com:8080' });
+  });
+
+  it('HTTPS port null → https://host；port 8443 → host:8443', async () => {
+    expect(await launchWith({ protocol: 'HTTPS', host: 's.example.com', port: null })).toEqual({ type: 'url', url: 'https://s.example.com' });
+    expect(await launchWith({ protocol: 'HTTPS', host: 's.example.com', port: 8443 })).toEqual({ type: 'url', url: 'https://s.example.com:8443' });
+  });
+
+  // ── VNC / 缺失 ──
+
+  it('VNC → CONN_006（该协议不支持直连，registry unsupported）', async () => {
+    await expect(launchWith({ protocol: 'VNC', host: '10.0.0.9', port: 5900 })).rejects.toMatchObject({ code: 'CONN_006' });
+  });
+
+  it('连接不存在 → CONN_002', async () => {
+    (prisma.connection.findUnique as MockFn).mockReset();
+    (prisma.connection.findUnique as MockFn).mockResolvedValue(null);
+    await expect(launchConnection('nope')).rejects.toMatchObject({ code: 'CONN_002' });
+  });
+
+  it('launch 触发 lastAccessed 节流更新（与 getConnection/decryptPassword 同款语义）', async () => {
+    (prisma.connection.findUnique as MockFn).mockReset();
+    (prisma.connection.findUnique as MockFn).mockResolvedValue({ ...mockConnection, id: 'conn-fresh', protocol: 'SSH', host: 's', port: 22, username: 'root' });
+    (prisma.connection.update as MockFn).mockClear();
+    // 用未被前序用例写过节流 Map 的 id——模块级 Map 单例，conn-1 已在 5 分钟窗口内被节流
+    await launchConnection('conn-fresh');
+    expect(prisma.connection.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'conn-fresh' }, data: { lastAccessed: expect.any(Date) } }),
+    );
   });
 });

@@ -86,3 +86,27 @@ export async function decryptPassword(req: Request, res: Response, next: NextFun
     res.json({ success: true, data: result });
   } catch (err) { next(err); }
 }
+
+/** #45 直连分派：RDP → .rdp 文件流（Buffer 直发不落盘，不走 res.download）；
+ * 命令串/URL → JSON 统一响应壳（shared LaunchJsonResponse）。
+ * 文件名 RFC 5987 双写：filename* UTF-8 中文原名 + filename ASCII 兜底（非 ASCII 名降级 connection-<id>.rdp）。 */
+export async function launchConnection(req: Request, res: Response, next: NextFunction) {
+  try {
+    const id = req.params['id'];
+    if (typeof id !== 'string') throw new Error('缺少 id');
+    const result = await connectionService.launchConnection(id);
+    if (result.type === 'rdp_file') {
+      const asciiFallback = /^[\x20-\x7E]+$/.test(result.filename)
+        ? result.filename.replace(/["\\]/g, '_')
+        : `connection-${id}.rdp`;
+      res.setHeader('Content-Type', 'application/x-rdp');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(result.filename)}`,
+      );
+      res.send(result.body);
+      return;
+    }
+    res.json({ success: true, data: result });
+  } catch (err) { next(err); }
+}

@@ -9,6 +9,7 @@ import {
   validateConnectionName, validateHost, validatePort,
   validateProtocol, validateVpnType, validateTags,
   validateNotes, validateVpnLoginUrl,
+  validateProtocolAgainstRegistry, getProtocolRegistryEntry,
   DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE,
 } from '@remotehub/shared';
 import type { ConnectionListQuery, ConnectionStats } from '@remotehub/shared';
@@ -155,17 +156,25 @@ export async function createConnection(userId: string, data: ConnectionCreateDat
   // VPN 一致性检查
   validateVpnConsistency(data.protocol, data);
 
+  // #45 协议注册表校验叠加（port:none 协议拒绝非 null port；host 校验为 validateHost 后的冗余兜底）
+  const registryErrors = validateProtocolAgainstRegistry(data.protocol, {
+    host: data.host, port: data.port, username: data.username,
+  });
+  if (registryErrors.length > 0) {
+    throw createAppError('VAL_001', registryErrors);
+  }
+
   // VPN 依赖检查
   if (data.requiredVpnId) {
     await validateVpnDependency(data.requiredVpnId, data.projectId);
   }
 
-  // 构建创建数据
+  // 构建创建数据（#45：port 缺省填 registry 默认——SSH 22 / HTTPS 443 / RDP 3389 等；显式 null = 明确留空不填）
   const createData: Prisma.ConnectionUncheckedCreateInput = {
     projectId: data.projectId,
     name: data.name,
     host: data.host,
-    port: data.port ?? null,
+    port: data.port ?? getProtocolRegistryEntry(data.protocol)?.defaultPort ?? null,
     username: data.username ?? null,
     encryptedPass: data.password ? encrypt(data.password) : null,
     protocol: data.protocol,
@@ -254,6 +263,17 @@ export async function updateConnection(userId: string, connectionId: string, dat
 
   // 验证字段
   validateConnectionFields(merged);
+
+  // #45 registry 宽松校验：只查 client 传入的字段（updatePayload 白名单拷贝自 body，
+  // 未传入的键 undefined → registry 跳过——存量行未触碰的字段不因 registry 规则被拒，零破坏）。
+  // protocol 用合并视图（切协议 + 传 port 的组合按目标协议拒绝）。
+  const registryErrors = validateProtocolAgainstRegistry(merged.protocol, {
+    host: updatePayload.host as string | undefined,
+    port: updatePayload.port as number | null | undefined,
+  });
+  if (registryErrors.length > 0) {
+    throw createAppError('VAL_001', registryErrors);
+  }
 
   // VPN 一致性检查
   validateVpnConsistency(merged.protocol, {
@@ -399,7 +419,104 @@ export async function decryptPassword(connectionId: string) {
   return { password: decrypt(connection.encryptedPass) };
 }
 
+// ─── #45 直连分派（launch）───
+
+/** launch 结果三形态：rdp_file 带文件体（controller 设 Content-Type/Disposition 后 Buffer 直发）；
+ * command/url 即 shared LaunchJsonResponse 的 data 形状（包统一响应壳 JSON）。 */
+export type LaunchResult =
+  | { type: 'rdp_file'; filename: string; body: Buffer }
+  | { type: 'command'; command: string }
+  | { type: 'url'; url: string };
+
+/** 生成 .rdp 文件字节（libcheck §3-§5 实证口径）：UTF-16 LE + BOM（0xFF 0xFE）、
+ * CRLF 行尾、最小集五键——screen mode / desktop 分辨率 / full address（唯一必填，
+ * port null 时裸 host 由 mstsc 自默认 3389）/ username（可选，无则整行省略）。
+ * 内容纯 ASCII——中文连接名只进 Content-Disposition 文件名，不进文件体。 */
+function buildRdpFileBody(host: string, port: number | null, username: string | null): Buffer {
+  const lines = [
+    'screen mode id:i:1',
+    'desktopwidth:i:1280',
+    'desktopheight:i:800',
+    `full address:s:${host}${port != null ? `:${port}` : ''}`,
+  ];
+  if (username) {
+    lines.push(`username:s:${username}`);
+  }
+  // 尾行也带 CRLF（Windows 工具链格式惯例——最后一行有无 CRLF mstsc 均可开，统一带）
+  const content = `${lines.join('\r\n')}\r\n`;
+  return Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(content, 'utf16le')]);
+}
+
+/** URL 形态通用拼装：port 显式存在且非 registry 默认时拼接（默认端口省略） */
+function buildUrl(scheme: 'http' | 'https', host: string, port: number | null, defaultPort: number | null): string {
+  const suffix = port != null && port !== defaultPort ? `:${port}` : '';
+  return `${scheme}://${host}${suffix}`;
+}
+
+/** GET /connections/:id/launch（票 #45）：按 PROTOCOL_REGISTRY 分派三类直连动作。
+ * viewer 可见字段构成（无密码），敏感度低于 decrypt-password——路由权限门 projectRole('viewer')。 */
+export async function launchConnection(connectionId: string): Promise<LaunchResult> {
+  const connection = await prisma.connection.findUnique({ where: { id: connectionId } });
+  if (!connection) throw createAppError('CONN_002');
+
+  const entry = getProtocolRegistryEntry(connection.protocol);
+  if (!entry || entry.launchAction === 'unsupported') {
+    throw createAppError('CONN_006');
+  }
+
+  // lastAccessed 节流更新（launch 语义 = 访问连接，与 getConnection/decryptPassword 同款）
+  touchLastAccessed(connectionId);
+
+  switch (entry.launchAction) {
+    case 'rdp_file':
+      return {
+        type: 'rdp_file',
+        filename: `${connection.name}.rdp`,
+        body: buildRdpFileBody(connection.host, connection.port, connection.username),
+      };
+    case 'command': {
+      // 设备码协议（hostSemantics=device_id）：command 即设备码本身（host 列复用存设备 ID）
+      if (entry.hostSemantics === 'device_id') {
+        return { type: 'command', command: connection.host };
+      }
+      // SSH：libcheck 钦定拼串口径——默认端口 22 省略 -p，非 22 加 -p；username 缺省裸 host
+      const userPrefix = connection.username ? `${connection.username}@` : '';
+      const portSuffix = connection.port != null && connection.port !== entry.defaultPort
+        ? ` -p ${connection.port}`
+        : '';
+      return { type: 'command', command: `ssh ${userPrefix}${connection.host}${portSuffix}` };
+    }
+    case 'url': {
+      // VPN：vpnLoginUrl 优先（无 scheme 补 https://），缺省回退 https://host[:port]
+      if (connection.protocol === 'VPN') {
+        if (connection.vpnLoginUrl) {
+          const url = /^[a-z][a-z0-9+.-]*:\/\//i.test(connection.vpnLoginUrl)
+            ? connection.vpnLoginUrl
+            : `https://${connection.vpnLoginUrl}`;
+          return { type: 'url', url };
+        }
+        return { type: 'url', url: buildUrl('https', connection.host, connection.port, entry.defaultPort) };
+      }
+      // HTTP / HTTPS（HTTP 为自然延伸——http:// 语义与 https 同构，裁量记施工报告）
+      return { type: 'url', url: buildUrl(connection.protocol === 'HTTP' ? 'http' : 'https', connection.host, connection.port, entry.defaultPort) };
+    }
+  }
+}
+
 // ─── Private Helpers ───
+
+/** C5: lastAccessed 节流更新（fire-and-forget）——getConnection/decryptPassword/launch 三处共用语义收敛 */
+function touchLastAccessed(connectionId: string) {
+  const now = Date.now();
+  const lastUpdate = lastAccessedUpdates.get(connectionId);
+  if (!lastUpdate || now - lastUpdate > LAST_ACCESSED_THROTTLE_MS) {
+    lastAccessedUpdates.set(connectionId, now);
+    prisma.connection.update({
+      where: { id: connectionId },
+      data: { lastAccessed: new Date() },
+    }).catch(() => {}); // fire-and-forget
+  }
+}
 
 function validateConnectionFields(data: {
   name: string;
