@@ -769,6 +769,19 @@ describe('connectionService', () => {
       );
     });
 
+    it('#41 review：sort 带首尾空格（%20lastAccessed）→ trim 归一后仍生效，不静默回退默认序', async () => {
+      (prisma.connection.findMany as MockFn).mockResolvedValue([]);
+      (prisma.connection.count as MockFn).mockResolvedValue(0);
+
+      await listConnections('admin-1', 'admin', undefined, 1, 20, { sort: '  lastAccessed  ' });
+
+      expect(prisma.connection.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderBy: [{ lastAccessed: 'desc' }, { updatedAt: 'desc' }],
+        }),
+      );
+    });
+
     it('#41 sort 缺省/未知值 → 维持 updatedAt desc 默认序（宽容回退，不 400）', async () => {
       (prisma.connection.findMany as MockFn).mockResolvedValue([]);
       (prisma.connection.count as MockFn).mockResolvedValue(0);

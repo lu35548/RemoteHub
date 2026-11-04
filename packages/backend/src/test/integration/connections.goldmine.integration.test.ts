@@ -44,6 +44,8 @@ const SEEDS: SeedConn[] = [
   { id: 'c5', name: 'Dev Box', host: '192.168.1.14', username: 'dev', protocol: 'SSH', tags: null, lastAccessed: null, updatedAt: new Date(T0.getTime() + 5) },
   // 空片段（stats 剔除断言用）
   { id: 'c6', name: 'Legacy Jump', host: '192.168.1.15', username: 'ops', protocol: 'SSH', tags: 'prod,,web', lastAccessed: null, updatedAt: new Date(T0.getTime() + 6) },
+  // review 补：三段串中段形态（锁四条件 OR 的 contains ',tag,' 中段命中分支）
+  { id: 'c7', name: 'CI Runner', host: '192.168.1.16', username: 'ci', protocol: 'SSH', tags: 'prod,test,web', lastAccessed: new Date('2026-01-05T00:00:00.000Z'), updatedAt: new Date(T0.getTime() + 7) },
 ];
 
 beforeAll(async () => {
@@ -88,14 +90,14 @@ afterAll(() => teardownServerWithDb(b));
 // ─── AC1a：tag 精确匹配（包夹法）───
 
 describe('GET /api/v1/connections?tag=（包夹法精确匹配）', () => {
-  it('tag=test → 命中单值/首段/尾段，不命中 xtest 前缀与 NULL tags（防 test 命中 test2 的反向即防 test 命中 xtest）', async () => {
+  it('tag=test → 命中单值/首段/中段/尾段，不命中 xtest 前缀与 NULL tags（防 test 命中 test2 的反向即防 test 命中 xtest）', async () => {
     const res = await request(b.app)
       .get(`/api/v1/connections?tag=test`)
       .set('Authorization', `Bearer ${b.adminToken}`);
     expect(res.status).toBe(200);
     const names = res.body.data.map((c: { name: string }) => c.name);
-    expect(names.sort()).toEqual(['DB Primary', 'Monitoring', 'Web Server']);
-    // c3（xtest,test2）与 c5（NULL）不在结果；c4（test2,test）以尾段命中
+    expect(names.sort()).toEqual(['CI Runner', 'DB Primary', 'Monitoring', 'Web Server']);
+    // c3（xtest,test2）与 c5（NULL）不在结果；c4（test2,test）以尾段命中；c7（prod,test,web）以中段 contains ',test,' 命中
   });
 
   it('tag=test2 → 命中首段/中段/尾段（c2 尾段、c3 尾段、c4 首段），tag=test 的行不因 test 前缀误命中', async () => {
@@ -113,7 +115,7 @@ describe('GET /api/v1/connections?tag=（包夹法精确匹配）', () => {
       .set('Authorization', `Bearer ${b.adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(2);
-    expect(res.body.pagination).toEqual({ page: 1, pageSize: 2, total: 3 });
+    expect(res.body.pagination).toEqual({ page: 1, pageSize: 2, total: 4 });
   });
 
   it('tag 无一命中 → 空列表 total=0', async () => {
@@ -178,9 +180,9 @@ describe('GET /api/v1/connections?sort=lastAccessed', () => {
       .get(`/api/v1/connections?sort=lastAccessed&projectId=${projectId}`)
       .set('Authorization', `Bearer ${b.adminToken}`);
     expect(res.status).toBe(200);
-    // 有 lastAccessed 的降序：c2(02-01) > c4(01-20) > c1(01-10)；NULL 殿后按 updatedAt desc：c6 > c5 > c3
+    // 有 lastAccessed 的降序：c2(02-01) > c4(01-20) > c1(01-10) > c7(01-05)；NULL 殿后按 updatedAt desc：c6 > c5 > c3
     expect(res.body.data.map((c: { name: string }) => c.name)).toEqual([
-      'DB Primary', 'Monitoring', 'Web Server', 'Legacy Jump', 'Dev Box', 'Backup Host',
+      'DB Primary', 'Monitoring', 'Web Server', 'CI Runner', 'Legacy Jump', 'Dev Box', 'Backup Host',
     ]);
   });
 
@@ -190,7 +192,7 @@ describe('GET /api/v1/connections?sort=lastAccessed', () => {
       .set('Authorization', `Bearer ${b.adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body.data.map((c: { name: string }) => c.name)).toEqual([
-      'Legacy Jump', 'Dev Box', 'Monitoring', 'Backup Host', 'DB Primary', 'Web Server',
+      'CI Runner', 'Legacy Jump', 'Dev Box', 'Monitoring', 'Backup Host', 'DB Primary', 'Web Server',
     ]);
   });
 });
@@ -205,8 +207,8 @@ describe('GET /api/v1/projects/:id/connections/stats', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.data).toEqual({
-      protocols: { SSH: 4, RDP: 1, VNC: 1 },
-      tags: { test: 3, test2: 3, xtest: 1, prod: 1, web: 1 },
+      protocols: { SSH: 5, RDP: 1, VNC: 1 },
+      tags: { test: 4, test2: 3, xtest: 1, prod: 2, web: 2 },
     });
   });
 
@@ -215,7 +217,7 @@ describe('GET /api/v1/projects/:id/connections/stats', () => {
       .get(`/api/v1/projects/${projectId}/connections/stats`)
       .set('Authorization', `Bearer ${viewerToken}`);
     expect(res.status).toBe(200);
-    expect(res.body.data.protocols).toEqual({ SSH: 4, RDP: 1, VNC: 1 });
+    expect(res.body.data.protocols).toEqual({ SSH: 5, RDP: 1, VNC: 1 });
   });
 
   it('非项目成员 403（AUTH_003）', async () => {

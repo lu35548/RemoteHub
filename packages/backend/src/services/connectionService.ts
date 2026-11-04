@@ -11,6 +11,7 @@ import {
   validateNotes, validateVpnLoginUrl,
   DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE,
 } from '@remotehub/shared';
+import type { ConnectionListQuery, ConnectionStats } from '@remotehub/shared';
 
 // ─── lastAccessed 节流 ───
 
@@ -67,16 +68,15 @@ interface ConnectionUpdateData {
 
 // ─── Public Functions ───
 
-/** #41 连接列表过滤参数：tag 精确匹配 / q 三字段模糊 / sort=lastAccessed */
-export interface ConnectionListFilters {
-  tag?: string;
-  q?: string;
-  sort?: string;
-}
+/** #41 连接列表过滤参数：tag 精确匹配 / q 三字段模糊 / sort=lastAccessed。
+ * extends Pick 锁与 shared wire 形状（ConnectionListQuery）的字段级同步——shared 改字段名时此处编译期报错；
+ * 职责仍分离：wire 形含 projectId/page/pageSize，service 侧分页与项目过滤走独立位置参数。 */
+export interface ConnectionListFilters extends Pick<ConnectionListQuery, 'tag' | 'q' | 'sort'> {}
 
 /** 连接列表 — admin 全部，非 admin 已加入项目的连接。
  * #41：tag 包夹法（四条件 OR，等价 SQL 「','||tags||',' LIKE '%,tag,%'」——防 test 命中 test2，
- * NULL tags 自然排除）；q 对 name/host/username contains；sort='lastAccessed' 时最近访问优先。 */
+ * NULL tags 自然排除）；q 对 name/host/username contains；sort='lastAccessed' 时最近访问优先。
+ * tag/q 匹配为 SQLite LIKE 家族——ASCII 大小写不敏感（语义详见 shared ConnectionListQuery 注释）。 */
 export async function listConnections(
   userId: string,
   userRole: string,
@@ -119,9 +119,9 @@ export async function listConnections(
   if (and.length > 0) where.AND = and;
 
   // #41 排序：lastAccessed 优先（SQLite DESC 下 NULL 恒殿后 = 从未访问垫底）+ updatedAt 次序稳定；
-  // 其他值宽容回退默认 updatedAt desc（不 400）
+  // sort 与 tag/q 同样 trim 归一（'?sort=%20lastAccessed' 不静默回退）；其他值宽容回退默认 updatedAt desc（不 400）
   const orderBy: Prisma.ConnectionOrderByWithRelationInput | Prisma.ConnectionOrderByWithRelationInput[] =
-    filters.sort === 'lastAccessed'
+    filters.sort?.trim() === 'lastAccessed'
       ? [{ lastAccessed: 'desc' }, { updatedAt: 'desc' }]
       : { updatedAt: 'desc' };
 
@@ -349,8 +349,9 @@ export async function deleteConnection(connectionId: string) {
 
 /** #41 项目连接统计 — 按协议 groupBy 语义聚合计数 + 标签 JS 侧 split 计数。
  * tags 为逗号分隔单串（queryable-fields 约定不迁移 JSON），空片段剔除、字面匹配（不 trim 片段，
- * 与列表 tag 过滤的包夹法字面语义保持一致）；NULL tags 跳过。 */
-export async function getConnectionStats(projectId: string) {
+ * 与列表 tag 过滤的包夹法字面语义保持一致）；NULL tags 跳过。
+ * 返回类型标注 shared ConnectionStats（对齐 monitoringService SystemHealth 先例，编译期锁契约）。 */
+export async function getConnectionStats(projectId: string): Promise<ConnectionStats> {
   const project = await prisma.project.findUnique({ where: { id: projectId } });
   if (!project) throw createAppError('PROJ_002');
 
