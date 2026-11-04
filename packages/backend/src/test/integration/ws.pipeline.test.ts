@@ -205,19 +205,19 @@ describe('广播路由', () => {
     const c3 = await wsConnect(user2Cookie);   // 房间外对照
     const msg3 = nextMessage(c3.ws, 300); // 房间外不应收到任何广播
 
-    wsMod.sendToProject(projectId, { type: 'connection_updated', payload: { projectId } });
-    expect((await nextMessage(c1.ws))?.type).toBe('connection_updated');
-    expect((await nextMessage(c2.ws))?.type).toBe('connection_updated');
+    wsMod.sendToProject(projectId, { type: 'CONNECTION_UPDATED', payload: { projectId } });
+    expect((await nextMessage(c1.ws))?.type).toBe('CONNECTION_UPDATED');
+    expect((await nextMessage(c2.ws))?.type).toBe('CONNECTION_UPDATED');
     expect(await msg3).toBeNull();
     expect(await nextMessage(ca.ws, 300)).toBeNull();
 
-    wsMod.sendToUser(user1Id, { type: 'system_alert', payload: {} });
-    expect((await nextMessage(c1.ws))?.type).toBe('system_alert');
-    expect((await nextMessage(c2.ws))?.type).toBe('system_alert');
+    wsMod.sendToUser(user1Id, { type: 'SYSTEM_ALERT', payload: {} });
+    expect((await nextMessage(c1.ws))?.type).toBe('SYSTEM_ALERT');
+    expect((await nextMessage(c2.ws))?.type).toBe('SYSTEM_ALERT');
     expect(await nextMessage(c3.ws, 300)).toBeNull();
 
-    wsMod.sendToAdmins({ type: 'system_alert', payload: {} });
-    expect((await nextMessage(ca.ws))?.type).toBe('system_alert');
+    wsMod.sendToAdmins({ type: 'SYSTEM_ALERT', payload: {} });
+    expect((await nextMessage(ca.ws))?.type).toBe('SYSTEM_ALERT');
     expect(await nextMessage(c1.ws, 300)).toBeNull();
 
     c1.ws.close(); c2.ws.close(); c3.ws.close(); ca.ws.close();

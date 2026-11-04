@@ -1,9 +1,9 @@
 // packages/backend/src/ws/wsServer.ts
 // #34 WS 管道基建：连接鉴权 / 房间模型 / 心跳 / 广播辅助 / 生命周期管理。
 //
-// ─── 消息协议（#34 定版，前端 #37 票消费）───
-// 客户端→服务端：{ type: 'join' | 'leave', payload: { room: string } }
-// 服务端→客户端：{ type: 'joined' | 'left' | 'denied' | 'error', payload: { room?, message? } }
+// ─── 消息协议（#34 定版）───
+// 协议契约（消息类型/端点路径）单一真相源已收口至 @remotehub/shared（src/wsProtocol.ts），
+// 本文件是服务端实现：消费 WsServerMessage 类型锚定 sendTo 系列签名。
 //
 // ─── 房间模型（design §8.2）───
 // project:{projectId}  项目房间——成员可入；admin 全局可入（管理员全局可见）
@@ -21,9 +21,7 @@ import type { Duplex } from 'node:stream';
 import { validateRefreshSession } from '../services/authService.js';
 import { prisma } from '../utils/prisma.js';
 import { logger } from '../utils/logger.js';
-
-/** WS 端点路径（ws path 精确匹配；nginx/vite 两路反代同路径） */
-export const WS_PATH = '/api/v1/ws';
+import { WS_PATH, type WsServerMessage } from '@remotehub/shared';
 
 /** 心跳间隔：30s < nginx proxy_read_timeout 60s 默认（libcheck-ws §4 定量） */
 export const WS_HEARTBEAT_MS = 30_000;
@@ -125,7 +123,7 @@ async function canJoinRoom(aw: AuthedWs, room: string): Promise<boolean> {
 }
 
 /** 单播一条 JSON 消息（readyState 守卫） */
-function sendTo(ws: WebSocket, message: unknown): void {
+function sendTo(ws: WebSocket, message: WsServerMessage): void {
   if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(message));
   }
@@ -194,7 +192,7 @@ function leaveRoom(aw: AuthedWs, room: string): void {
 // ─── 广播辅助（#35/#36 事件源接线点）───
 
 /** 定向用户（其全部在线连接） */
-export function sendToUser(userId: string, message: unknown): void {
+export function sendToUser(userId: string, message: WsServerMessage): void {
   if (!wss) return;
   for (const client of wss.clients) {
     if ((client as AuthedWs).userId === userId) sendTo(client, message);
@@ -202,7 +200,7 @@ export function sendToUser(userId: string, message: unknown): void {
 }
 
 /** 定向全体在线 admin */
-export function sendToAdmins(message: unknown): void {
+export function sendToAdmins(message: WsServerMessage): void {
   if (!wss) return;
   for (const client of wss.clients) {
     if ((client as AuthedWs).role === 'admin') sendTo(client, message);
@@ -210,7 +208,7 @@ export function sendToAdmins(message: unknown): void {
 }
 
 /** 定向项目房间（仅房间内成员） */
-export function sendToProject(projectId: string, message: unknown): void {
+export function sendToProject(projectId: string, message: WsServerMessage): void {
   const set = rooms.get(`project:${projectId}`);
   if (!set) return;
   for (const aw of set) sendTo(aw, message);

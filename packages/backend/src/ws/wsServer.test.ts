@@ -14,7 +14,8 @@ vi.mock('../utils/prisma.js', () => ({
 import type { Server as HttpServer } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { IncomingMessage } from 'node:http';
-import { WS_PATH, initWsServer, closeWsServer, parseCookieHeader } from './wsServer.js';
+import { initWsServer, closeWsServer, parseCookieHeader } from './wsServer.js';
+import { WS_PATH } from '@remotehub/shared';
 
 // ─── 假件 ───
 
