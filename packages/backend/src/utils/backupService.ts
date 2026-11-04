@@ -129,17 +129,24 @@ export function listBackups(backupDir?: string): Array<{ filename: string; sizeB
     .readdirSync(dir)
     .filter((f) => BACKUP_FILENAME_RE.test(f))
     .sort((a, b) => b.localeCompare(a)) // 文件名时间戳字典序 = 时间倒序
-    .map((filename) => {
-      const stat = fs.statSync(path.join(dir, filename));
-      return { filename, sizeBytes: stat.size, createdAt: new Date(stat.mtimeMs).toISOString() };
+    .flatMap((filename) => {
+      // readdir→stat 间隙文件可能消失（retention 轮转删除 / 同秒覆盖 rename 的竞态）——
+      // 文件即真相（无 manifest 需要对账），stat 失败（ENOENT 等）即不在列：skip 而非让整个列表 500
+      try {
+        const stat = fs.statSync(path.join(dir, filename));
+        return [{ filename, sizeBytes: stat.size, createdAt: new Date(stat.mtimeMs).toISOString() }];
+      } catch {
+        return [];
+      }
     });
 }
 
 /**
  * retention 轮转：白名单文件按文件名排序（时间序），保留最新 keep 份，超出的最旧份删除；
  * 中断 tmp 残留一并清理。目录不存在静默 0（首启未备份过）。返回删除文件数。
+ * 纯同步 fs 语义（内部无 await，外部入口仅做日志包装）。
  */
-export async function applyRetention(backupDir?: string, keep = env.BACKUP_RETENTION_COUNT): Promise<number> {
+export function applyRetention(backupDir?: string, keep = env.BACKUP_RETENTION_COUNT): number {
   const dir = resolveBackupDir(backupDir ?? env.BACKUP_DIR);
   const removed = retentionSync(dir, keep);
   if (removed > 0) logger.info(`Backup retention: removed ${removed} file(s) (keep ${Math.max(1, keep)})`);

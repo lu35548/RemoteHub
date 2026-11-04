@@ -4,6 +4,9 @@
 触发通道：cron 每日 02:00（仅定时，与 session 03:00 / 审计 03:30 / 通知清理 04:00 错峰）+
 admin 手动触发 `POST /api/v1/admin/backups`。retention 默认保留最新 30 份（`BACKUP_RETENTION_COUNT` 可配，下界 1）。
 
+> 时区语义：cron 时刻（02:00 及错峰序列）与备份文件名时间戳均按**容器本地时区**解释——
+> compose 已为 backend 显式设置 `TZ=Asia/Shanghai`；若未设置，容器默认 UTC，定时语义会整体偏移 8 小时。
+
 ## 备份存储位置
 
 | 环境 | 目录 | 说明 |

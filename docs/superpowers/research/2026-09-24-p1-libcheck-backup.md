@@ -170,6 +170,8 @@ P1 spec W2 裁决（full-spec.md:86）：
 
 **结论**：实装 express 5.2.1；`res.download`（attachment 语义）是对口 API；路径遍历防护的官方机制是 **`root` 选项**（Express 校验相对路径解析结果在 root 内），配合绝对路径 + 服务端生成文件名双保险。
 
+> **[2026-11-04 实装订正 #38 review]** 上述「root 选项」结论已被实装推翻：**绝对路径 + root 组合**会被 send 库把绝对路径当相对路径与 root 再拼接，产出坏路径恒 500（本节下方「票面级实施注意」的三重防护才是实装形态——白名单正则 + `path.resolve` 前缀校验 + 绝对路径 `res.download`，**不带 root**）。root 仅适用于相对路径场景；spec W2-6 已同步加订正标注。
+
 官方 5x API 文档关键摘录：
 
 > ### res.download(path [, filename] [, options] [, fn])

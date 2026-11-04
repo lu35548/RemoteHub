@@ -27,6 +27,9 @@ services:
       - DATABASE_URL=file:/data/prod.db
       # 备份目录指向独立卷（#38：与 sqlite-data 生命周期解耦——删库卷不连带备份）
       - BACKUP_DIR=/data/backups
+      # 容器时区显式定死：node-cron 全部 4 个定时任务（备份 02:00 / session 03:00 / 审计 03:30 /
+      # 通知清理 04:00）与备份文件名时间戳均按容器本地时区解释；不设 TZ 默认 UTC，本地时区语义整体偏移
+      - TZ=Asia/Shanghai
     volumes:
       - sqlite-data:/data
       - backup-data:/data/backups

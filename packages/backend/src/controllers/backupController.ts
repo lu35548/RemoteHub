@@ -56,7 +56,15 @@ export function downloadBackup(req: Request, res: Response, next: NextFunction) 
     // 坏路径报 Forbidden/ENOENT（实测 500）——root 是相对路径的沙箱基准，绝对路径场景省略。
     res.download(abs, filename, (err) => {
       if (!err) return;
-      if (res.headersSent) { next(err); return; } // 响应已部分发送，只能交全局 handler 记日志
+      // 响应已部分发送，无法补写错误 JSON（全局 handler 无 headersSent 检查，next 会对已发送
+      // 响应再写头 → ERR_HTTP_HEADERS_SENT），只能记日志收口
+      if (res.headersSent) {
+        logger.error('备份下载传输中断（响应已部分发送，无法补写错误 JSON，仅记日志）', {
+          filename,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return;
+      }
       // 白名单形态但文件不存在（如刚被 retention 轮转删除的竞态）
       if (!fs.existsSync(abs)) { next(createAppError('BACKUP_002')); return; }
       next(err);

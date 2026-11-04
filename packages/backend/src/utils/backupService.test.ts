@@ -1,9 +1,10 @@
 // packages/backend/src/utils/backupService.test.ts
 // #38 备份 service 单元级（纯逻辑/文件系统，不依赖真库）：
-// 路径锚定（resolveBackupDir / resolveSourceDbPath——票面测试红线的纯函数层）+ 文件名白名单 + retention 轮转。
+// 路径锚定（resolveBackupDir / resolveSourceDbPath——票面测试红线的纯函数层）+ 文件名白名单 + retention 轮转
+// + listBackups stat 竞态容错（readdir→stat 间隙文件消失 skip 不炸列表）。
 // VACUUM INTO 真库链路在 src/test/integration/backup.api.test.ts（mock 验不了 raw SQL 副作用，libback §2）。
 import '../test/helpers/env.js';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import {
   BACKUP_FILENAME_RE,
   applyRetention,
+  listBackups,
   resolveBackupDir,
   resolveSourceDbPath,
 } from './backupService.js';
@@ -80,7 +82,7 @@ describe('applyRetention（轮转：保最新 N 份 + 清中断 tmp 残留）', 
     return dir;
   }
 
-  it('4 份保留 2 → 剩最新 2，tmp 残留一并清理，返回删除计数 3', async () => {
+  it('4 份保留 2 → 剩最新 2，tmp 残留一并清理，返回删除计数 3', () => {
     const dir = mkDirWith([
       'backup-20260101-000000.db',
       'backup-20260102-000000.db',
@@ -89,7 +91,7 @@ describe('applyRetention（轮转：保最新 N 份 + 清中断 tmp 残留）', 
       'backup-20260105-000000.db.tmp', // 中断残留（libback §1.4：retention 顺带清理）
     ]);
     try {
-      const removed = await applyRetention(dir, 2);
+      const removed = applyRetention(dir, 2);
       expect(removed).toBe(3);
       expect(fs.readdirSync(dir).sort()).toEqual([
         'backup-20260103-000000.db',
@@ -100,27 +102,52 @@ describe('applyRetention（轮转：保最新 N 份 + 清中断 tmp 残留）', 
     }
   });
 
-  it('不足保留数时零删除', async () => {
+  it('不足保留数时零删除', () => {
     const dir = mkDirWith(['backup-20260101-000000.db']);
     try {
-      expect(await applyRetention(dir, 3)).toBe(0);
+      expect(applyRetention(dir, 3)).toBe(0);
       expect(fs.readdirSync(dir)).toHaveLength(1);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it('keep 下界 1：keep=0 视为 1（不删光全部备份）', async () => {
+  it('keep 下界 1：keep=0 视为 1（不删光全部备份）', () => {
     const dir = mkDirWith(['backup-20260101-000000.db', 'backup-20260102-000000.db']);
     try {
-      await applyRetention(dir, 0);
+      applyRetention(dir, 0);
       expect(fs.readdirSync(dir)).toEqual(['backup-20260102-000000.db']);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it('目录不存在静默返回 0（首启未备份过）', async () => {
-    await expect(applyRetention(path.join(os.tmpdir(), `rh-no-such-${Date.now()}`), 2)).resolves.toBe(0);
+  it('目录不存在静默返回 0（首启未备份过）', () => {
+    expect(applyRetention(path.join(os.tmpdir(), `rh-no-such-${Date.now()}`), 2)).toBe(0);
+  });
+});
+
+describe('listBackups（目录实时扫描——stat 竞态容错）', () => {
+  it('readdir→stat 间隙文件消失（retention 轮转/同秒覆盖 rename 竞态）→ 该项 skip，列表不炸', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rh-listbk-'));
+    fs.writeFileSync(path.join(dir, 'backup-20260101-000000.db'), 'a');
+    fs.writeFileSync(path.join(dir, 'backup-20260102-000000.db'), 'b');
+    // 只让「较新那份」stat 抛 ENOENT（模拟 readdir 后被并发轮转删除），其余走真 stat
+    const realStatSync = fs.statSync.bind(fs);
+    const statSpy = vi.spyOn(fs, 'statSync').mockImplementation((p: fs.PathLike) => {
+      if (p.toString().endsWith('backup-20260102-000000.db')) {
+        throw Object.assign(new Error(`ENOENT: no such file or directory, stat '${p}'`), { code: 'ENOENT' });
+      }
+      return realStatSync(p);
+    });
+    try {
+      const list = listBackups(dir);
+      expect(list).toHaveLength(1);
+      expect(list[0]!.filename).toBe('backup-20260101-000000.db');
+      expect(list[0]!.sizeBytes).toBe(1);
+    } finally {
+      statSpy.mockRestore();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

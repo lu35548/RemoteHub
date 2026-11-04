@@ -46,8 +46,10 @@ RemoteHub 是 pnpm workspace monorepo（`packages/{shared,backend,frontend}`）�
 
 ### 架构分层（后端）
 - **routes** → **controllers**（输入验证，并行收集错误）→ **services**（业务逻辑 + Prisma）→ **utils**（prisma / encryption / password / logger / appError）
+- 显式惯例：系统级维护任务（cleaner / backup / monitor 类）落 **utils/** 且**允许调用 services**（先例：sessionCleaner / auditCleaner / ipMonitor / backupService）——utils 并非字面意义上的「最底层」
 - 三层权限中间件链：`authMiddleware`（JWT → 查用户 → `req.user`）→ `roleMiddleware`（全局角色）→ `projectRoleMiddleware`（项目级角色，admin 绕过）
-- 统一响应格式 `{ success, data | error }`；错误码体系（AUTH / USER / PROJ / CONN / MEMBER / AUDIT / VAL / SYS / RESET）；K8s 探针端点 `/healthz` `/readyz` 豁免统一响应壳（裸 200/503，探针惯例）
+- 统一响应格式 `{ success, data | error }`；错误码体系（AUTH / USER / PROJ / CONN / MEMBER / AUDIT / VAL / SYS / RESET / MFA / NOTIF / BACKUP）；K8s 探针端点 `/healthz` `/readyz` 豁免统一响应壳（裸 200/503，探针惯例）
+  - phase2 新增三族（码值以 `utils/appError.ts` 为单一真相源）：MFA_001 验证码/恢复码错误 400、MFA_002 MFA 令牌无效或过期 401、MFA_003 2FA 未启用或状态冲突 400；NOTIF_001 通知不存在 404、NOTIF_002 无权操作他人通知 403；BACKUP_001 备份文件名非法 400、BACKUP_002 备份文件不存在 404、BACKUP_003 备份执行失败 500
 
 ### 命名约定
 - 表名 snake_case 复数（`@@map`），列名 snake_case（`@map`）

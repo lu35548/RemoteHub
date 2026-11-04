@@ -14,10 +14,9 @@ import { fileURLToPath } from 'node:url';
 import { PrismaClient } from '@prisma/client';
 import { PrismaBetterSQLite3 } from '@prisma/adapter-better-sqlite3';
 import { setupServerWithDb, teardownServerWithDb, type ServerBootstrap } from '../helpers/serverBootstrap.js';
+import { PRISMA_CLI } from '../helpers/testDb.js';
 
 const BACKEND_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-const PRISMA_BIN = process.platform === 'win32' ? 'prisma.CMD' : 'prisma';
-const PRISMA_CLI = path.join(BACKEND_ROOT, 'node_modules', '.bin', PRISMA_BIN);
 
 let b: ServerBootstrap;
 let adminToken: string;
@@ -239,7 +238,7 @@ describe('retention 串链（手动触发后顺带轮转 + tmp 清理）', () =>
         fs.writeFileSync(path.join(dir, n), 'x');
       }
       fs.writeFileSync(path.join(dir, 'backup-20260105-000000.db.tmp'), 'partial');
-      const removed = await svc.applyRetention(dir, 2);
+      const removed = svc.applyRetention(dir, 2);
       expect(removed).toBe(3);
       expect(fs.readdirSync(dir).sort()).toEqual(['backup-20260103-000000.db', 'backup-20260104-000000.db']);
     } finally {
