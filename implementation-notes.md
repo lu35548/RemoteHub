@@ -16,8 +16,78 @@
 - [ ] **首个 SQLite 方言 migration vs project.md「MySQL 统一」约定**——已移交 P1 #52（ADR 豁免 + project.md 四处订正，spec D6 裁决）。
 - [ ] **净化豁免清单未含 Project `description`**——已裁决（P1 spec D6）：接受误杀面并明示边界，随 #52 ADR 固化。
 - [ ] **AUTH_LOGIN 审计行操作人恒为「系统」**（票 #22 Spec 轴 review 发现）：login 未认证 userId=null 是 P0-5 spec 口径，但登录人信息（IP/UA）其实已记录，是否让 login 审计带 userId 待裁决。
+- [x] **#40 真机四操作验收**（2026-11-04 implementer 挂）——✅ 同日 lead 真机双用户全过（添加/改角色/移除/自离 + viewer 三层遮蔽 + onLeft 缓存失效双实证），证据贴 #40 关票评论。
 - [ ] **mfa 二段流审计口径**（批 2 #30 review + 未决①）：mfa/verify 成功/失败零审计（2FA 爆破不可见）；mfaPending 第一段被记 AUTH_LOGIN success 但无 session 建立语义失真。修复需新增审计 action 枚举（跨 shared AUDIT_ACTIONS + 前端 #23 标签映射）+ 恢复码使用事件可见性（OWASP 建议），属契约变更交用户裁决。
-- [ ] **WS 协议 shared 常量化收口**（批 4 遗留）：#37 为并行零相交将 WS 协议常量落在前端本地 `lib/wsProtocol.ts`，原计划两票合流后 lead 统一迁移 shared（防漂移，#34 review 记账）——批 4 未做，下批开工前收口。
+- [x] **WS 协议 shared 常量化收口**（批 4 遗留）——✅ 批 5 开工前 lead 收口（commit `740ff88`）：契约迁 shared `wsProtocol.ts`，前端 re-export 门面，backend sendTo 系列 WsServerMessage 类型锚定（当场抓 3 处测试小写枚举脑补）。
+- [ ] **备份元数据「时长/状态」口径**（批 5 R2 minor-1，需用户裁决）：现状 = 大小/时间走列表（文件即真相），时长走触发响应，状态走通知+审计（列表端点无字段）。推荐：接受该口径并回写 spec W2-6（retention 删文件后 manifest 同步是持续负担）；备选：列表端点补「最近一次结果」聚合字段（从 NotificationQueue 最近 BACKUP_* 行推导）。
+
+---
+
+## [2026-11-04] P1 批 5：WS 协议收口 + #38 备份后端 ∥ #40 members UI ✅
+
+团队形态：lead 亲自前置收口（WS 协议常量化迁 shared，批 4 遗留 OQ 清账，commit `740ff88`）→ 2 implementer 并行（A=#38 backend+compose+docs+shared 唯一写者 / B=#40 frontend 独占不 commit）→ 4 份双轴 review（2 reviewer × 2 票）→ 2 fixer 按域并行 → lead 真机双用户验收 + 统一 commit/push/关票。质量门终值 **769** = backend 548（511+36+1）/ shared 41（37+4）/ frontend 183（166+17）；lint/tsc 全 0；6 commits（1 refactor 收口 + 2 feat + 2 fix + 本 docs）；#38/#40 关票带证据。
+
+### Design decisions
+- [2026-11-04] 决策：WS 协议契约单一真相源落 shared `wsProtocol.ts`（WS_PATH + 消息接口 + isNotificationType），前端 lib/wsProtocol.ts 转 re-export 门面（消费方 import 零改动）、backend sendTo 系列签名 unknown→WsServerMessage 类型锚定——锚定当场抓出 3 处测试脑补小写枚举值（'system_alert'→'SYSTEM_ALERT'，unknown 签名时代漏网）。buildWsUrl 留前端（浏览器语义）；WS_HEARTBEAT_MS 留 backend（实现细节非契约）。
+- [2026-11-04] 决策：cron 时区走 compose `TZ=Asia/Shanghai` 系统级修正（4 个 cron 一并受益）而非 node-cron per-schedule timezone——UTC 容器下「02:00 备份」实为北京 10:00 高峰（R1+R2 双轴独立实锤）。
+- [2026-11-04] 决策：`res.download` 绝对路径场景**省略 root**（实测反转 libcheck：绝对路径+root 被 send 库 join 拼坏路径恒 500；root 仅适用相对路径）——防线等强（白名单正则先于 fs → 前缀校验 → 绝对路径 download），spec+research 双处订正标注。
+
+### Deviations
+- A/B 并行写 notes 各自追加到**文件尾**（互不知对方写入位置），布局偏离「新 section 插顶部」惯例——lead 收口搬移归位（本次）。
+- rtk 假象 +1 新实例：**收集失败被报成 PASS(0) EXIT=0**（wsProtocol 红测试阶段）——压缩层吞 collection failure 伪造退出码，`rtk proxy` 复跑才见真红。
+- 生成层损坏 3 连（Write 烂尾截断/乱字符「两条」/多余括号）——回读 + 诊断核实修复（generation-corruption-reread 教训连续应验）。
+- 真机四坑实录：①Sidebar 菜单项是 div 非 button（a11y 树有文本但 button 选择器抓不到）②候选行点击必须点 button 本身（容器 div click 无效，picked 恒 null → 提交按钮 disabled 卡死）③React 受控 select 原生 setter+change 配方未触发 onChange（MCP fill 按 option 文本匹配才生效，且 fill 的 value 是 option 文本非 value 属性）④CDP click confirm 假成功第四实例（evaluate 内联点击解，批 2 第三实例同款）。
+
+### Tradeoffs
+- 不修挂账：parseInt NaN 既有病（env.ts 5 处同款，不跨票修）；手动触发单飞锁（better-sqlite3 同步驱动隐式保障，备案）；同秒 tmp 竞态（双败无损坏）；mtime vs 文件名时间戳（展示级）；cron 备份审计（挂后续票）；icon title vs aria-label（全仓既有模式整批另议）；用户搜索 debounce（内网规模低风险）。
+- review 战果：4 份报告 0 blocker / 0 major / 9 minor / 15 nit，采纳修复 11 项（7 backend + 4 frontend）+ 挂账 8 项。R2 亲测复跑质量门（非信自报）+ R4 后端真源逐行核权限链——「亲拉证据不信转述」纪律两票一致。
+- 元数据口径（R2 minor-1）：推荐「文件即真相」（大小/时间走列表，时长走触发响应，状态走通知+审计）+ 回写 spec W2-6——挂 OQ 待用户确认。
+
+### Open questions
+- 备份元数据「时长/状态」口径（挂顶部清单，需用户裁决）。
+
+## [2026-11-04] #38 备份后端（W2-6）：VACUUM INTO + cron 02:00 + 手动触发 + retention + compose 卷
+
+### Design decisions
+- 单文件 `utils/backupService.ts`（createBackup/listBackups/applyRetention/startBackupScheduler 同文件）——与三 cleaner（session/audit/notification）同族先例；controller 消费 utils 无障碍（ipMonitor 先例）。
+- 源库路径推导强制过 `resolveSqliteUrl`（防「备到空库」）+ 备份前 fail-fast 存在性校验；备份目录相对路径锚定 backend 根（参照 SCHEMA_DIR 模式）。
+- 通知在 service 层接线（非 libcheck 建议的「调用侧」）：两入口（cron/手动）DRY，「备份结果必通知」是不变量；emit 失败只记日志不传播。
+- 下载三重防线：白名单正则（先于 fs）→ path.resolve+startsWith 前缀校验 → 绝对路径 res.download。
+- retention 挂在每次备份成功后顺带执行（非独立 cron），顺带清 *.tmp 中断残留。
+
+### Deviations
+- **不落 backup_manifest.json（design §7.4 偏离）**：文件即真相（文件名时间戳 + stat），失败记录走通知+审计双通道；manifest 会引入与实际文件不一致的第二真相源。
+- **cron 触发的备份不落 SYSTEM_BACKUP 审计**（无 req 语境，auditMiddleware 不可用；通知+logger 已是记录通道）；手动触发挂审计（reset-link 先例）。
+- res.download 不带 `{root}` 选项（libcheck §4 「root 双保险」建议的反向修正）：send 库对 root 内路径做 join 拼接，**绝对路径+root 组合拼出坏路径**（实测 500 Forbidden/ENOENT）；绝对路径场景 root 应省略。
+
+### Tradeoffs
+- 同秒双触发 = 同名覆盖（秒级时间戳文件名）：不引入毫秒/序号后缀（白名单契约 `backup-YYYYMMDD-HHmmss.db` 是下载防线一部分）；并发竞争失败者有 BACKUP_FAILED 通知兜底。
+- 备份产物验证用 PrismaBetterSQLite3 只读打开（测试侧），不新增 better-sqlite3 直接依赖（pnpm 严格隔离下 import 传递依赖不可靠）。
+
+### Open questions
+- 备份**下载**动作是否需要专属审计 action（如 BACKUP_DOWNLOAD，需扩 shared AUDIT_ACTIONS）——数据外带属敏感操作，票面未要求，挂账后续票。
+
+## [2026-11-04] #40 members 管理 UI：工作台项目成员弹窗（W3-7，后端零改动）
+
+### Design decisions
+- 入口落 Sidebar 项目 MoreVertical 菜单（「成员管理」项）+ 新组件 `ProjectMembersModal.tsx`（max-w-2xl 单列卡片，对齐 UserManagementModal 深色惯例）。
+- 权限遮蔽三层对齐后端：入口= admin 直通或 `project.currentUserRole` 存在；管理面（添加/改角色/移除他人）= admin 或 owner（POST/PATCH 路由门 owner）；离开（移除自己）= 任何成员（DELETE viewer 门 + service self 校验）。
+- admin 非成员时 `currentUserRole` 为 **null**（projectService listProjects 的 admin where 不带 members 过滤）——管理判定必须并上 `currentUser.role==='admin'`，单看 currentUserRole 会漏 admin。
+- 添加成员数据源用已有 `GET /users/search`（仅登录门，userRoutes.ts:11）+ `useSearchUsers`——owner 非 admin 也能选人；已是成员的结果项禁选标注（后端 MEMBER_001 兜底）。
+- 离开项目成功后 `onLeft(projectId)` 回调 App：重置 activeProjectId + invalidate projects/connections（成员关系变化影响可见项目集）；查询失效不塞进 queries.ts（hooks 的 onSuccess 只 invalidate ['members']，保持 hooks 通用）。
+- 角色中文标签 `MEMBER_ROLE_LABELS` 落 constants.ts（照 AUDIT_ACTION_LABELS 先例）；头像渐变 getAvatarColor 抽 utils/avatar.ts（review 修复：App↔Modal 双份维护消除，第三方文件零循环）。
+
+### Deviations
+- 自己行不提供改角色下拉：后端本允许 owner/admin 改任何人（含自己），UI 收紧防误操作（owner 自降还有 MEMBER_002 last-owner 保护混杂，语义混乱）。
+- 唯一 owner 自己行不渲染「离开」按钮（非禁用置灰）：MEMBER_002 必拒，遮蔽比可点后报错干净；owner 数按第一页近似（两个误判方向已注释诚实化——review 修复）。
+- 成员列表不分页 UI（后端默认 pageSize 20，hook 无 pageSize 参数）：头部「共 N 人」+ 超页时右下提示，跟随 useUsers/useProjects 同款截断面现状。
+
+### Tradeoffs
+- 改角色用 inline select 直接提交（无 confirm）：低风险操作，失败 toast 回滚显示（对齐 2FA 开关交互先例）；移除他人/离开走危险 confirm。
+- MoreVertical 容器加 `role="button"` + aria-label（项目名后缀）：纯为可测性（opacity-0 hover 按钮 fireEvent 需语义锚点），无 a11y 插件约束下零 lint 风险；键盘可达性（tabIndex + Enter/Space）为 review 修复补强。
+
+### Open questions
+- ~~「真机四操作全过」待验收~~ ✅ 2026-11-04 lead 真机双用户全过（证据见 #40 关票评论）；用户搜索 debounce 挂账。
 
 ---
 
@@ -930,24 +1000,3 @@ D1–D10 全部拍板；剩余见顶部「待办」。
 - Plan B Step5 `git push` 触发 CI（待用户在有远端的仓库执行）。
 - Plan A Task8 docker build/load 验证（本环境无 Docker 守护进程）—— D7 plan 验证项未实际执行。
 - D7 终验依赖 docker build。
-
-## [2026-11-04] #38 备份后端（W2-6）：VACUUM INTO + cron 02:00 + 手动触发 + retention + compose 卷
-
-### Design decisions
-- 单文件 `utils/backupService.ts`（createBackup/listBackups/applyRetention/startBackupScheduler 同文件）——与三 cleaner（session/audit/notification）同族先例；controller 消费 utils 无障碍（ipMonitor 先例）。
-- 源库路径推导强制过 `resolveSqliteUrl`（防「备到空库」）+ 备份前 fail-fast 存在性校验；备份目录相对路径锚定 backend 根（参照 SCHEMA_DIR 模式）。
-- 通知在 service 层接线（非 libcheck 建议的「调用侧」）：两入口（cron/手动）DRY，「备份结果必通知」是不变量；emit 失败只记日志不传播。
-- 下载三重防线：白名单正则（先于 fs）→ path.resolve+startsWith 前缀校验 → 绝对路径 res.download。
-- retention 挂在每次备份成功后顺带执行（非独立 cron），顺带清 *.tmp 中断残留。
-
-### Deviations
-- **不落 backup_manifest.json（design §7.4 偏离）**：文件即真相（文件名时间戳 + stat），失败记录走通知+审计双通道；manifest 会引入与实际文件不一致的第二真相源。
-- **cron 触发的备份不落 SYSTEM_BACKUP 审计**（无 req 语境，auditMiddleware 不可用；通知+logger 已是记录通道）；手动触发挂审计（reset-link 先例）。
-- res.download 不带 `{root}` 选项（libcheck §4 「root 双保险」建议的反向修正）：send 库对 root 内路径做 join 拼接，**绝对路径+root 组合拼出坏路径**（实测 500 Forbidden/ENOENT）；绝对路径场景 root 应省略。
-
-### Tradeoffs
-- 同秒双触发 = 同名覆盖（秒级时间戳文件名）：不引入毫秒/序号后缀（白名单契约 `backup-YYYYMMDD-HHmmss.db` 是下载防线一部分）；并发竞争失败者有 BACKUP_FAILED 通知兜底。
-- 备份产物验证用 PrismaBetterSQLite3 只读打开（测试侧），不新增 better-sqlite3 直接依赖（pnpm 严格隔离下 import 传递依赖不可靠）。
-
-### Open questions
-- 备份**下载**动作是否需要专属审计 action（如 BACKUP_DOWNLOAD，需扩 shared AUDIT_ACTIONS）——数据外带属敏感操作，票面未要求，挂账后续票。
