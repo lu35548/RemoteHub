@@ -25,7 +25,7 @@
 
 ## [2026-11-04] P1 批 5：WS 协议收口 + #38 备份后端 ∥ #40 members UI ✅
 
-团队形态：lead 亲自前置收口（WS 协议常量化迁 shared，批 4 遗留 OQ 清账，commit `740ff88`）→ 2 implementer 并行（A=#38 backend+compose+docs+shared 唯一写者 / B=#40 frontend 独占不 commit）→ 4 份双轴 review（2 reviewer × 2 票）→ 2 fixer 按域并行 → lead 真机双用户验收 + 统一 commit/push/关票。质量门终值 **769** = backend 548（511+36+1）/ shared 41（37+4）/ frontend 183（166+17）；lint/tsc 全 0；6 commits（1 refactor 收口 + 2 feat + 2 fix + 本 docs）；#38/#40 关票带证据。
+团队形态：lead 亲自前置收口（WS 协议常量化迁 shared，批 4 遗留 OQ 清账，commit `740ff88`）→ 2 implementer 并行（A=#38 backend+compose+docs+shared 唯一写者 / B=#40 frontend 独占不 commit）→ 4 份双轴 review（2 reviewer × 2 票）→ 2 fixer 按域并行 → lead 真机双用户验收 + 统一 commit/push/关票。质量门终值 **769** = backend 548（511+36+1）/ shared 41（37+4）/ frontend 183（166+17）；lint/tsc 全 0；5 commits（1 refactor 收口 + 2 feat + 1 fix + 1 docs——#40 review 修复随 feat 合并未独立成 commit）；#38/#40 关票带证据。
 
 ### Design decisions
 - [2026-11-04] 决策：WS 协议契约单一真相源落 shared `wsProtocol.ts`（WS_PATH + 消息接口 + isNotificationType），前端 lib/wsProtocol.ts 转 re-export 门面（消费方 import 零改动）、backend sendTo 系列签名 unknown→WsServerMessage 类型锚定——锚定当场抓出 3 处测试脑补小写枚举值（'system_alert'→'SYSTEM_ALERT'，unknown 签名时代漏网）。buildWsUrl 留前端（浏览器语义）；WS_HEARTBEAT_MS 留 backend（实现细节非契约）。
