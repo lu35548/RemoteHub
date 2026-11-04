@@ -12,27 +12,11 @@ import Sidebar from './components/Sidebar';
 import ConnectionCard from './components/ConnectionCard';
 import ConnectionModal from './components/ConnectionModal';
 import ProjectModal, { type ProjectFormInput } from './components/ProjectModal';
+import ProjectMembersModal from './components/ProjectMembersModal';
 import UserManagementModal from './components/UserManagementModal';
 import NotificationCenter from './components/NotificationCenter';
 import { useUI } from './components/UIComponents';
-
-// Helper for consistent avatar colors based on User ID（v1 原样）
-const getAvatarColor = (userId: string) => {
-  const gradients = [
-    'from-rose-500 to-orange-500',
-    'from-orange-500 to-amber-500',
-    'from-emerald-500 to-teal-600',
-    'from-teal-500 to-cyan-600',
-    'from-cyan-500 to-blue-600',
-    'from-blue-500 to-indigo-600',
-    'from-violet-500 to-purple-600',
-    'from-fuchsia-500 to-pink-600'
-  ];
-  let hash = 0;
-  for (let i = 0; i < userId.length; i++) hash = userId.charCodeAt(i) + ((hash << 5) - hash);
-  const index = Math.abs(hash) % gradients.length;
-  return gradients[index];
-};
+import { getAvatarColor } from './utils/avatar';
 
 const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
   const { toast, confirm } = useUI();
@@ -70,6 +54,8 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
   const [isConnectionModalOpen, setIsConnectionModalOpen] = useState(false);
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
   const [editingConnection, setEditingConnection] = useState<ConnectionDetail | null>(null);
+  // #40 成员管理弹窗：目标项目（Sidebar 项目菜单进入）
+  const [membersProject, setMembersProject] = useState<ProjectListItem | null>(null);
 
   // 过滤 + 分组（v1 行为：项目视图显示项目全部；全局视图 vpn/all 互斥过滤；搜索覆盖 username/tags）
   const { hosts, vpns } = useMemo(() => {
@@ -201,6 +187,13 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
     }
   };
 
+  // #40：离开项目后——若正处于该项目视图则回全局，并失效项目/连接缓存（成员关系变化影响可见项目集）
+  const handleLeftProject = (projectId: string) => {
+    if (activeProjectId === projectId) setActiveProjectId(null);
+    void queryClient.invalidateQueries({ queryKey: ['projects'] });
+    void queryClient.invalidateQueries({ queryKey: ['connections'] });
+  };
+
   const getHeaderTitle = () => {
     if (activeProjectId && projects && projects.length > 0) {
       const project = projects.find(p => p.id === activeProjectId);
@@ -221,6 +214,7 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
         onAddProject={() => { setEditingProject(null); setIsProjectModalOpen(true); }}
         onEditProject={handleEditProject}
         onDeleteProject={handleDeleteProject}
+        onManageMembers={setMembersProject}
         onLogout={handleLogout}
         currentUser={currentUser}
         onOpenUserModal={() => setIsUserModalOpen(true)}
@@ -388,6 +382,14 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
         isOpen={isUserModalOpen}
         onClose={() => setIsUserModalOpen(false)}
         currentUser={currentUser}
+      />
+
+      <ProjectMembersModal
+        isOpen={!!membersProject}
+        onClose={() => setMembersProject(null)}
+        project={membersProject}
+        currentUser={currentUser}
+        onLeft={handleLeftProject}
       />
     </div>
   );

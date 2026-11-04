@@ -42,6 +42,12 @@ vi.mock('./api/queries', () => ({
   // 票 #37：通知中心消费（铃铛真实渲染，数据层受控）
   useNotifications: vi.fn(() => ({ data: undefined, isPending: false })),
   useMarkNotificationRead: vi.fn(() => ({ mutate: vi.fn(), isPending: false, variables: undefined })),
+  // 票 #40：ProjectMembersModal 挂载即调用（isOpen false 时组件 hooks 仍执行；pid 空串停查）
+  useMembers: vi.fn(() => ({ data: undefined })),
+  useAddMember: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
+  useUpdateMemberRole: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
+  useRemoveMember: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
+  useSearchUsers: vi.fn(() => ({ data: undefined })),
   // App.tsx 值导入 NOTIFICATION_QUERY_KEY（WS 派发写缓存键）：factory 缺 key 会炸 "No export defined on the mock"
   NOTIFICATION_QUERY_KEY: ['notifications'],
 }));

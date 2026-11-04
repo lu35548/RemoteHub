@@ -1,7 +1,7 @@
 // 枚举短码 → 中文显示文案（v1 enum 的文案值在 v2 拆为「机器码 + 展示层映射」）。
 // 仅含 PROTOCOL：v2 的 vpnType 语义是 VPN 协议类型，与 v1 VpnType（登录方式：网页登录/客户端/L2TP）
 // 是两个概念，T5 迁移 ConnectionModal 时按 shared 语义另行处理。
-import type { AuditAction, AuditResource, NotificationType, Protocol, VpnType } from '@remotehub/shared';
+import type { AuditAction, AuditResource, MemberRole, NotificationType, Protocol, VpnType } from '@remotehub/shared';
 
 // 协议族分类（ConnectionModal/ConnectionCard 共用的领域概念）
 export const PROPRIETARY_PROTOCOLS: Protocol[] = ['TODESK', 'SUNLOGIN', 'TEAMVIEWER', 'ANYDESK'];
@@ -107,6 +107,13 @@ export const AUDIT_RESOURCE_LABELS: Record<AuditResource, string> = {
   member: '成员',
   system: '系统',
   security: '安全',
+};
+
+// 项目成员角色 → 中文标签（票 #40 成员弹窗；值域 = shared MEMBER_ROLES 三档，照 AUDIT_ACTION_LABELS 先例）
+export const MEMBER_ROLE_LABELS: Record<MemberRole, string> = {
+  owner: '所有者',
+  editor: '编辑者',
+  viewer: '查看者',
 };
 
 // 通知类型 → 中文标签（票 #37 通知中心；值域 = shared NOTIFICATION_TYPES 八类，照 AUDIT_ACTION_LABELS 先例）

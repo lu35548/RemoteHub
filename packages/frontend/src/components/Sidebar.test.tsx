@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import Sidebar from './Sidebar';
@@ -22,6 +22,7 @@ const props = {
   onAddProject: noop,
   onEditProject: noop,
   onDeleteProject: noop,
+  onManageMembers: noop,
   onLogout: noop,
   currentUser: admin,
   onOpenUserModal: noop,
@@ -61,5 +62,60 @@ describe('Sidebar 冒烟（T4）', () => {
     );
     await events.click(screen.getByText('某某科技 - 私有云'));
     expect(onSelectProject).toHaveBeenCalledWith('p1');
+  });
+});
+
+describe('成员管理入口（#40）', () => {
+  // MoreVertical 按钮 opacity-0 hover 才显示——userEvent 点击会静默失效，用 fireEvent 直点
+  const openProjectMenu = (name: string) => {
+    fireEvent.click(screen.getByRole('button', { name: `项目操作 ${name}` }));
+  };
+
+  it('admin：项目菜单含「成员管理」，点击回调带项目', () => {
+    const onManageMembers = vi.fn();
+    render(
+      <MemoryRouter>
+        <Sidebar {...props} onManageMembers={onManageMembers} />
+      </MemoryRouter>,
+    );
+    openProjectMenu('某某科技 - 私有云');
+    fireEvent.click(screen.getByText('成员管理'));
+    expect(onManageMembers).toHaveBeenCalledWith(projects[0]);
+  });
+
+  it('入口遮蔽：非 admin 且 currentUserRole 为空 → 菜单无「成员管理」，编辑/删除不受影响', () => {
+    const user: UserPublic = { ...admin, id: 'u2', role: 'user' };
+    render(
+      <MemoryRouter>
+        <Sidebar {...props} currentUser={user} />
+      </MemoryRouter>,
+    );
+    openProjectMenu('测试项目');
+    expect(screen.queryByText('成员管理')).not.toBeInTheDocument();
+    expect(screen.getByText('编辑')).toBeInTheDocument();
+    expect(screen.getByText('删除')).toBeInTheDocument();
+  });
+
+  it('项目成员（非 admin 但 currentUserRole 存在）→ 入口可见', () => {
+    const user: UserPublic = { ...admin, id: 'u2', role: 'user' };
+    const memberProjects: ProjectListItem[] = [{ ...projects[0]!, currentUserRole: 'viewer' }];
+    render(
+      <MemoryRouter>
+        <Sidebar {...props} projects={memberProjects} currentUser={user} />
+      </MemoryRouter>,
+    );
+    openProjectMenu('某某科技 - 私有云');
+    expect(screen.getByText('成员管理')).toBeInTheDocument();
+  });
+
+  it('键盘可达：MoreVertical 触发按钮 Enter 打开项目菜单', () => {
+    render(
+      <MemoryRouter>
+        <Sidebar {...props} />
+      </MemoryRouter>,
+    );
+    fireEvent.keyDown(screen.getByRole('button', { name: '项目操作 某某科技 - 私有云' }), { key: 'Enter' });
+    expect(screen.getByText('成员管理')).toBeInTheDocument();
+    expect(screen.getByText('编辑')).toBeInTheDocument();
   });
 });

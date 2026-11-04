@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LayoutGrid, Plus, Monitor, Network, PanelLeftClose, PanelLeftOpen, Search, X, LogOut, Settings, MoreVertical, Edit2, Trash2, LayoutDashboard } from 'lucide-react';
+import { LayoutGrid, Plus, Monitor, Network, PanelLeftClose, PanelLeftOpen, Search, X, LogOut, Settings, MoreVertical, Edit2, Trash2, LayoutDashboard, Users } from 'lucide-react';
 import type { ProjectListItem, UserPublic } from '@remotehub/shared';
 import { Tooltip } from './UIComponents';
 import { ProjectIcon } from './ProjectIcons';
@@ -14,6 +14,8 @@ interface SidebarProps {
   onAddProject: () => void;
   onEditProject: (project: ProjectListItem) => void;
   onDeleteProject: (id: string) => void;
+  /** #40 成员管理弹窗入口（admin 直通或项目成员可见） */
+  onManageMembers: (project: ProjectListItem) => void;
   onLogout: () => void;
   currentUser: UserPublic;
   onOpenUserModal: () => void;
@@ -28,6 +30,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   onAddProject,
   onEditProject,
   onDeleteProject,
+  onManageMembers,
   onLogout,
   currentUser,
   onOpenUserModal
@@ -210,15 +213,35 @@ const Sidebar: React.FC<SidebarProps> = ({
                       <span className="text-sm font-medium truncate text-left flex-1 tracking-tight">{project.name}</span>
                       
                       <div className="relative" onClick={(e) => e.stopPropagation()}>
-                         <div 
+                         <div
+                           role="button"
+                           tabIndex={0}
+                           aria-label={`项目操作 ${project.name}`}
                            onClick={(e) => toggleProjectMenu(e, project.id)}
+                           onKeyDown={(e) => {
+                             // 键盘可达：Enter/Space 与 onClick 同逻辑（stopPropagation + 切换菜单）；Space 阻默认滚动
+                             if (e.key === 'Enter' || e.key === ' ') {
+                               e.preventDefault();
+                               e.stopPropagation();
+                               setProjectMenuOpenId(projectMenuOpenId === project.id ? null : project.id);
+                             }
+                           }}
                            className={`p-1 rounded-md transition-all ${projectMenuOpenId === project.id ? 'text-white bg-white/10' : 'text-slate-600 hover:text-white hover:bg-white/10 opacity-0 group-hover:opacity-100'}`}
                          >
                            <MoreVertical size={14} />
                          </div>
                          {projectMenuOpenId === project.id && (
                             <div className="absolute right-0 top-8 w-32 bg-slate-900/95 border border-white/10 rounded-xl shadow-2xl backdrop-blur-xl z-50 py-1 animate-in fade-in zoom-in duration-200 origin-top-right ring-1 ring-black/50">
-                              <div 
+                              {/* #40 成员管理入口：admin 全局直通或项目成员（对齐后端 member 权限链，非成员遮蔽） */}
+                              {(currentUser.role === 'admin' || !!project.currentUserRole) && (
+                                <div
+                                  onClick={(e) => { e.stopPropagation(); setProjectMenuOpenId(null); onManageMembers(project); }}
+                                  className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white flex items-center gap-2 cursor-pointer transition-colors"
+                                >
+                                  <Users size={12} /> 成员管理
+                                </div>
+                              )}
+                              <div
                                 onClick={(e) => { e.stopPropagation(); setProjectMenuOpenId(null); onEditProject(project); }}
                                 className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white flex items-center gap-2 cursor-pointer transition-colors"
                               >
