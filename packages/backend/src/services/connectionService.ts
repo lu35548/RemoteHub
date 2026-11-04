@@ -67,26 +67,68 @@ interface ConnectionUpdateData {
 
 // ─── Public Functions ───
 
-/** 连接列表 — admin 全部，非 admin 已加入项目的连接 */
+/** #41 连接列表过滤参数：tag 精确匹配 / q 三字段模糊 / sort=lastAccessed */
+export interface ConnectionListFilters {
+  tag?: string;
+  q?: string;
+  sort?: string;
+}
+
+/** 连接列表 — admin 全部，非 admin 已加入项目的连接。
+ * #41：tag 包夹法（四条件 OR，等价 SQL 「','||tags||',' LIKE '%,tag,%'」——防 test 命中 test2，
+ * NULL tags 自然排除）；q 对 name/host/username contains；sort='lastAccessed' 时最近访问优先。 */
 export async function listConnections(
   userId: string,
   userRole: string,
   projectId?: string,
   page: number = 1,
   pageSize: number = DEFAULT_PAGE_SIZE,
+  filters: ConnectionListFilters = {},
 ) {
   pageSize = Math.min(pageSize, MAX_PAGE_SIZE);
 
   const projectFilter = projectId ? { projectId } : {};
 
-  const where = userRole === 'admin'
+  const where: Prisma.ConnectionWhereInput = userRole === 'admin'
     ? projectFilter
     : { ...projectFilter, project: { members: { some: { userId } } } };
+
+  // #41 过滤条件叠加（AND 组内各自 OR）
+  const and: Prisma.ConnectionWhereInput[] = [];
+  const tag = filters.tag?.trim();
+  if (tag) {
+    and.push({
+      OR: [
+        { tags: tag },
+        { tags: { startsWith: `${tag},` } },
+        { tags: { endsWith: `,${tag}` } },
+        { tags: { contains: `,${tag},` } },
+      ],
+    });
+  }
+  const q = filters.q?.trim();
+  if (q) {
+    and.push({
+      OR: [
+        { name: { contains: q } },
+        { host: { contains: q } },
+        { username: { contains: q } },
+      ],
+    });
+  }
+  if (and.length > 0) where.AND = and;
+
+  // #41 排序：lastAccessed 优先（SQLite DESC 下 NULL 恒殿后 = 从未访问垫底）+ updatedAt 次序稳定；
+  // 其他值宽容回退默认 updatedAt desc（不 400）
+  const orderBy: Prisma.ConnectionOrderByWithRelationInput | Prisma.ConnectionOrderByWithRelationInput[] =
+    filters.sort === 'lastAccessed'
+      ? [{ lastAccessed: 'desc' }, { updatedAt: 'desc' }]
+      : { updatedAt: 'desc' };
 
   const [connections, total] = await Promise.all([
     prisma.connection.findMany({
       where,
-      orderBy: { updatedAt: 'desc' },
+      orderBy,
       skip: (page - 1) * pageSize,
       take: pageSize,
       include: { project: { select: { id: true, name: true } } },
@@ -303,6 +345,32 @@ export async function deleteConnection(connectionId: string) {
     payload: { projectId: connection.projectId, connectionId, action: 'deleted', name: connection.name },
   }).catch((err: Error) => logger.error('连接删除通知下发失败（不传播）', { projectId: connection.projectId, connectionId, error: err.message }));
   return { id: connectionId };
+}
+
+/** #41 项目连接统计 — 按协议 groupBy 语义聚合计数 + 标签 JS 侧 split 计数。
+ * tags 为逗号分隔单串（queryable-fields 约定不迁移 JSON），空片段剔除、字面匹配（不 trim 片段，
+ * 与列表 tag 过滤的包夹法字面语义保持一致）；NULL tags 跳过。 */
+export async function getConnectionStats(projectId: string) {
+  const project = await prisma.project.findUnique({ where: { id: projectId } });
+  if (!project) throw createAppError('PROJ_002');
+
+  const connections = await prisma.connection.findMany({
+    where: { projectId },
+    select: { protocol: true, tags: true },
+  });
+
+  const protocols: Record<string, number> = {};
+  const tags: Record<string, number> = {};
+  for (const c of connections) {
+    protocols[c.protocol] = (protocols[c.protocol] ?? 0) + 1;
+    if (!c.tags) continue;
+    for (const fragment of c.tags.split(',')) {
+      if (fragment === '') continue; // 空片段剔除（"a,,b"）
+      tags[fragment] = (tags[fragment] ?? 0) + 1;
+    }
+  }
+
+  return { protocols, tags };
 }
 
 /** 解密密码 */

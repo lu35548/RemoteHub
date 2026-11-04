@@ -9,6 +9,7 @@ vi.mock('../services/connectionService.js', () => ({
   updateConnection: vi.fn(),
   deleteConnection: vi.fn(),
   decryptPassword: vi.fn(),
+  getConnectionStats: vi.fn(),
 }));
 
 import * as connectionController from './connectionController.js';
@@ -62,7 +63,7 @@ describe('connectionController', () => {
       );
       await connectionController.listConnections(req, res, next);
 
-      expect(connectionService.listConnections).toHaveBeenCalledWith('u1', 'owner', 'p1', 1, 20);
+      expect(connectionService.listConnections).toHaveBeenCalledWith('u1', 'owner', 'p1', 1, 20, {});
       expect(res.json).toHaveBeenCalledWith({ success: true, ...mockResult });
       expect(next).not.toHaveBeenCalled();
     });
@@ -77,7 +78,38 @@ describe('connectionController', () => {
       const { req, res, next } = mockReqRes(undefined, {}, undefined, { id: 'u1', role: 'admin' });
       await connectionController.listConnections(req, res, next);
 
-      expect(connectionService.listConnections).toHaveBeenCalledWith('u1', 'admin', undefined, 1, 20);
+      expect(connectionService.listConnections).toHaveBeenCalledWith('u1', 'admin', undefined, 1, 20, {});
+    });
+
+    // ── #41 连接金矿：tag / q / sort 透传 ──
+
+    it('#41 tag/q/sort 查询参数 → 组装 filters 透传 service', async () => {
+      (connectionService.listConnections as ReturnType<typeof vi.fn>).mockResolvedValue({ data: [], pagination: { page: 1, pageSize: 20, total: 0 } });
+
+      const { req, res, next } = mockReqRes(
+        undefined,
+        { projectId: 'p1', tag: 'prod', q: 'web', sort: 'lastAccessed' },
+        undefined,
+        { id: 'u1', role: 'user' },
+      );
+      await connectionController.listConnections(req, res, next);
+
+      expect(connectionService.listConnections).toHaveBeenCalledWith('u1', 'user', 'p1', 1, 20, { tag: 'prod', q: 'web', sort: 'lastAccessed' });
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    it('#41 部分参数（仅 q）→ filters 只含有值键，空串不透传', async () => {
+      (connectionService.listConnections as ReturnType<typeof vi.fn>).mockResolvedValue({ data: [], pagination: { page: 1, pageSize: 20, total: 0 } });
+
+      const { req, res, next } = mockReqRes(
+        undefined,
+        { q: 'web', tag: '', sort: '' },
+        undefined,
+        { id: 'u1', role: 'user' },
+      );
+      await connectionController.listConnections(req, res, next);
+
+      expect(connectionService.listConnections).toHaveBeenCalledWith('u1', 'user', undefined, 1, 20, { q: 'web' });
     });
 
     it('service 抛错 → 传递到 next', async () => {
@@ -302,6 +334,36 @@ describe('connectionController', () => {
 
       const { req, res, next } = mockReqRes({ id: 'nonexist' }, undefined, undefined, { id: 'u1', role: 'editor' });
       await connectionController.decryptPassword(req, res, next);
+
+      expect(next).toHaveBeenCalledWith(error);
+    });
+  });
+
+  // ─── #41 getProjectConnectionStats ───
+  describe('getProjectConnectionStats', () => {
+    it('有效项目 ID → 返回协议/标签聚合计数', async () => {
+      const mockData = {
+        protocols: { SSH: 2, RDP: 1 },
+        tags: { prod: 2, web: 1 },
+      };
+      (connectionService.getConnectionStats as ReturnType<typeof vi.fn>).mockResolvedValue(mockData);
+
+      const { req, res, next } = mockReqRes({ id: 'p1' }, undefined, undefined, { id: 'u1', role: 'viewer' });
+      await connectionController.getProjectConnectionStats(req, res, next);
+
+      expect(connectionService.getConnectionStats).toHaveBeenCalledWith('p1');
+      expect(res.json).toHaveBeenCalledWith({ success: true, data: mockData });
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    it('项目不存在 → 传递 PROJ_002 到 next', async () => {
+      const error = new Error('PROJ_002') as any;
+      error.code = 'PROJ_002';
+      error.statusCode = 404;
+      (connectionService.getConnectionStats as ReturnType<typeof vi.fn>).mockRejectedValue(error);
+
+      const { req, res, next } = mockReqRes({ id: 'nonexist' }, undefined, undefined, { id: 'u1', role: 'viewer' });
+      await connectionController.getProjectConnectionStats(req, res, next);
 
       expect(next).toHaveBeenCalledWith(error);
     });

@@ -51,6 +51,7 @@ import {
   decryptPassword,
   listConnections,
   getConnection,
+  getConnectionStats,
 } from './connectionService.js';
 import { emitToProjectMembers } from './notificationService.js';
 
@@ -660,6 +661,169 @@ describe('connectionService', () => {
         requiredVpnId: 'vpn-1',
         hasPassword: true,
       });
+    });
+
+    // ── #41 连接金矿：tag / q / sort 过滤 ──
+
+    it("#41 tag 过滤 → 包夹法四条件 OR（等价 SQL 包夹法「,||tags||, LIKE %,tag,%」，防 test 命中 test2）", async () => {
+      (prisma.connection.findMany as MockFn).mockResolvedValue([]);
+      (prisma.connection.count as MockFn).mockResolvedValue(0);
+
+      await listConnections('admin-1', 'admin', undefined, 1, 20, { tag: 'test' });
+
+      expect(prisma.connection.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            AND: [{
+              OR: [
+                { tags: 'test' },
+                { tags: { startsWith: 'test,' } },
+                { tags: { endsWith: ',test' } },
+                { tags: { contains: ',test,' } },
+              ],
+            }],
+          }),
+        }),
+      );
+      // count 与 findMany 共用同一 where（total 语义一致）
+      expect(prisma.connection.count).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            AND: [{
+              OR: [
+                { tags: 'test' },
+                { tags: { startsWith: 'test,' } },
+                { tags: { endsWith: ',test' } },
+                { tags: { contains: ',test,' } },
+              ],
+            }],
+          }),
+        }),
+      );
+    });
+
+    it('#41 q 模糊 → name/host/username 三字段 OR contains', async () => {
+      (prisma.connection.findMany as MockFn).mockResolvedValue([]);
+      (prisma.connection.count as MockFn).mockResolvedValue(0);
+
+      await listConnections('admin-1', 'admin', undefined, 1, 20, { q: 'web' });
+
+      expect(prisma.connection.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            AND: [{
+              OR: [
+                { name: { contains: 'web' } },
+                { host: { contains: 'web' } },
+                { username: { contains: 'web' } },
+              ],
+            }],
+          }),
+        }),
+      );
+    });
+
+    it('#41 tag + q 叠加 → AND 两组条件并存', async () => {
+      (prisma.connection.findMany as MockFn).mockResolvedValue([]);
+      (prisma.connection.count as MockFn).mockResolvedValue(0);
+
+      await listConnections('admin-1', 'admin', undefined, 1, 20, { tag: 'prod', q: 'web' });
+
+      const call = (prisma.connection.findMany as MockFn).mock.calls[0]![0]!;
+      expect(call.where.AND).toHaveLength(2);
+      expect(call.where.AND[0].OR[0]).toEqual({ tags: 'prod' });
+      expect(call.where.AND[1].OR).toEqual([
+        { name: { contains: 'web' } },
+        { host: { contains: 'web' } },
+        { username: { contains: 'web' } },
+      ]);
+    });
+
+    it('#41 过滤参数与既有权限/项目过滤合并（非 admin + projectId + tag）', async () => {
+      (prisma.connection.findMany as MockFn).mockResolvedValue([]);
+      (prisma.connection.count as MockFn).mockResolvedValue(0);
+
+      await listConnections('user-1', 'user', 'proj-1', 1, 20, { tag: 'test' });
+
+      expect(prisma.connection.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            projectId: 'proj-1',
+            project: { members: { some: { userId: 'user-1' } } },
+            AND: [{ OR: expect.any(Array) }],
+          }),
+        }),
+      );
+    });
+
+    it('#41 sort=lastAccessed → lastAccessed desc 优先 + updatedAt desc 次序（null 殿后由 SQLite DESC 语义保证，integration 锁行为）', async () => {
+      (prisma.connection.findMany as MockFn).mockResolvedValue([]);
+      (prisma.connection.count as MockFn).mockResolvedValue(0);
+
+      await listConnections('admin-1', 'admin', undefined, 1, 20, { sort: 'lastAccessed' });
+
+      expect(prisma.connection.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderBy: [{ lastAccessed: 'desc' }, { updatedAt: 'desc' }],
+        }),
+      );
+    });
+
+    it('#41 sort 缺省/未知值 → 维持 updatedAt desc 默认序（宽容回退，不 400）', async () => {
+      (prisma.connection.findMany as MockFn).mockResolvedValue([]);
+      (prisma.connection.count as MockFn).mockResolvedValue(0);
+
+      await listConnections('admin-1', 'admin', undefined, 1, 20, { sort: 'bogus' });
+      expect(prisma.connection.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ orderBy: { updatedAt: 'desc' } }),
+      );
+
+      await listConnections('admin-1', 'admin');
+      expect(prisma.connection.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ orderBy: { updatedAt: 'desc' } }),
+      );
+    });
+  });
+
+  // ── #41 连接金矿：项目连接统计 ──
+
+  describe('getConnectionStats', () => {
+    it('按协议聚合计数 + tags JS 侧拆分计数（空片段剔除、null 跳过）', async () => {
+      (prisma.project.findUnique as MockFn).mockResolvedValue({ id: 'proj-1' });
+      (prisma.connection.findMany as MockFn).mockResolvedValue([
+        { protocol: 'SSH', tags: 'prod,web' },
+        { protocol: 'SSH', tags: 'prod' },
+        { protocol: 'RDP', tags: null },
+        { protocol: 'VPN', tags: 'vpn,,prod' }, // 空片段剔除
+      ]);
+
+      const result = await getConnectionStats('proj-1');
+
+      expect(result).toEqual({
+        protocols: { SSH: 2, RDP: 1, VPN: 1 },
+        tags: { prod: 3, web: 1, vpn: 1 },
+      });
+      expect(prisma.connection.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { projectId: 'proj-1' },
+          select: { protocol: true, tags: true },
+        }),
+      );
+    });
+
+    it('无连接项目 → 空聚合（protocols/tags 均空对象）', async () => {
+      (prisma.project.findUnique as MockFn).mockResolvedValue({ id: 'proj-1' });
+      (prisma.connection.findMany as MockFn).mockResolvedValue([]);
+
+      const result = await getConnectionStats('proj-1');
+
+      expect(result).toEqual({ protocols: {}, tags: {} });
+    });
+
+    it('项目不存在 → PROJ_002', async () => {
+      (prisma.project.findUnique as MockFn).mockResolvedValue(null);
+
+      await expect(getConnectionStats('nope')).rejects.toMatchObject({ code: 'PROJ_002' });
     });
   });
 });

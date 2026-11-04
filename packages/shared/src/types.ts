@@ -257,6 +257,28 @@ export interface DecryptedPasswordResponse {
   password: string;
 }
 
+// ─── 连接金矿（票 #41：tag 过滤 / 搜索 / 最近访问排序 / 统计）───
+
+/** GET /connections 查询参数。
+ * tag：精确匹配 tags 串中单个片段（包夹法，防 test 命中 test2；SQLite LIKE 家族对 ASCII 大小写不敏感）；
+ * q：name/host/username 三字段模糊匹配（contains，同为 ASCII 大小写不敏感）；
+ * sort：'lastAccessed' = 最近访问优先（NULL 殿后），缺省或其他值 = updatedAt desc。 */
+export interface ConnectionListQuery {
+  projectId?: string;
+  tag?: string;
+  q?: string;
+  sort?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+/** GET /projects/:id/connections/stats 响应 data：按协议/标签聚合计数。
+ * tags 为逗号分隔单串的 JS 侧拆分计数（空片段剔除、NULL 跳过、片段字面值不 trim）。 */
+export interface ConnectionStats {
+  protocols: Record<string, number>;
+  tags: Record<string, number>;
+}
+
 export interface AuditLogDetail {
   before?: Record<string, unknown>;
   after?: Record<string, unknown>;

@@ -1,6 +1,7 @@
 // packages/backend/src/controllers/connectionController.ts
 import type { Request, Response, NextFunction } from 'express';
 import * as connectionService from '../services/connectionService.js';
+import type { ConnectionListFilters } from '../services/connectionService.js';
 
 function qsParam(val: unknown, fallback: string): string {
   if (typeof val === 'string') return val;
@@ -13,14 +14,33 @@ export async function listConnections(req: Request, res: Response, next: NextFun
     const projectId = qsParam(req.query.projectId, '');
     const page = Math.max(1, parseInt(qsParam(req.query.page, '1')) || 1);
     const pageSize = parseInt(qsParam(req.query.pageSize, '20')) || 20;
+    // #41 连接金矿：tag/q/sort 透传 service（只含有值键；空串归一为不传，service 侧 trim 后亦不生效）
+    const filters: ConnectionListFilters = {};
+    const tag = qsParam(req.query.tag, '');
+    const q = qsParam(req.query.q, '');
+    const sort = qsParam(req.query.sort, '');
+    if (tag) filters.tag = tag;
+    if (q) filters.q = q;
+    if (sort) filters.sort = sort;
     const result = await connectionService.listConnections(
       req.user.id,
       req.user.role,
       projectId || undefined,
       page,
       pageSize,
+      filters,
     );
     res.json({ success: true, ...result });
+  } catch (err) { next(err); }
+}
+
+/** #41 项目连接统计（GET /projects/:id/connections/stats，权限由 projectRoutes 的 projectRole('viewer') 门） */
+export async function getProjectConnectionStats(req: Request, res: Response, next: NextFunction) {
+  try {
+    const id = req.params['id'];
+    if (typeof id !== 'string') throw new Error('缺少 id');
+    const data = await connectionService.getConnectionStats(id);
+    res.json({ success: true, data });
   } catch (err) { next(err); }
 }
 
