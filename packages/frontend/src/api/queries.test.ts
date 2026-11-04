@@ -31,7 +31,7 @@ vi.mock('./client.js', () => ({
   ensureRefreshed: vi.fn().mockResolvedValue(null),
 }));
 
-import { exportAuditLogsCsv, useAuditLogs, useDashboard, useForgotPassword, useProjectStats, useResetPassword, useAdminResetLink, useUserStats, useNotifications, useMarkNotificationRead, NOTIFICATION_QUERY_KEY } from './queries';
+import { exportAuditLogsCsv, useAuditLogs, useDashboard, useForgotPassword, useProjectStats, useResetPassword, useAdminResetLink, useUserStats, useNotifications, useMarkNotificationRead, NOTIFICATION_QUERY_KEY, useAdminBackups, useTriggerBackup, downloadBackup, BACKUP_QUERY_KEY } from './queries';
 import { api, ensureRefreshed } from './client.js';
 import type { AuditLogQuery } from '@remotehub/shared';
 
@@ -269,5 +269,117 @@ describe('通知 hooks（票 #37）', () => {
     expect(api.patch).toHaveBeenCalledWith('/notifications/n9/read'); // 单参数 = 无 body
     (mutationCaptured!.onSuccess as () => void)();
     expect(invalidate).toHaveBeenCalledWith({ queryKey: NOTIFICATION_QUERY_KEY });
+  });
+});
+
+// ── 备份 hooks（#39）──
+// GET /admin/backups 是非分页端点（backupController.listBackupsHandler 直出纯数组，
+// 无 pagination 包裹）：queryFn 须走剥壳的 api.get——与 audit-logs（分页 getRaw）相反
+describe('备份 hooks（#39）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    captured = undefined;
+    mutationCaptured = undefined;
+  });
+
+  it('useAdminBackups：GET /admin/backups（api.get 剥壳），staleTime 5 分钟', () => {
+    useAdminBackups();
+
+    expect(captured).toMatchObject({ queryKey: BACKUP_QUERY_KEY, staleTime: 5 * 60_000 });
+    expect(typeof captured!.queryFn).toBe('function');
+    (captured!.queryFn as () => unknown)();
+    expect(mockedGet).toHaveBeenCalledWith('/admin/backups');
+  });
+
+  it('useTriggerBackup：POST /admin/backups（无 body）；成功后 invalidate 备份列表', () => {
+    const invalidate = vi.fn();
+    (useQueryClient as ReturnType<typeof vi.fn>).mockReturnValueOnce({ invalidateQueries: invalidate } as never);
+    useTriggerBackup();
+    (mutationCaptured!.mutationFn as () => unknown)();
+    expect(api.post).toHaveBeenCalledWith('/admin/backups'); // 单参数 = 无 body
+    (mutationCaptured!.onSuccess as () => void)();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: BACKUP_QUERY_KEY });
+  });
+});
+
+describe('downloadBackup（#39）', () => {
+  /** jsdom 未实现 URL.createObjectURL/revokeObjectURL，defineProperty 补桩 */
+  function stubObjectURL() {
+    Object.defineProperty(URL, 'createObjectURL', { value: vi.fn().mockReturnValue('blob:mock'), configurable: true });
+    Object.defineProperty(URL, 'revokeObjectURL', { value: vi.fn(), configurable: true });
+  }
+
+  it('fetch blob → downloadBlob 以行内 filename 落盘（带 Authorization）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, blob: async () => new Blob(['db'], { type: 'application/octet-stream' }) });
+    vi.stubGlobal('fetch', fetchMock);
+    stubObjectURL();
+    let clicked: HTMLAnchorElement | undefined;
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      // a.click() 无参调用，取元素只能经 this（jsdom 场景的正当 alias）
+      // eslint-disable-next-line @typescript-eslint/no-this-alias
+      clicked = this;
+    });
+
+    await downloadBackup('backup-20261104-020000.db');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/admin/backups/backup-20261104-020000.db/download',
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer tok123' },
+        credentials: 'include',
+      }),
+    );
+    expect(URL.createObjectURL).toHaveBeenCalled();
+    expect(clicked?.download).toBe('backup-20261104-020000.db'); // 落盘文件名 = 行内 filename
+    expect(clicked?.href).toContain('blob:mock');
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock');
+
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('非 2xx → 抛中文错误（不触发下载）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500 });
+    vi.stubGlobal('fetch', fetchMock);
+    stubObjectURL();
+
+    await expect(downloadBackup('backup-20261104-020000.db')).rejects.toThrow('下载失败');
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('401 → ensureRefreshed 刷新后重试一次成功（新 token 进 Authorization）', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 401 })
+      .mockResolvedValueOnce({ ok: true, blob: async () => new Blob(['db']) });
+    vi.stubGlobal('fetch', fetchMock);
+    stubObjectURL();
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    (ensureRefreshed as ReturnType<typeof vi.fn>).mockResolvedValue('tok456');
+
+    await downloadBackup('backup-20261104-020000.db');
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect((fetchMock.mock.calls[1] as unknown[])[1]).toHaveProperty(
+      'headers.Authorization', 'Bearer tok456',
+    );
+    expect(URL.createObjectURL).toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('非 2xx 且 body 是 ApiErrorResponse → 保留服务端中文消息', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false, status: 403, json: async () => ({ success: false, error: { code: 'ROLE_001', message: '仅管理员可访问' } }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(downloadBackup('backup-20261104-020000.db')).rejects.toThrow('仅管理员可访问');
+
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 });

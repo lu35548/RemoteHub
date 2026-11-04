@@ -10,6 +10,7 @@ import ForgotPasswordPage from './components/ForgotPasswordPage.js';
 import ResetPasswordPage from './components/ResetPasswordPage.js';
 import AdminDashboardPage from './components/AdminDashboardPage.js';
 import AuditLogsPage from './components/AuditLogsPage.js';
+import BackupsPage from './components/BackupsPage.js';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -50,6 +51,8 @@ async function bootstrap() {
     // access token payload 仅 { userId } 无 role，不动 jwt.ts 一期签名契约
     { path: '/admin/dashboard', loader: requireAuth, element: <AdminDashboardPage /> },
     { path: '/admin/audit-logs', loader: requireAuth, element: <AuditLogsPage /> },
+    // 备份管理（票 #39，§19 预留第三页落位）：两段式同上——loader 只验登录，admin 在页面内校验
+    { path: '/admin/backups', loader: requireAuth, element: <BackupsPage /> },
   ]);
 
   const root = document.getElementById('root')!;

@@ -443,3 +443,69 @@ export function useMarkNotificationRead() {
     onSuccess: () => qc.invalidateQueries({ queryKey: NOTIFICATION_QUERY_KEY }),
   });
 }
+
+// ─── Backups（#39 备份管理页）─────────────────────────────────────────
+// 两个 API 事实（读 #38 后端真源定案，非猜测）：
+// ① GET /admin/backups 是非分页端点（listBackupsHandler 直出纯数组，无 pagination 包裹）
+//   → queryFn 走剥壳的 api.get（与 audit-logs 分页 getRaw 相反）；
+// ② 元数据口径（2026-11-04 用户裁决「文件即真相」）：列表只有 filename/sizeBytes/createdAt
+//   （stat 实时读），无状态字段——状态语义由通知历史承载（BACKUP_COMPLETED/FAILED），本页不轮询。
+
+/** 备份列表项（本地镜像 API 形状，shared 本批被独占；合流后可迁 shared） */
+export interface BackupListItem {
+  filename: string;
+  sizeBytes: number;
+  createdAt: string; // ISO 时间（stat.mtimeMs）
+}
+
+/** POST /admin/backups 响应（本地镜像；controller 不外露服务器 path） */
+export interface BackupTriggerResult {
+  filename: string;
+  sizeBytes: number;
+  durationMs: number;
+}
+
+/** 备份列表缓存键（触发成功后 invalidate 共用，防 key 漂移） */
+export const BACKUP_QUERY_KEY = ['admin-backups'] as const;
+
+/** 备份列表（后端已按文件名时间戳倒序返回；staleTime 与 /admin 监控端点同口径 5 分钟） */
+export function useAdminBackups() {
+  return useQuery({
+    queryKey: BACKUP_QUERY_KEY,
+    queryFn: () => api.get<BackupListItem[]>('/admin/backups'),
+    staleTime: 5 * 60_000,
+  });
+}
+
+/** 手动触发备份（无 body POST）；成功后 invalidate 列表——新文件即现，文件即真相无需轮询 */
+export function useTriggerBackup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<BackupTriggerResult>('/admin/backups'),
+    onSuccess: () => qc.invalidateQueries({ queryKey: BACKUP_QUERY_KEY }),
+  });
+}
+
+/** 下载备份：文件流走手动 fetch（同 exportAuditLogsCsv 链路）→ downloadBlob 以行内 filename 落盘 */
+export async function downloadBackup(filename: string): Promise<void> {
+  const url = `${API_BASE}/admin/backups/${encodeURIComponent(filename)}/download`;
+  const doFetch = (token: string | null) =>
+    fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {}, credentials: 'include' });
+  // 401 与统一客户端同口径：ensureRefreshed 后重试一次（仍失败落下方错误分支，toast 呈现）
+  let res = await doFetch(getAccessToken());
+  if (res.status === 401) {
+    const newToken = await ensureRefreshed();
+    if (newToken) res = await doFetch(newToken);
+  }
+  if (!res.ok) {
+    let message = '下载失败';
+    try {
+      const body: unknown = await res.json();
+      message = (body as ApiErrorResponse)?.error?.message || message;
+    } catch {
+      // 错误响应非 JSON（如网关 502）→ 中文兜底
+    }
+    throw new Error(message);
+  }
+  downloadBlob(await res.blob(), filename);
+}
