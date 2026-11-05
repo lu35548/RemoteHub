@@ -377,7 +377,9 @@ export async function deleteConnection(connectionId: string) {
  * 不走 DTO 脱敏层、不 decrypt+encrypt（同 ENCRYPTION_KEY 下解密即一致），
  * 密码全程不过前端明文中转。
  * 权限差异（票面钦定，与 v1 owner-only 不同）：目标项目写权（路由层 projectRole('editor')）；
- * 权限拒绝由路由中间件短路，本函数只管数据边界（不存在 → CONN_002）。 */
+ * 权限拒绝由路由中间件短路，本函数只管数据边界（不存在 → CONN_002）。
+ * 并发备案：并发克隆同名原件时后者 create 撞 @@unique([projectId,name]) → P2002 → CONN_005 409
+ * （handlePrismaUniqueViolation 先例同款），窗口极窄不做重试。 */
 export async function cloneConnection(userId: string, connectionId: string) {
   const original = await prisma.connection.findUnique({ where: { id: connectionId } });
   if (!original) throw createAppError('CONN_002');

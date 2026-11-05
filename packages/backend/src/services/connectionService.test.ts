@@ -1313,6 +1313,17 @@ describe('cloneConnection（#43 克隆）', () => {
     });
   });
 
+  it('空缺回填：「TestConn (副本) 2」存在但「TestConn (副本)」空缺 → 回填「TestConn (副本)」（无冲突即用，票面三级规则）', async () => {
+    setupClone(mockConnection);
+    (prisma.connection.findMany as MockFn).mockResolvedValue([{ name: 'TestConn (副本) 2' }]);
+
+    await cloneConnection('user-1', 'conn-1');
+
+    expect(prisma.connection.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ name: 'TestConn (副本)' }),
+    });
+  });
+
   it('连接不存在 → CONN_002', async () => {
     (prisma.connection.findUnique as MockFn).mockResolvedValue(null);
 
