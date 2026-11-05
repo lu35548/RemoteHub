@@ -1194,6 +1194,11 @@ describe('#45 launchConnection - 直连分派矩阵', () => {
     expect(await launchWith({ protocol: 'HTTPS', host: 's.example.com', port: 8443 })).toEqual({ type: 'url', url: 'https://s.example.com:8443' });
   });
 
+  it('HTTPS host 已含 scheme（完整 URL）→ 原样返回无双拼、不拼 port 后缀（#45 真机修复）', async () => {
+    const r = await launchWith({ protocol: 'HTTPS', host: 'https://x.example.com/portal', port: 8443 });
+    expect(r).toEqual({ type: 'url', url: 'https://x.example.com/portal' });
+  });
+
   // ── VNC / 缺失 ──
 
   it('VNC → CONN_006（该协议不支持直连，registry unsupported）', async () => {

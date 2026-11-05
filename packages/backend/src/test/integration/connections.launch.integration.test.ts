@@ -146,6 +146,19 @@ describe('GET /api/v1/connections/:id/launch — URL JSON（VPN / HTTP / HTTPS�
     expect(res.status).toBe(200);
     expect(res.body.data).toEqual({ type: 'url', url: 'https://console.example.com' });
   });
+
+  it('HTTPS host 存完整 URL（含 scheme）→ url 原样返回无双拼、不拼 port（#45 真机修复：buildUrl 防双拼守卫）', async () => {
+    const created = await apiCreate(b.adminToken, {
+      name: '门户直链', host: 'https://x.example.com/portal', protocol: 'HTTPS', port: 8443,
+    });
+    expect(created.status).toBe(201);
+    const id = created.body.data.id as string;
+    const res = await request(b.app)
+      .get(`/api/v1/connections/${id}/launch`)
+      .set('Authorization', `Bearer ${b.adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ type: 'url', url: 'https://x.example.com/portal' });
+  });
 });
 
 describe('GET /api/v1/connections/:id/launch — 权限四分支', () => {

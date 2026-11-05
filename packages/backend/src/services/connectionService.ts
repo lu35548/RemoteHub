@@ -514,8 +514,13 @@ function buildRdpFileBody(host: string, port: number | null, username: string | 
   return Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(content, 'utf16le')]);
 }
 
-/** URL 形态通用拼装：port 显式存在且非 registry 默认时拼接（默认端口省略） */
+/** URL 形态通用拼装：port 显式存在且非 registry 默认时拼接（默认端口省略）。
+ * #45 真机修复（跨票）：host 已含 scheme（完整 URL，如 https://x.example.com/portal——
+ * 前端「网址 URL」placeholder 引导用户可填完整 URL）时原样返回——不拼协议前缀、
+ * 也不拼 port 后缀（完整 URL 语义下端口已含在 URL 内）。守卫对齐同文件 launchConnection
+ * vpnLoginUrl 分支先例（https://https:// 双拼实锤于真机 toast）。 */
 function buildUrl(scheme: 'http' | 'https', host: string, port: number | null, defaultPort: number | null): string {
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(host)) return host;
   const suffix = port != null && port !== defaultPort ? `:${port}` : '';
   return `${scheme}://${host}${suffix}`;
 }
