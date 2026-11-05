@@ -31,7 +31,7 @@ vi.mock('./client.js', () => ({
   ensureRefreshed: vi.fn().mockResolvedValue(null),
 }));
 
-import { exportAuditLogsCsv, useAuditLogs, useDashboard, useForgotPassword, useProjectStats, useResetPassword, useAdminResetLink, useUserStats, useNotifications, useMarkNotificationRead, NOTIFICATION_QUERY_KEY, useAdminBackups, useTriggerBackup, downloadBackup, BACKUP_QUERY_KEY, useConnections, useConnectionStats, useDeleteConnection } from './queries';
+import { exportAuditLogsCsv, launchConnection, useAuditLogs, useDashboard, useForgotPassword, useProjectStats, useResetPassword, useAdminResetLink, useUserStats, useNotifications, useMarkNotificationRead, NOTIFICATION_QUERY_KEY, useAdminBackups, useTriggerBackup, downloadBackup, BACKUP_QUERY_KEY, useConnections, useConnectionStats, useDeleteConnection } from './queries';
 import { api, ensureRefreshed } from './client.js';
 import type { AuditLogQuery } from '@remotehub/shared';
 
@@ -193,6 +193,141 @@ describe('exportAuditLogsCsv（票 #23）', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(exportAuditLogsCsv({})).rejects.toThrow('仅管理员可导出');
+
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+});
+
+// ── 直连动作分派（票 #46）──
+// launch 端点双形态响应：application/x-rdp → Blob 下载（downloadBlob 真链路，jsdom 配方同 CSV 导出）；
+// JSON → 剥壳 union。401 与统一客户端同口径（ensureRefreshed 重试一次）。
+describe('launchConnection（票 #46）', () => {
+  /** jsdom 未实现 URL.createObjectURL/revokeObjectURL，defineProperty 补桩 */
+  function stubObjectURL() {
+    Object.defineProperty(URL, 'createObjectURL', { value: vi.fn().mockReturnValue('blob:mock'), configurable: true });
+    Object.defineProperty(URL, 'revokeObjectURL', { value: vi.fn(), configurable: true });
+  }
+
+  it('application/x-rdp → Blob 下载（filename* UTF-8 中文解码 + Authorization 头）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({
+        'Content-Type': 'application/x-rdp',
+        'Content-Disposition': `attachment; filename="connection-c1.rdp"; filename*=UTF-8''${encodeURIComponent('财务部.rdp')}`,
+      }),
+      blob: async () => new Blob(['﻿full address:s:'], { type: 'application/x-rdp' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    stubObjectURL();
+    let clicked: HTMLAnchorElement | undefined;
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      // a.click() 无参调用，取元素只能经 this（jsdom 场景的正当 alias）
+      // eslint-disable-next-line @typescript-eslint/no-this-alias
+      clicked = this;
+    });
+
+    const result = await launchConnection('c1');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/connections/c1/launch',
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer tok123' },
+        credentials: 'include',
+      }),
+    );
+    expect(result).toMatchObject({ type: 'rdp_file', filename: '财务部.rdp' });
+    expect(URL.createObjectURL).toHaveBeenCalled();
+    expect(clicked?.download).toBe('财务部.rdp');
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock');
+
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('rdp 响应无 filename* → 回退 ASCII filename（connection-<id>.rdp）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({
+        'Content-Type': 'application/x-rdp',
+        'Content-Disposition': 'attachment; filename="connection-c1.rdp"',
+      }),
+      blob: async () => new Blob(['x']),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    stubObjectURL();
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+    const result = await launchConnection('c1');
+
+    expect(result).toMatchObject({ type: 'rdp_file', filename: 'connection-c1.rdp' });
+
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('JSON command → 剥壳返回 {type:command, command}', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'Content-Type': 'application/json' }),
+      json: async () => ({ success: true, data: { type: 'command', command: 'ssh root@10.0.0.5 -p 22' } }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await launchConnection('c1');
+
+    expect(result).toMatchObject({ type: 'command', command: 'ssh root@10.0.0.5 -p 22' });
+
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('JSON url → 剥壳返回 {type:url, url}', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'Content-Type': 'application/json' }),
+      json: async () => ({ success: true, data: { type: 'url', url: 'https://intranet.example.com' } }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await launchConnection('c1');
+
+    expect(result).toMatchObject({ type: 'url', url: 'https://intranet.example.com' });
+
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('400 CONN_006 → 抛 Error 携带 code 属性（组件层判码出中文 toast）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false, status: 400,
+      headers: new Headers({ 'Content-Type': 'application/json' }),
+      json: async () => ({ success: false, error: { code: 'CONN_006', message: '该协议不支持直连' } }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(launchConnection('c1')).rejects.toMatchObject({ message: '该协议不支持直连', code: 'CONN_006' });
+
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('401 → ensureRefreshed 刷新后重试一次（新 token 进 Authorization）', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 401 })
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'Content-Type': 'application/json' }),
+        json: async () => ({ success: true, data: { type: 'url', url: 'https://vpn.example.com' } }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+    (ensureRefreshed as ReturnType<typeof vi.fn>).mockResolvedValue('tok456');
+
+    const result = await launchConnection('c1');
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect((fetchMock.mock.calls[1] as unknown[])[1]).toHaveProperty('headers.Authorization', 'Bearer tok456');
+    expect(result).toMatchObject({ type: 'url', url: 'https://vpn.example.com' });
 
     vi.unstubAllGlobals();
     vi.restoreAllMocks();

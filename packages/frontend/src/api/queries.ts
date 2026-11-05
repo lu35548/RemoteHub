@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { API_BASE, api, ensureRefreshed, getAccessToken, setAccessToken, mfaRequest } from './client.js';
 import { downloadBlob } from '../utils';
 import type {
-  ApiErrorResponse, AuditLog, AuditLogQuery, LoginRequest, LoginResponse, UserPublic,
+  ApiErrorResponse, ApiResponse, AuditLog, AuditLogQuery, LoginRequest, LoginResponse, UserPublic,
   Dashboard, DailyActivityStat, ProjectConnectionStat,
   ProjectListItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
   ConnectionListItem, ConnectionDetail, CreateConnectionRequest, UpdateConnectionRequest,
@@ -410,6 +410,52 @@ export async function exportAuditLogsCsv(filters: Omit<AuditLogQuery, 'page' | '
     throw new Error(message);
   }
   downloadBlob(await res.blob(), 'audit-logs.csv');
+}
+
+/** 直连动作结果 union（#46）：rdp_file 的 Blob 下载已在函数内完成（downloadBlob），调用方只做 toast */
+export type LaunchConnectionResult =
+  | { type: 'rdp_file'; filename: string }
+  | { type: 'command'; command: string }
+  | { type: 'url'; url: string };
+
+/** #46 一键直连：GET /connections/:id/launch 双形态响应解析。
+ * application/x-rdp → Blob 真链路下载（文件流走手动 fetch，api 封装只解 JSON 不返回 blob）；
+ * JSON → 剥统一响应壳返回 union。401 与统一客户端同口径（ensureRefreshed 重试一次）；
+ * 错误抛 Error 且携带 error.code（组件层判 CONN_006 出「不支持直连」中文 toast）。 */
+export async function launchConnection(id: string): Promise<LaunchConnectionResult> {
+  const url = `${API_BASE}/connections/${id}/launch`;
+  const doFetch = (token: string | null) =>
+    fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {}, credentials: 'include' });
+  let res = await doFetch(getAccessToken());
+  if (res.status === 401) {
+    const newToken = await ensureRefreshed();
+    if (newToken) res = await doFetch(newToken);
+  }
+  if (!res.ok) {
+    let message = '获取直连指令失败';
+    let code: string | undefined;
+    try {
+      const body: unknown = await res.json();
+      message = (body as ApiErrorResponse)?.error?.message || message;
+      code = (body as ApiErrorResponse)?.error?.code;
+    } catch {
+      // 错误响应非 JSON（如网关 502）→ 中文兜底
+    }
+    throw Object.assign(new Error(message), { code });
+  }
+  const contentType = res.headers.get('Content-Type') ?? '';
+  if (contentType.includes('application/x-rdp')) {
+    // RFC 5987 双写文件名：filename* UTF-8 优先（中文原名），退 ASCII filename；都无 → connection-<id>.rdp
+    const disposition = res.headers.get('Content-Disposition') ?? '';
+    const utf8Name = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+    const asciiName = disposition.match(/filename="([^"]+)"/)?.[1];
+    const filename = utf8Name ? decodeURIComponent(utf8Name) : asciiName || `connection-${id}.rdp`;
+    downloadBlob(await res.blob(), filename);
+    return { type: 'rdp_file', filename };
+  }
+  const body = (await res.json()) as ApiResponse<{ type: 'command' | 'url'; command?: string; url?: string }>;
+  const data = body.data;
+  return data.type === 'url' ? { type: 'url', url: data.url ?? '' } : { type: 'command', command: data.command ?? '' };
 }
 
 export function useProjectStats() {

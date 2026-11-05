@@ -173,3 +173,60 @@ describe('ConnectionModal（T5）', () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 });
+
+// ── #46 协议注册表动态表单 ──
+// HOST 表单按 PROTOCOL_REGISTRY[protocol].fields 动态渲染：协议切换字段联动（port 预填
+// defaultPort / port:none 不渲染 / username:none 隐藏 / hostSemantics 决定 host 文案）。
+describe('ConnectionModal 协议注册表动态表单（#46）', () => {
+  it('切 SSH → port 预填默认 22，随 payload 提交（defaultPort 联动）', async () => {
+    const onSave = vi.fn().mockResolvedValue(detail());
+    const events = userEvent.setup();
+    renderModal({ onSave });
+
+    await events.click(screen.getByRole('button', { name: /SSH 终端/ }));
+    expect((screen.getByPlaceholderText('22') as HTMLInputElement).value).toBe('22');
+
+    await events.type(screen.getByPlaceholderText('例如: 财务部-应用服务器-01'), '跳板机');
+    await events.type(screen.getByPlaceholderText('192.168.1.100'), '10.0.0.5');
+    await events.click(screen.getByRole('button', { name: '立即创建' }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave.mock.calls[0]?.[0]).toMatchObject({ protocol: 'SSH', port: 22 });
+  });
+
+  it('切 ToDesk → 表单变设备 ID：port 字段消失、host 文案「设备 ID / 识别码」、placeholder 882 331 992', async () => {
+    const events = userEvent.setup();
+    renderModal({});
+
+    await events.click(screen.getByRole('button', { name: 'ToDesk' }));
+    expect(screen.queryByPlaceholderText('3389')).not.toBeInTheDocument(); // fields.port='none' 不渲染
+    expect(screen.getByText(/设备 ID \/ 识别码/)).toBeInTheDocument(); // hostSemantics='device_id'
+    expect(screen.getByPlaceholderText('例如: 882 331 992')).toBeInTheDocument();
+  });
+
+  it('切 HTTP → username 字段消失（fields.username=none），密码字段保留', async () => {
+    const events = userEvent.setup();
+    renderModal({});
+
+    await events.click(screen.getByRole('button', { name: 'HTTP' }));
+    expect(screen.queryByPlaceholderText('root / administrator')).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText('••••••••')).toBeInTheDocument();
+  });
+
+  it('切 HTTPS → username 消失且 port 保留（fields.port=optional，placeholder 443）', async () => {
+    const events = userEvent.setup();
+    renderModal({});
+
+    await events.click(screen.getByRole('button', { name: 'HTTPS' }));
+    expect(screen.queryByPlaceholderText('root / administrator')).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText('443')).toBeInTheDocument();
+  });
+
+  it('切 VNC → port 预填 5900（registry defaultPort 裁量值）', async () => {
+    const events = userEvent.setup();
+    renderModal({});
+
+    await events.click(screen.getByRole('button', { name: 'VNC' }));
+    expect((screen.getByPlaceholderText('5900') as HTMLInputElement).value).toBe('5900');
+  });
+});

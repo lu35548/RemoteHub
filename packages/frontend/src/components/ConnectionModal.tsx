@@ -3,7 +3,8 @@ import { X, Save, Shield, Plus, Monitor, Network, Laptop, Lock, Check, Loader2 }
 import type {
   ConnectionDetail, ConnectionListItem, CreateConnectionRequest, ProjectListItem, Protocol, VpnType,
 } from '@remotehub/shared';
-import { PROTOCOL_SHORT_LABELS, PROPRIETARY_PROTOCOLS, WEB_PROTOCOLS, getProtocolColor } from '../constants';
+import { PROTOCOL_REGISTRY } from '@remotehub/shared';
+import { PROTOCOL_SHORT_LABELS, WEB_PROTOCOLS, getProtocolColor } from '../constants';
 import { ProtocolIcon } from './Icons';
 import { useUI } from './UIComponents';
 
@@ -188,7 +189,13 @@ const ConnectionModal: React.FC<ConnectionModalProps> = ({
     setCurrentData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleProtocolSelect = (p: Protocol) => setHostFormData(prev => ({ ...prev, protocol: p }));
+  // #46 协议切换字段联动：port 预填 registry 默认端口（SSH 22 / RDP 3389 / HTTPS 443 / HTTP 80 / VNC 5900；
+  // 无默认值的设备码协议清空）。编辑回填走 toFormState 不经此处，不受影响。
+  const handleProtocolSelect = (p: Protocol) => setHostFormData(prev => ({
+    ...prev,
+    protocol: p,
+    port: PROTOCOL_REGISTRY[p].defaultPort != null ? String(PROTOCOL_REGISTRY[p].defaultPort) : '',
+  }));
   const handleVpnTypeSelect = (t: VpnType) => setVpnFormData(prev => ({ ...prev, vpnType: t }));
 
   const handleTagKeyDown = (e: React.KeyboardEvent) => {
@@ -287,8 +294,14 @@ const ConnectionModal: React.FC<ConnectionModalProps> = ({
   // 编辑既有连接时锁定所属项目：backend updateConnection 白名单不含 projectId（v2 项目是权限边界，
   // 跨项目移动需专门权限设计，归 phase2——ADR-0001 auth 例外同款处理，显式 Deviation 记 notes）
   const isEditingExisting = !!editingConnection || !!vpnEditingId;
-  const isProprietary = PROPRIETARY_PROTOCOLS.includes(hostFormData.protocol || 'RDP');
-  const isWeb = WEB_PROTOCOLS.includes(hostFormData.protocol || 'RDP');
+  // #46 HOST 表单按 PROTOCOL_REGISTRY 动态渲染（协议切换字段联动）；VPN tab 保留既有字段
+  // （vpnType 驱动，不在 registry 管辖）。hostRegistry 以 hostFormData.protocol 查表——mode==='VPN'
+  // 时该表单不可见，取值无 UI 影响。
+  const hostRegistry = PROTOCOL_REGISTRY[hostFormData.protocol];
+  const isDeviceId = hostRegistry.hostSemantics === 'device_id';
+  const isWeb = WEB_PROTOCOLS.includes(hostFormData.protocol);
+  const showPort = hostRegistry.fields.port !== 'none';
+  const showUsername = hostRegistry.fields.username !== 'none';
   const isVpnWeb = mode === 'VPN' && currentData.vpnType === 'SSL_VPN';
   const vpnOptions = connections.filter(c => c.protocol === 'VPN' && c.id !== editingConnection?.id);
 
@@ -359,21 +372,22 @@ const ConnectionModal: React.FC<ConnectionModalProps> = ({
                   </select>
                 </div>
                 <div className="col-span-1 md:col-span-2 space-y-2">
-                  <label className="text-sm font-medium text-slate-300 flex items-center gap-2">{isProprietary ? '设备代码 / 识别码' : isWeb ? '网址 URL' : isVpnWeb ? '登录地址 (URL)' : '主机地址 (IP / Domain)'} <span className="text-rose-400">*</span></label>
+                  <label className="text-sm font-medium text-slate-300 flex items-center gap-2">{isDeviceId ? '设备 ID / 识别码' : isWeb ? '网址 URL' : isVpnWeb ? '登录地址 (URL)' : '主机地址 (IP / Domain)'} <span className="text-rose-400">*</span></label>
                   <div className="flex gap-3">
-                    <input name="host" value={currentData.host || ''} onChange={handleChange} disabled={isSaving} placeholder={isProprietary ? '例如: 882 331 992' : isWeb || isVpnWeb ? 'https://...' : '192.168.1.100'} required className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2.5 text-sm font-mono text-white focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50" />
-                    {!isProprietary && !isWeb && mode === 'HOST' && (
-                      <input name="port" type="number" value={currentData.port || ''} onChange={handleChange} disabled={isSaving} placeholder={hostFormData.protocol === 'SSH' ? '22' : hostFormData.protocol === 'RDP' ? '3389' : 'Port'} className="w-24 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2.5 text-sm font-mono text-white focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50" />
+                    <input name="host" value={currentData.host || ''} onChange={handleChange} disabled={isSaving} placeholder={isDeviceId ? '例如: 882 331 992' : isWeb || isVpnWeb ? 'https://...' : '192.168.1.100'} required className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2.5 text-sm font-mono text-white focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50" />
+                    {showPort && (
+                      <input name="port" type="number" value={currentData.port || ''} onChange={handleChange} disabled={isSaving} placeholder={hostRegistry.defaultPort != null ? String(hostRegistry.defaultPort) : 'Port'} className="w-24 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2.5 text-sm font-mono text-white focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50" />
                     )}
                   </div>
                 </div>
                 <div className="col-span-1 md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-5">
-                  {currentData.protocol !== 'HTTP' ? (
-                    <>
-                      <div className="space-y-2"><label className="text-sm font-medium text-slate-300">用户名 / 账号</label><input name="username" value={currentData.username || ''} onChange={handleChange} disabled={isSaving} placeholder={isProprietary ? '无 (可选)' : 'root / administrator'} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50" /></div>
-                      <div className="space-y-2"><label className="text-sm font-medium text-slate-300">密码 / Key</label><div className="relative"><input name="password" type="password" value={currentData.password || ''} onChange={handleChange} disabled={isSaving} placeholder={isEditingExisting ? '留空保持不变' : '••••••••'} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50" /><Lock className="absolute right-3 top-2.5 text-slate-600 w-4 h-4" /></div></div>
-                    </>
-                  ) : <div className="col-span-2 h-[74px]"></div>}
+                  {showUsername && (
+                    <div className="space-y-2"><label className="text-sm font-medium text-slate-300">用户名 / 账号</label><input name="username" value={currentData.username || ''} onChange={handleChange} disabled={isSaving} placeholder="root / administrator" className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50" /></div>
+                  )}
+                  <div className={`space-y-2 ${showUsername ? '' : 'md:col-span-2'}`}>
+                    <label className="text-sm font-medium text-slate-300">密码 / Key</label>
+                    <div className="relative"><input name="password" type="password" value={currentData.password || ''} onChange={handleChange} disabled={isSaving} placeholder={isEditingExisting ? '留空保持不变' : '••••••••'} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50" /><Lock className="absolute right-3 top-2.5 text-slate-600 w-4 h-4" /></div>
+                  </div>
                 </div>
               </div>
               {mode === 'HOST' && (
