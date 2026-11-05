@@ -31,7 +31,7 @@ vi.mock('./client.js', () => ({
   ensureRefreshed: vi.fn().mockResolvedValue(null),
 }));
 
-import { exportAuditLogsCsv, launchConnection, useAuditLogs, useDashboard, useForgotPassword, useProjectStats, useResetPassword, useAdminResetLink, useUserStats, useNotifications, useMarkNotificationRead, NOTIFICATION_QUERY_KEY, useAdminBackups, useTriggerBackup, downloadBackup, BACKUP_QUERY_KEY, useConnections, useConnectionStats, useDeleteConnection } from './queries';
+import { exportAuditLogsCsv, launchConnection, useAuditLogs, useDashboard, useForgotPassword, useProjectStats, useResetPassword, useAdminResetLink, useUserStats, useNotifications, useMarkNotificationRead, NOTIFICATION_QUERY_KEY, useAdminBackups, useTriggerBackup, downloadBackup, BACKUP_QUERY_KEY, useConnections, useConnectionStats, useDeleteConnection, useCloneConnection } from './queries';
 import { api, ensureRefreshed } from './client.js';
 import type { AuditLogQuery } from '@remotehub/shared';
 
@@ -483,6 +483,27 @@ describe('连接金矿 hooks（#42）', () => {
 
     (mutationCaptured!.mutationFn as (d: unknown) => unknown)('c1');
     expect(api.delete).toHaveBeenCalledWith('/connections/c1');
+
+    (mutationCaptured!.onSuccess as () => void)();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['connections'] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['connection-stats'] });
+  });
+});
+
+// ── 克隆连接 hook（#43）──
+describe('克隆连接 hook（#43）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mutationCaptured = undefined;
+  });
+
+  it('useCloneConnection：POST /connections/:id/clone（无 body）；成功后 invalidate 连接列表与统计两族缓存', () => {
+    const invalidate = vi.fn();
+    (useQueryClient as ReturnType<typeof vi.fn>).mockReturnValueOnce({ invalidateQueries: invalidate } as never);
+    useCloneConnection();
+
+    (mutationCaptured!.mutationFn as (d: unknown) => unknown)('c1');
+    expect(api.post).toHaveBeenCalledWith('/connections/c1/clone');
 
     (mutationCaptured!.onSuccess as () => void)();
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['connections'] });

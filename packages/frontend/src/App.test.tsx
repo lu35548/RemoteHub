@@ -21,6 +21,7 @@ const connMutations = vi.hoisted(() => ({
   createAsync: vi.fn(),
   updateAsync: vi.fn(),
   deleteAsync: vi.fn(),
+  cloneAsync: vi.fn(),
 }));
 
 // mock 数据层：useMe 返回 admin，列表 hooks 返回扁平分页 body（真实运行时形状，T4 教训）
@@ -42,6 +43,8 @@ vi.mock('./api/queries', () => ({
   useCreateConnection: vi.fn(() => ({ mutateAsync: connMutations.createAsync })),
   useUpdateConnection: vi.fn(() => ({ mutateAsync: connMutations.updateAsync })),
   useDeleteConnection: vi.fn(() => ({ mutateAsync: connMutations.deleteAsync })),
+  // 票 #43：克隆 mutation（factory 与 queries.ts 导出同步——缺 key 炸 "No export defined on the mock"）
+  useCloneConnection: vi.fn(() => ({ mutateAsync: connMutations.cloneAsync })),
   useLogout: vi.fn(() => ({ mutateAsync: vi.fn(), mutate: vi.fn() })),
   // T6：ConnectionCard 渲染期调用（App 用例不触发解密，给空实现即可）
   useDecryptPassword: vi.fn(() => ({ mutateAsync: vi.fn() })),
@@ -170,6 +173,29 @@ describe('连接卡片区接线（T5）', () => {
 
     await events.click(screen.getByRole('button', { name: '删除' }));
     await waitFor(() => expect(connMutations.deleteAsync).toHaveBeenCalledWith('c1'));
+  });
+
+  it('克隆连接（#43）：菜单 → 克隆连接 → mutateAsync(id) → 编辑弹窗载入克隆件 detail', async () => {
+    state.connections = [hostConn];
+    state.allConnections = [hostConn];
+    const clonedDetail = {
+      id: 'c-clone', projectId: 'p1', name: '应用服务器 (副本)', host: '192.168.1.10',
+      port: 3389, username: 'administrator', protocol: 'RDP', vpnType: null, vpnLoginUrl: null,
+      requiredVpnId: null, notes: null, tags: '生产环境', lastAccessed: null,
+      createdBy: user, updatedBy: user,
+      createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', clonedFrom: 'c1',
+    };
+    connMutations.cloneAsync.mockResolvedValueOnce(clonedDetail);
+    const events = userEvent.setup();
+    renderApp();
+
+    await events.click(screen.getByRole('button', { name: '更多操作' }));
+    await events.click(screen.getByText('克隆连接'));
+
+    expect(connMutations.cloneAsync).toHaveBeenCalledWith('c1');
+    // 成功后跳编辑弹窗载入新连接（票面「成功后跳编辑弹窗」）：编辑态标题 + 名称回填克隆件名
+    expect(await screen.findByText('编辑连接')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('应用服务器 (副本)')).toBeInTheDocument();
   });
 
   it('用户管理：侧栏 footer 头像按钮 → 打开账号管理弹窗', async () => {

@@ -12,6 +12,8 @@ interface ConnectionCardProps {
   vpnDependency?: ConnectionListItem;
   onEdit: (conn: ConnectionListItem) => void;
   onDelete: (id: string) => void;
+  /** #43 克隆入口（回调上浮 App 统一处理，与 onEdit/onDelete 同模式） */
+  onClone: (conn: ConnectionListItem) => void;
 }
 
 const getRelativeTime = (dateStr?: string) => {
@@ -25,7 +27,7 @@ const getRelativeTime = (dateStr?: string) => {
   return `${Math.floor(hours / 24)}天前`;
 };
 
-const ConnectionCard: React.FC<ConnectionCardProps> = ({ connection, vpnDependency, onEdit, onDelete }) => {
+const ConnectionCard: React.FC<ConnectionCardProps> = ({ connection, vpnDependency, onEdit, onDelete, onClone }) => {
   const { toast } = useUI();
   const decrypt = useDecryptPassword();
   const [showMenu, setShowMenu] = useState(false);
@@ -214,6 +216,8 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({ connection, vpnDependen
               {showMenu && (
                 <div className="absolute right-0 top-8 w-36 bg-slate-900 border border-white/10 rounded-xl shadow-2xl z-20 py-1 animate-in fade-in zoom-in duration-150 ring-1 ring-black/50 origin-top-right">
                   <button onClick={() => { setShowMenu(false); onEdit(connection); }} className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white flex items-center gap-2"><Edit2 size={12} /> 编辑配置</button>
+                  {/* #43 克隆入口：服务端密文复制（POST /:id/clone），成功后 App 层打开编辑弹窗载入克隆件 */}
+                  <button onClick={() => { setShowMenu(false); onClone(connection); }} className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-white/5 flex items-center gap-2"><Copy size={12} /> 克隆连接</button>
                   {connection.protocol === 'RDP' && (
                     <>
                       <button onClick={() => { setShowMenu(false); setShowRdpSetup(true); }} className="w-full text-left px-3 py-2 text-xs text-amber-400 hover:bg-white/5 flex items-center gap-2"><Zap size={12} /> {isRdpReady ? '重新配置' : '配置直连'}</button>

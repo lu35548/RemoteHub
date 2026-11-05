@@ -53,6 +53,7 @@ const renderCard = (props: Partial<Parameters<typeof ConnectionCard>[0]> = {}) =
         connection={hostItem()}
         onEdit={vi.fn()}
         onDelete={vi.fn()}
+        onClone={vi.fn()}
         {...props}
       />
     </UIProvider>,
@@ -125,6 +126,16 @@ describe('ConnectionCard（T5）', () => {
     await events.click(screen.getByRole('button', { name: /更多/i }));
     await events.click(screen.getByText('删除'));
     expect(onDelete).toHaveBeenCalledWith('c1');
+  });
+
+  it('菜单：克隆连接回调 connection（#43 克隆入口）', async () => {
+    const onClone = vi.fn();
+    const events = userEvent.setup();
+    renderCard({ onClone });
+
+    await events.click(screen.getByRole('button', { name: /更多/i }));
+    await events.click(screen.getByText('克隆连接'));
+    expect(onClone).toHaveBeenCalledWith(expect.objectContaining({ id: 'c1' }));
   });
 });
 

@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ConnectionDetail, ConnectionListItem, ConnectionListQuery, CreateConnectionRequest, ProjectListItem, ProjectDetail, UserPublic } from '@remotehub/shared';
 import { api, setAccessToken } from './api/client';
-import { useMe, useLogout, useProjects, useConnections, useConnectionStats, useCreateProject, useUpdateProject, useDeleteProject, useCreateConnection, useUpdateConnection, useDeleteConnection, NOTIFICATION_QUERY_KEY } from './api/queries';
+import { useMe, useLogout, useProjects, useConnections, useConnectionStats, useCreateProject, useUpdateProject, useDeleteProject, useCreateConnection, useUpdateConnection, useDeleteConnection, useCloneConnection, NOTIFICATION_QUERY_KEY } from './api/queries';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { useWs } from './hooks/useWs';
 import { dispatchWsMessage } from './lib/notificationDispatch';
@@ -44,6 +44,7 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
   const createConnectionMutation = useCreateConnection();
   const updateConnectionMutation = useUpdateConnection();
   const deleteConnectionMutation = useDeleteConnection();
+  const cloneConnectionMutation = useCloneConnection();
 
   // 大 pageSize 一次拉全（后端 MAX_PAGE_SIZE=100 上限，spec 决策 3 的「200」勘误为上限值；个人项目量级足够）
   const { data: projectsPage } = useProjects(1, 100);
@@ -235,6 +236,19 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
     });
   };
 
+  // #43 克隆：调 clone 端点（密文服务端复制不过前端）→ 成功后打开编辑弹窗载入克隆件
+  // （票面「成功后跳编辑弹窗」；响应 detail 即完整形状，免二次 fetchQuery——handleEditConnection 惯例只补列表项缺的字段）
+  const handleCloneConnection = async (conn: ConnectionListItem) => {
+    try {
+      const cloned = await cloneConnectionMutation.mutateAsync(conn.id);
+      setEditingConnection(cloned);
+      setIsConnectionModalOpen(true);
+      toast('success', '克隆成功', `已创建 "${cloned.name}"，密码已随连接复制`);
+    } catch {
+      toast('error', '克隆失败', '无法克隆连接，请重试');
+    }
+  };
+
   // 注：v1 的导出/导入是死功能链（Sidebar 从无导出按钮，Download/Upload 为死 import），等价迁移时整链移除
 
   const handleLogout = async () => {
@@ -406,6 +420,7 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
                       connection={conn}
                       onEdit={handleEditConnection}
                       onDelete={handleDeleteConnection}
+                      onClone={handleCloneConnection}
                     />
                   ))}
                 </div>
@@ -429,6 +444,7 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
                       vpnDependency={allConnections.find(c => c.id === conn.requiredVpnId) ?? undefined}
                       onEdit={handleEditConnection}
                       onDelete={handleDeleteConnection}
+                      onClone={handleCloneConnection}
                     />
                   ))}
                 </div>

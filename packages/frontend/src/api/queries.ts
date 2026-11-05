@@ -262,6 +262,16 @@ export function useDecryptPassword() {
   });
 }
 
+/** #43 克隆连接（POST /connections/:id/clone）：密文服务端复制不过前端，返回新连接 detail
+ * （clonedFrom 携带来源 id）。克隆即新建——成功后失效连接列表与统计两族缓存（同 CRUD 先例）。 */
+export function useCloneConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post<ConnectionDetail>(`/connections/${id}/clone`),
+    onSuccess: () => invalidateConnectionCaches(qc),
+  });
+}
+
 // ─── Members ───
 
 export function useMembers(projectId: string, page = 1) {
