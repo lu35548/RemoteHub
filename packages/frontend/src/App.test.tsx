@@ -196,6 +196,8 @@ describe('连接卡片区接线（T5）', () => {
     // 成功后跳编辑弹窗载入新连接（票面「成功后跳编辑弹窗」）：编辑态标题 + 名称回填克隆件名
     expect(await screen.findByText('编辑连接')).toBeInTheDocument();
     expect(screen.getByDisplayValue('应用服务器 (副本)')).toBeInTheDocument();
+    // 成功 toast 锁密文复制语义（rev-43-spec nit：「密码已随连接复制」= 密文服务端复制不过前端）
+    expect(await screen.findByText('已创建 "应用服务器 (副本)"，密码已随连接复制')).toBeInTheDocument();
   });
 
   it('用户管理：侧栏 footer 头像按钮 → 打开账号管理弹窗', async () => {
