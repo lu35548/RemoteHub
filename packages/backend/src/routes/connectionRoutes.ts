@@ -16,3 +16,7 @@ connectionRoutes.delete('/:id', authMiddleware, auditMiddleware({ action: 'CONNE
 connectionRoutes.post('/:id/decrypt-password', authMiddleware, auditMiddleware({ action: 'CONNECTION_ACCESS', resource: 'connection' }), projectRoleMiddleware('editor' as MemberRole), connectionController.decryptPassword);
 // #45 直连三类分派（viewer 门——rdp/命令串/URL 全由 viewer 可见字段构成，不含密码；审计挂 CONNECTION_ACCESS 同 decrypt-password 先例）
 connectionRoutes.get('/:id/launch', authMiddleware, auditMiddleware({ action: 'CONNECTION_ACCESS', resource: 'connection' }), projectRoleMiddleware('viewer' as MemberRole), connectionController.launchConnection);
+// #43 克隆（写操作 → editor 门同 PATCH/DELETE，非 v1 的 owner-only——票面钦定目标项目写权；
+// 审计 CONNECTION_CREATE——克隆即新建，resourceId 取响应体新 id（resolveResourceId 优先 envelope.data.id），
+// detail.after 从响应体 clonedFrom 自动留痕）
+connectionRoutes.post('/:id/clone', authMiddleware, auditMiddleware({ action: 'CONNECTION_CREATE', resource: 'connection' }), projectRoleMiddleware('editor' as MemberRole), connectionController.cloneConnection);

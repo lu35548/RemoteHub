@@ -370,6 +370,76 @@ export async function deleteConnection(connectionId: string) {
   return { id: connectionId };
 }
 
+/** #43 克隆连接（POST /connections/:id/clone）。
+ * v1 参照消费点（ConnectionRepository.ts:501-526），本票完成后 v1 backend/ 目录可删。
+ *
+ * 密文服务端复制（spec W3-9 / 票面 L52）：直查 prisma 原行拿 encryptedPass 原样落新行——
+ * 不走 DTO 脱敏层、不 decrypt+encrypt（同 ENCRYPTION_KEY 下解密即一致），
+ * 密码全程不过前端明文中转。
+ * 权限差异（票面钦定，与 v1 owner-only 不同）：目标项目写权（路由层 projectRole('editor')）；
+ * 权限拒绝由路由中间件短路，本函数只管数据边界（不存在 → CONN_002）。 */
+export async function cloneConnection(userId: string, connectionId: string) {
+  const original = await prisma.connection.findUnique({ where: { id: connectionId } });
+  if (!original) throw createAppError('CONN_002');
+
+  // 改名递增（@@unique([projectId,name]) 避让）+ 超长校验（复制语义下唯一新生成字段）
+  const name = await resolveCloneName(original.projectId, original.name);
+  const vName = validateConnectionName(name);
+  if (!vName.valid) {
+    throw createAppError('VAL_001', [{ field: 'name', message: vName.message }]);
+  }
+
+  try {
+    const connection = await prisma.connection.create({
+      data: {
+        projectId: original.projectId,
+        name,
+        host: original.host,
+        port: original.port,
+        username: original.username,
+        encryptedPass: original.encryptedPass,
+        protocol: original.protocol,
+        vpnType: original.vpnType,
+        vpnLoginUrl: original.vpnLoginUrl,
+        requiredVpnId: original.requiredVpnId,
+        notes: original.notes,
+        tags: original.tags,
+        lastAccessed: null, // 新连接从未访问
+        createdBy: userId,
+        updatedBy: userId,
+      },
+    });
+    // #36：克隆即新建，通知项目全体成员（fire-and-forget，失败只记日志——create 先例同款）
+    void emitToProjectMembers(connection.projectId, {
+      type: 'CONNECTION_UPDATED',
+      payload: { projectId: connection.projectId, connectionId: connection.id, action: 'created', name: connection.name },
+    }).catch((err: Error) => logger.error('连接克隆通知下发失败（不传播）', { projectId: connection.projectId, connectionId: connection.id, error: err.message }));
+    const userMap = await resolveUserRefs([connection.createdBy, connection.updatedBy]);
+    // clonedFrom 进响应体 → auditMiddleware 的 detail.after 从 envelope.data 自动携带（无自定义通道，留痕零成本）
+    return { ...toDetail(connection, false, userMap), clonedFrom: connectionId };
+  } catch (error) {
+    await handlePrismaUniqueViolation(error);
+    throw error;
+  }
+}
+
+/** #43 克隆名递增（@@unique([projectId,name]) 避让，v1 RemoteConnection.clone 先例格式）：
+ * 「X」→「X (副本)」→「X (副本) 2」→「X (副本) 3」…（半角括号 + 单半角空格，测试锁死）。
+ * startsWith 收集后 Set 精确判等——「X (副本)A」前缀命中不占号；「X (副本)」空缺时
+ * 即使「X (副本) 2」存在也回填（无冲突即用，票面三级规则）。 */
+async function resolveCloneName(projectId: string, originalName: string): Promise<string> {
+  const base = `${originalName} (副本)`;
+  const siblings = await prisma.connection.findMany({
+    where: { projectId, name: { startsWith: base } },
+    select: { name: true },
+  });
+  const names = new Set(siblings.map((s) => s.name));
+  if (!names.has(base)) return base;
+  let n = 2;
+  while (names.has(`${base} ${n}`)) n++;
+  return `${base} ${n}`;
+}
+
 /** #41 项目连接统计 — 按协议 groupBy 语义聚合计数 + 标签 JS 侧 split 计数。
  * tags 为逗号分隔单串（queryable-fields 约定不迁移 JSON），空片段剔除、字面匹配（不 trim 片段，
  * 与列表 tag 过滤的包夹法字面语义保持一致）；NULL tags 跳过。

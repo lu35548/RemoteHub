@@ -222,6 +222,8 @@ export interface ConnectionDetail {
   createdAt: string;
   updatedAt: string;
   encryptedPass?: string | null;
+  /** #43 克隆来源连接 id（仅 POST /connections/:id/clone 响应携带；审计 detail.after 经响应体自动留痕） */
+  clonedFrom?: string;
 }
 
 export interface CreateConnectionRequest {

@@ -78,6 +78,18 @@ export async function deleteConnection(req: Request, res: Response, next: NextFu
   } catch (err) { next(err); }
 }
 
+/** #43 克隆连接（POST /connections/:id/clone，editor 门）：克隆即新建 → 201。
+ * 密文在 service 层服务端复制；响应 detail.clonedFrom 携带来源 id
+ * （审计 detail.after 经 envelope.data 自动留痕，无自定义通道）。 */
+export async function cloneConnection(req: Request, res: Response, next: NextFunction) {
+  try {
+    const id = req.params['id'];
+    if (typeof id !== 'string') throw new Error('缺少 id');
+    const data = await connectionService.cloneConnection(req.user.id, id);
+    res.status(201).json({ success: true, data });
+  } catch (err) { next(err); }
+}
+
 export async function decryptPassword(req: Request, res: Response, next: NextFunction) {
   try {
     const id = req.params['id'];

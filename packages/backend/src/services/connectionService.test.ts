@@ -53,6 +53,7 @@ import {
   getConnection,
   getConnectionStats,
   launchConnection,
+  cloneConnection,
 } from './connectionService.js';
 import { emitToProjectMembers } from './notificationService.js';
 
@@ -1214,5 +1215,126 @@ describe('#45 launchConnection - 直连分派矩阵', () => {
     expect(prisma.connection.update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'conn-fresh' }, data: { lastAccessed: expect.any(Date) } }),
     );
+  });
+});
+
+// ────────────────────────────────────────────────
+// cloneConnection（#43 克隆：密文服务端复制 + 重名递增）
+// ────────────────────────────────────────────────
+
+describe('cloneConnection（#43 克隆）', () => {
+  beforeEach(() => {
+    // 本 describe 位于顶层 describe 外（追加在文件尾），顶层 beforeEach（clearAllMocks +
+    // user.findMany 编排）不覆盖此处——自持 mock 卫生（调用计数跨用例累积教训）
+    vi.clearAllMocks();
+    (prisma.user.findMany as MockFn).mockResolvedValue([
+      { id: 'user-1', nickname: 'User One' },
+      { id: 'admin-1', nickname: 'Admin' },
+    ]);
+  });
+
+  /** 克隆场景脚手架：findUnique 返回原行；create 回显 data（幂等构造新行形状，id 固定 conn-clone） */
+  function setupClone(original: Record<string, unknown>) {
+    (prisma.connection.findUnique as MockFn).mockResolvedValue(original);
+    (prisma.connection.create as MockFn).mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
+      ...original,
+      ...data,
+      id: 'conn-clone',
+      createdAt: new Date('2025-01-02T00:00:00Z'),
+      updatedAt: new Date('2025-01-02T00:00:00Z'),
+    }));
+  }
+
+  it('无重名冲突 → 名「原名 (副本)」+ 密文原样复制（encrypt 不经过）+ lastAccessed 置 null', async () => {
+    setupClone(mockConnection);
+    (prisma.connection.findMany as MockFn).mockResolvedValue([]);
+
+    const result = await cloneConnection('user-1', 'conn-1');
+
+    expect(prisma.connection.findUnique).toHaveBeenCalledWith({ where: { id: 'conn-1' } });
+    // 重名查询形状：同项目内基名 startsWith 收集 + 侧精确判等（unit 锁 where 形状惯例，listConnections 先例）
+    expect(prisma.connection.findMany).toHaveBeenCalledWith({
+      where: { projectId: 'proj-1', name: { startsWith: 'TestConn (副本)' } },
+      select: { name: true },
+    });
+    expect(prisma.connection.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        projectId: 'proj-1',
+        name: 'TestConn (副本)',
+        host: '192.168.1.1',
+        port: 22,
+        username: 'root',
+        encryptedPass: 'encrypted:s3cret', // 密文原样复制（不 decrypt+encrypt），同 ENCRYPTION_KEY 下解密即一致
+        protocol: 'SSH',
+        createdBy: 'user-1',
+        updatedBy: 'user-1',
+        lastAccessed: null, // 新连接从未访问，置 null
+      }),
+    });
+    expect(encrypt).not.toHaveBeenCalled(); // 密文复制不过加解密层（票面 L52：密码不经前端明文中转、服务端不重加密）
+    expect(result.clonedFrom).toBe('conn-1'); // 审计 after 快照经响应体自动携带来源 id
+    expect(result).not.toHaveProperty('password'); // 明文不回传
+    expect(result.encryptedPass).toBeUndefined(); // includeEncryptedPass=false，与既有 detail 同形状
+  });
+
+  it('三级递增：「原名 (副本)」存在 → 「原名 (副本) 2」', async () => {
+    setupClone(mockConnection);
+    (prisma.connection.findMany as MockFn).mockResolvedValue([{ name: 'TestConn (副本)' }]);
+
+    await cloneConnection('user-1', 'conn-1');
+
+    expect(prisma.connection.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ name: 'TestConn (副本) 2' }),
+    });
+  });
+
+  it('三级递增：「原名 (副本) 2」存在 → 「原名 (副本) 3」', async () => {
+    setupClone(mockConnection);
+    (prisma.connection.findMany as MockFn).mockResolvedValue([
+      { name: 'TestConn (副本)' },
+      { name: 'TestConn (副本) 2' },
+    ]);
+
+    await cloneConnection('user-1', 'conn-1');
+
+    expect(prisma.connection.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ name: 'TestConn (副本) 3' }),
+    });
+  });
+
+  it('前缀字面陷阱：「TestConn (副本)A」startsWith 命中但不占号（精确判等才递增）', async () => {
+    setupClone(mockConnection);
+    (prisma.connection.findMany as MockFn).mockResolvedValue([{ name: 'TestConn (副本)A' }]);
+
+    await cloneConnection('user-1', 'conn-1');
+
+    expect(prisma.connection.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ name: 'TestConn (副本)' }),
+    });
+  });
+
+  it('连接不存在 → CONN_002', async () => {
+    (prisma.connection.findUnique as MockFn).mockResolvedValue(null);
+
+    await expect(cloneConnection('user-1', 'nope')).rejects.toMatchObject({ code: 'CONN_002' });
+  });
+
+  it('克隆名超长（原名 200 字符 + 副本后缀 > 上限 200）→ VAL_001 且不落库', async () => {
+    setupClone({ ...mockConnection, name: 'A'.repeat(200) });
+    (prisma.connection.findMany as MockFn).mockResolvedValue([]);
+
+    await expect(cloneConnection('user-1', 'conn-1')).rejects.toMatchObject({ code: 'VAL_001' });
+    expect(prisma.connection.create).not.toHaveBeenCalled();
+  });
+
+  it('克隆成功 → emitToProjectMembers created 通知（#36 语义：clone=新建连接，列表实时刷新）', async () => {
+    setupClone(mockConnection);
+    (prisma.connection.findMany as MockFn).mockResolvedValue([]);
+    await cloneConnection('user-1', 'conn-1');
+
+    expect(emitToProjectMembers).toHaveBeenCalledWith('proj-1', {
+      type: 'CONNECTION_UPDATED',
+      payload: { projectId: 'proj-1', connectionId: 'conn-clone', action: 'created', name: 'TestConn (副本)' },
+    });
   });
 });
