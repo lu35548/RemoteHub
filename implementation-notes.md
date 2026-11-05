@@ -24,8 +24,51 @@
 - [ ] **#42 全局视图无协议分布**：stats 是 per-project 端点；若产品要全局分布需补全局聚合端点（是否立项待裁决）。
 - [ ] **#45 OQ1 切协议有 port 协议间残留**：SSH→RDP 等不传 port 时残留旧值（port:none 侧已修自动清）；维持宽松（残留是历史数据非新写入）待确认。
 - [ ] **#45 分派裁量确认**：VNC→400 CONN_006（未来支持只需 registry 加 launchAction）/ HTTP→URL（spec 未列自然延伸）/ TEAMVIEWER/ANYDESK→设备码命令串（对齐前端先例）。
+- [ ] **#43 克隆不重跑全量字段校验**（批 8）：只校验新名，存量字段免新规则拦截——与 #45「存量零破坏」口径一致；若产品要求克隆强制全量校验再改。
+- [ ] **Zap「配置直连」引导链路去留**（批 8）：launch 端点时代该链路承诺（唤起 mstsc）与实际行为（下载 .rdp）矛盾，本批只修文案；整链砍除属功能裁决（砍则 triggerRdpProtocol/isRdpReady/showRdpSetup/downloadRdpFile 引用链一并）。
+- [ ] **编辑态 username:'none' 协议遗留值不可清**（批 8）：存量 HTTPS/TODESK 行历史 username 回填后输入框隐藏、静默重提交不可清（数据无损）——是否需要编辑态查表清值交裁决。
 
 ---
+
+## [2026-11-05] P1 批 8：#46 协议注册表前端 ∥ #43 clone 连接（两段式）✅
+
+**收官数据**：质量门终值 lead 亲测 **backend 655 / shared 59 / frontend 241**（基线 638/59/221 → +17/+0/+20）六门全零；8 commits 全推 origin（`a515036` #46 feat → `48660ec` #43 后端 feat → `fb22538` #43 integration 补交 → `f859fa1` #43 前端窄段 feat → `43ca753` #43 修复 → `48ed72b` #46 修复七项 → `7875ec8` #43 toast 断言 → `d63bec0` buildUrl 跨票修复）；#46/#43 关票带证据评论。真机验收双票全过（5 协议联动 + 直连四路径含 .rdp 字节级 + 克隆链路/密文等价/递增）。**本票后 v1 `backend/` 目录的 clone 参照消费点已消，#52（v1 删除票）解锁**。
+
+团队形态：2 implementer 两段式并行（A=impl-46 独占 frontend / B=impl-43 独占 backend+shared，Phase 1 完工后转 **#43 前端窄段**串行接续）+ 4 reviewer 双轴提前介入（审 commit 锚定 diff，与另一 implementer 工作树中间态隔离）+ lead 亲测六门代 commit。**#43 票面含前端段（克隆入口+跳编辑弹窗），交接文档「与 #46 零文件相交」不成立**——ConnectionCard/App.tsx/queries.ts 正面相交，改两段式化解。
+
+### Design decisions
+- [2026-11-05] 决策：#46 「替换 HOST/VPN 双模式」落地为 **HOST 分支 registry 化 + 双 tab 结构保留**——快速建 VPN 流依赖双表单 state 保存 host 草稿，硬合并会破坏该流；「替换」语义收窄为字段渲染层 registry 驱动（isProprietary 硬编码删除，hostSemantics 接管）。
+- [2026-11-05] 决策：#46 直连复制走**现有 handleCopy 同款通道**（票面「复用 copyTarget 重构后的复制通道」——核实该重构未落地属后续清理票，按现有通道实现，关票评论注明）。
+- [2026-11-05] 决策：#43 密文复制走**原样复制不 decrypt+encrypt**——AES-GCM IV 随机性使重加密密文必不等，integration「两行密文串严格相等」成为复制路径的字节级锁死证据（顺带防「解密+重加密」伪实现）。
+- [2026-11-05] 决策：#43 权限 editor+（票面「目标项目写权」）非 v1 owner-only——票 #41 先例贯彻（v1 缺陷/差异以 spec 为准）；路由三层 auth→audit→projectRole 对齐 PATCH/DELETE 同门。
+- [2026-11-05] 决策：#43 审计 clonedFrom **零 middleware 改动**——响应体 detail.clonedFrom 经 auditMiddleware envelope.data→after 快照通道自动携带（password 在 SENSITIVE_FIELDS 内不受影响）。
+- [2026-11-05] 决策：#43 克隆**不重跑全量字段校验**（只校验新名，存量字段免新规则拦截）——与 #45「存量零破坏」口径一致；**挂 OQ 待用户确认**（若产品要求克隆强制全量校验再改）。
+
+### Deviations
+- rev-43-spec prompt 生成层噪声（票面引述乱码）——预埋「以 gh issue view 真票面为准」指令兜底，reviewer 亲拉权威源不受影响（generation-corruption-reread 教训）。
+- impl-43 integration 首跑即绿未经历红阶段（如实自报）——已声明反向证据（404/403 响应形状只能来自新端点真接线）。
+- **lead 收口漏 add 事故（双轴独立抓到的唯一 blocker）**：commit 48660ec 按「修改」清单 add 漏了报告「新增」清单里的 integration 文件（`grep -v "^??"` 过滤掩盖 untracked 行）——commit message 声称 652 实为 645，checkout 即失密文/审计测试锁。已补交 `fb22538`。教训：**commit 前对齐完工报告全文文件清单（新增+修改两段），不看过滤后的 git status**。
+- impl-46 首轮追加派单漏读（追加发出晚于其开工）——spec 轴 4 项完工报告不含 std 轴 3 项，重发后补做。
+- **node_modules 并行损坏窗口（环境事故非代码）**：三症状同根源——better-sqlite3 binding 瞬态丢失（lead 全量跑 7 integration 全 skip）/ @asamuzakjp/css-color 缺失 / @babel/parser 空壳目录，疑并行验收期 install 半途中断所致；impl-46 `pnpm install --prefer-offline` 修复，lockfile 零变化。并行 agent 各自跑门的时代，node_modules 是共享可变状态——全量红先排除环境再查代码。
+
+### Tradeoffs
+- **review 战果（4 份双轴报告）**：#46 = 3 major（VPN 显隐守卫丢失 / M1 存量设备码行带 port 编辑死锁 / M2 launch 类型绕开 shared+空串兜底掩盖后端 bug）+ 3 minor + 4 nit；#43 = 1 blocker（lead 漏 add）+ 2 minor + 3 nit。采纳修复：#46 七项（major×3 + minor×3 + 恒真断言）、#43 三项（JSDoc 并发备案 + 空缺回填用例 + toast 断言）；挂账：手动 fetch 样板两处同构（rule of three）、filename* decodeURIComponent 无保护、递增产物超长 VAL_001、Zap 链路砍除、username:'none' 遗留值。
+- #46 字段显隐 registry 化推论四处（HTTPS username 隐藏/HTTP-HTTPS port 显示/设备码 username 隐藏/password 恒显）——「registry 单一真相源」直接推论，测试已锁新行为；SSH 直连不再 ssh:// 唤起（票面即「复制命令串」）。
+- impl-46 修复 1 主动扩展 isDeviceId/isWeb mode 感知（host label 三元链同受跨表单驱动）——lead 裁决认可不回退（同一根因完整修复）。
+- IDE 诊断伪影再 +N 实例（queries.ts/ConnectionCard/ConnectionModal 假红 vs 亲测 EXIT=0）——质量门亲测为准纪律持续有效。
+
+### Open questions
+- **#43 克隆不重跑全量字段校验**（存量零破坏口径一致性）——需用户确认，不阻塞。
+- **Zap「配置直连」引导链路去留**——launch 端点时代承诺（唤起 mstsc）与实际行为（下载 .rdp）矛盾，本批只修文案（isRdpReady 分支改下载口径）；整链砍除属功能裁决，交用户/后续清理票。
+- **编辑态 username:'none' 协议遗留值不可清**（存量 HTTPS/TODESK 脏数据边缘，数据无损，静默重提交）——交用户裁决。
+- （审查修复后补充）
+
+### 真机验收（2026-11-05 lead 亲测，Chrome DevTools MCP isolatedContext）
+- **#46 AC1 协议联动 5 协议全过**（超 AC ≥4）：SSH→port 预填 22 / TODESK→「设备 ID / 识别码」+「验证码 / 临时密码」+ port·username 双隐藏 / VNC→5900 / HTTPS→443+「网址 URL」+ username 隐藏 / RDP→3389。连续快速点击读 DOM 需每步 await 渲染（React 批处理），首次假 null 非实现 bug。
+- **#46 AC2 直连四路径 + CONN_006 全过**：RDP→blob 拦截字节级坐实（224B `application/x-rdp`、UTF-16 LE BOM FF FE、`full address:s:10.0.0.50:3389`+`username:s:ruser`）/ SSH→toast「连接命令已复制到剪贴板」/ HTTPS→window.open+「正在打开」toast / TODESK→复制码 toast / VNC→「无法直连 · 该协议不支持直连」。
+- **#43 全链真机过**：菜单「克隆连接」→ toast「已创建 "X (副本)"，密码已随连接复制」+ 编辑弹窗载入（标题「编辑连接」+ 名称回填）；克隆件密码显示 `SshTest123` 与原件一致（密文解密等价）；递增真机：克隆原件时 (副本) 已占用 →「(副本) 2」✓；克隆 (副本) →「(副本) (副本)」（对「原名+(副本)」避让语义正确）。
+- **真机抓到 1 个 #45 遗留 bug（唯一红灯）**：buildUrl（connectionService.ts:520）对已含 scheme 的 host 双拼前缀——HTTPS 行 host 存完整 URL 时 launch 返回 `https://https://...`（toast 实锤）。同文件 vpnLoginUrl 分支（:560-562）已有同款守卫，#45 只在 VPN 路径防了——mock/integration 造数 host 全是裸域名故全绿漏网，真机是 mock 盲区的唯一暴露层（第 N 次应验）。修复派 impl-43。
+- 真机配方演进：toast 4s 窗口内联脚本点击+即时断言一次完成；图标按钮 textContent 恒空必须 aria-label/title 定位（临时脚本两次踩坑）；clipboard.readText() 在 MCP 上下文卡权限弹窗（120s 超时转后台，TaskStop 后改 toast 断言）；dev 栈凭据 admin/Admin123（.env seed）。
 
 ## [2026-11-04] P1 批 7：#42 金矿前端 ∥ #45 协议注册表后端 ✅
 
