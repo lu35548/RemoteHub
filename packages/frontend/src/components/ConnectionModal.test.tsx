@@ -194,7 +194,7 @@ describe('ConnectionModal 协议注册表动态表单（#46）', () => {
     expect(onSave.mock.calls[0]?.[0]).toMatchObject({ protocol: 'SSH', port: 22 });
   });
 
-  it('切 ToDesk → 表单变设备 ID：port 字段消失、host 文案「设备 ID / 识别码」、placeholder 882 331 992', async () => {
+  it('切 ToDesk → 表单变设备 ID：port 字段消失、host 文案「设备 ID / 识别码」、placeholder 882 331 992、密码 label 变「验证码 / 临时密码」', async () => {
     const events = userEvent.setup();
     renderModal({});
 
@@ -202,6 +202,8 @@ describe('ConnectionModal 协议注册表动态表单（#46）', () => {
     expect(screen.queryByPlaceholderText('3389')).not.toBeInTheDocument(); // fields.port='none' 不渲染
     expect(screen.getByText(/设备 ID \/ 识别码/)).toBeInTheDocument(); // hostSemantics='device_id'
     expect(screen.getByPlaceholderText('例如: 882 331 992')).toBeInTheDocument();
+    expect(screen.getByText('验证码 / 临时密码')).toBeInTheDocument(); // 设备 ID+验证码 口径
+    expect(screen.queryByText('密码 / Key')).not.toBeInTheDocument();
   });
 
   it('切 HTTP → username 字段消失（fields.username=none），密码字段保留', async () => {
@@ -228,5 +230,38 @@ describe('ConnectionModal 协议注册表动态表单（#46）', () => {
 
     await events.click(screen.getByRole('button', { name: 'VNC' }));
     expect((screen.getByPlaceholderText('5900') as HTMLInputElement).value).toBe('5900');
+  });
+
+  // 回归锁：字段显隐不得被 HOST registry 跨表单驱动（review major——VPN tab 曾冒出 Port 输入框）
+  it('VPN tab 表单无 port 字段（显隐 mode 守卫回归）', async () => {
+    const events = userEvent.setup();
+    renderModal({});
+
+    await events.click(screen.getByRole('button', { name: /VPN 节点 \/ 网关/ }));
+    expect(screen.queryByPlaceholderText('3389')).not.toBeInTheDocument();
+  });
+
+  it('编辑 TODESK 连接切 VPN tab：username 可见且无 port 字段（跨表单显隐回归）', async () => {
+    const events = userEvent.setup();
+    renderModal({
+      editingConnection: detail({ protocol: 'TODESK', port: null, username: null, host: '882 331 992' }),
+    });
+
+    await events.click(screen.getByRole('button', { name: /VPN 节点 \/ 网关/ }));
+    expect(screen.getByPlaceholderText('root / administrator')).toBeInTheDocument(); // VPN tab username 恒显示（v1 行为）
+    expect(screen.queryByPlaceholderText('3389')).not.toBeInTheDocument();
+  });
+
+  it('存量设备码协议行带脏 port 编辑保存 → payload 强制 port=null（port:none 防御，review M1）', async () => {
+    // 存量脏数据：TODESK 行带 port=3389（registry 上线前的遗留行）——表单无 port 框可自救，
+    // buildPayload 必须强制清 port，否则后端 registry 校验 VAL_001 400 死锁
+    const dirty = detail({ protocol: 'TODESK', port: 3389, host: '882 331 992', username: null });
+    const onSave = vi.fn().mockResolvedValue(detail({ ...dirty, id: 'c9' }));
+    const events = userEvent.setup();
+    renderModal({ onSave, editingConnection: dirty });
+
+    await events.click(screen.getByRole('button', { name: '保存修改' }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave.mock.calls[0]?.[0]).toMatchObject({ protocol: 'TODESK', port: null, host: '882 331 992' });
   });
 });

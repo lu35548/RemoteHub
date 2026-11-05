@@ -219,7 +219,9 @@ const ConnectionModal: React.FC<ConnectionModalProps> = ({
       projectId: data.projectId,
       name: data.name,
       host: data.host,
-      port: data.port !== '' ? Number(data.port) : null,
+      // port:none 协议强制 null：存量脏行（registry 上线前的设备码行带 port）回填后表单无 port 框可自救，
+      // 前端先行防御对齐后端「显式切 port:none 协议自动清 port」语义（review M1，避免 VAL_001 死锁）
+      port: PROTOCOL_REGISTRY[data.protocol].fields.port === 'none' ? null : data.port !== '' ? Number(data.port) : null,
       protocol: data.protocol,
       username: data.username || null,
       tags: data.tags.length > 0 ? data.tags.join(',') : null,
@@ -295,13 +297,14 @@ const ConnectionModal: React.FC<ConnectionModalProps> = ({
   // 跨项目移动需专门权限设计，归 phase2——ADR-0001 auth 例外同款处理，显式 Deviation 记 notes）
   const isEditingExisting = !!editingConnection || !!vpnEditingId;
   // #46 HOST 表单按 PROTOCOL_REGISTRY 动态渲染（协议切换字段联动）；VPN tab 保留既有字段
-  // （vpnType 驱动，不在 registry 管辖）。hostRegistry 以 hostFormData.protocol 查表——mode==='VPN'
-  // 时该表单不可见，取值无 UI 影响。
+  // （vpnType 驱动，不在 registry 管辖）。显隐标志全部 mode 感知——hostRegistry 查的是
+  // hostFormData（HOST 表单草稿），VPN tab 下不得跨表单驱动字段显隐（review major 回归锁）。
   const hostRegistry = PROTOCOL_REGISTRY[hostFormData.protocol];
-  const isDeviceId = hostRegistry.hostSemantics === 'device_id';
-  const isWeb = WEB_PROTOCOLS.includes(hostFormData.protocol);
-  const showPort = hostRegistry.fields.port !== 'none';
-  const showUsername = hostRegistry.fields.username !== 'none';
+  const onHostTab = mode === 'HOST';
+  const isDeviceId = onHostTab && hostRegistry.hostSemantics === 'device_id';
+  const isWeb = onHostTab && WEB_PROTOCOLS.includes(hostFormData.protocol);
+  const showPort = onHostTab && hostRegistry.fields.port !== 'none';
+  const showUsername = mode === 'VPN' || hostRegistry.fields.username !== 'none';
   const isVpnWeb = mode === 'VPN' && currentData.vpnType === 'SSL_VPN';
   const vpnOptions = connections.filter(c => c.protocol === 'VPN' && c.id !== editingConnection?.id);
 
@@ -385,7 +388,7 @@ const ConnectionModal: React.FC<ConnectionModalProps> = ({
                     <div className="space-y-2"><label className="text-sm font-medium text-slate-300">用户名 / 账号</label><input name="username" value={currentData.username || ''} onChange={handleChange} disabled={isSaving} placeholder="root / administrator" className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50" /></div>
                   )}
                   <div className={`space-y-2 ${showUsername ? '' : 'md:col-span-2'}`}>
-                    <label className="text-sm font-medium text-slate-300">密码 / Key</label>
+                    <label className="text-sm font-medium text-slate-300">{isDeviceId ? '验证码 / 临时密码' : '密码 / Key'}</label>
                     <div className="relative"><input name="password" type="password" value={currentData.password || ''} onChange={handleChange} disabled={isSaving} placeholder={isEditingExisting ? '留空保持不变' : '••••••••'} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50" /><Lock className="absolute right-3 top-2.5 text-slate-600 w-4 h-4" /></div>
                   </div>
                 </div>

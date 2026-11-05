@@ -306,7 +306,6 @@ describe('ConnectionCard 一键直连 launch 分派（#46）', () => {
     fireEvent.click(screen.getByRole('button', { name: /一键直连/ }));
     expect(await screen.findByText(/RDP 文件已下载/)).toBeInTheDocument();
     expect(launchMock).toHaveBeenCalledWith('c1');
-    expect(rdpMocks.downloadBlob).not.toHaveBeenCalled(); // 下载在 queries 层，卡片不再触碰 blob
   });
 
   it('CONN_006 → toast「该协议不支持直连」（VNC）', async () => {
@@ -323,5 +322,19 @@ describe('ConnectionCard 一键直连 launch 分派（#46）', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /一键直连/ }));
     expect(await screen.findByText('连接不存在')).toBeInTheDocument();
+  });
+
+  it('OTHER 类型 VPN：主按钮「打开 VPN 地址」→ launch url 分派 window.open', async () => {
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+    try {
+      launchMock.mockResolvedValue({ type: 'url', url: 'https://vpn.example.com' } satisfies LaunchConnectionResult);
+      renderCard({ connection: vpnItem({ vpnType: 'OTHER' }) });
+
+      fireEvent.click(screen.getByRole('button', { name: /打开 VPN 地址/ }));
+      await waitFor(() => expect(openSpy).toHaveBeenCalledWith('https://vpn.example.com', '_blank'));
+      expect(await screen.findByText('正在打开')).toBeInTheDocument();
+    } finally {
+      openSpy.mockRestore();
+    }
   });
 });

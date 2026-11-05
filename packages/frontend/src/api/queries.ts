@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { API_BASE, api, ensureRefreshed, getAccessToken, setAccessToken, mfaRequest } from './client.js';
 import { downloadBlob } from '../utils';
 import type {
-  ApiErrorResponse, ApiResponse, AuditLog, AuditLogQuery, LoginRequest, LoginResponse, UserPublic,
+  ApiErrorResponse, ApiResponse, AuditLog, AuditLogQuery, LaunchCommandResponse, LaunchJsonResponse, LaunchUrlResponse,
+  LoginRequest, LoginResponse, UserPublic,
   Dashboard, DailyActivityStat, ProjectConnectionStat,
   ProjectListItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
   ConnectionListItem, ConnectionDetail, CreateConnectionRequest, UpdateConnectionRequest,
@@ -422,11 +423,12 @@ export async function exportAuditLogsCsv(filters: Omit<AuditLogQuery, 'page' | '
   downloadBlob(await res.blob(), 'audit-logs.csv');
 }
 
-/** 直连动作结果 union（#46）：rdp_file 的 Blob 下载已在函数内完成（downloadBlob），调用方只做 toast */
+/** 直连动作结果 union（#46）：rdp_file 的 Blob 下载已在函数内完成（downloadBlob），调用方只做 toast。
+ * JSON 两形态直接消费 shared 契约类型（review M2：删本地重复声明，单一真相源）。 */
 export type LaunchConnectionResult =
   | { type: 'rdp_file'; filename: string }
-  | { type: 'command'; command: string }
-  | { type: 'url'; url: string };
+  | LaunchCommandResponse
+  | LaunchUrlResponse;
 
 /** #46 一键直连：GET /connections/:id/launch 双形态响应解析。
  * application/x-rdp → Blob 真链路下载（文件流走手动 fetch，api 封装只解 JSON 不返回 blob）；
@@ -463,9 +465,9 @@ export async function launchConnection(id: string): Promise<LaunchConnectionResu
     downloadBlob(await res.blob(), filename);
     return { type: 'rdp_file', filename };
   }
-  const body = (await res.json()) as ApiResponse<{ type: 'command' | 'url'; command?: string; url?: string }>;
-  const data = body.data;
-  return data.type === 'url' ? { type: 'url', url: data.url ?? '' } : { type: 'command', command: data.command ?? '' };
+  // JSON 分支 cast shared LaunchJsonResponse（契约必填字段，不兜空串——后端缺字段就该暴露，review M2）
+  const body = (await res.json()) as ApiResponse<LaunchJsonResponse>;
+  return body.data;
 }
 
 export function useProjectStats() {

@@ -170,7 +170,9 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({ connection, vpnDependen
   };
 
   const getActionLabel = () => {
-    if (connection.protocol === 'VPN') return connection.vpnType === 'SSL_VPN' ? '跳转登录' : '复制 VPN 地址';
+    // #46 review 修正：直连统一走 launch 端点，OTHER 类型 VPN 实际动作是打开 URL（window.open），
+    // 文案不再是「复制 VPN 地址」
+    if (connection.protocol === 'VPN') return connection.vpnType === 'SSL_VPN' ? '跳转登录' : '打开 VPN 地址';
     return PROTOCOL_ACTION_META[connection.protocol].actionLabel ?? '连接';
   };
 
@@ -328,9 +330,7 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({ connection, vpnDependen
             <><Loader2 size={16} className="animate-spin text-white/70" /> <span className="text-white/90">连接中...</span></>
           ) : (
             <>
-              {actionMeta.neutralAction && isCopied && copyTarget === 'host_main'
-                ? '已复制'
-                : getActionLabel()}
+              {getActionLabel()}
               {!actionMeta.neutralAction && connection.protocol !== 'RDP' && <ExternalLink size={14} className="opacity-70" />}
               {connection.protocol === 'RDP' && <Zap size={16} className={`${isRdpReady ? 'fill-current text-amber-200' : 'text-blue-200'}`} />}
             </>
@@ -354,7 +354,7 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({ connection, vpnDependen
     <Modal isOpen={showRdpSetup} onClose={() => setShowRdpSetup(false)} className="max-w-md rounded-2xl overflow-hidden">
       <div className="relative p-8 flex flex-col items-center text-center bg-slate-950">
         <div className="relative mb-6"><div className={`w-20 h-20 rounded-3xl flex items-center justify-center shadow-2xl transition-all duration-500 ring-1 ring-white/10 ${isRdpReady ? 'bg-gradient-to-br from-emerald-500 to-teal-600 shadow-emerald-500/20' : 'bg-gradient-to-br from-blue-600 to-indigo-600 shadow-blue-500/20'}`}><Zap size={40} className="text-white fill-current drop-shadow-lg" /></div></div>
-        <div className="space-y-2 mb-8"><h3 className="text-2xl font-bold text-white tracking-tight">{isRdpReady ? '直连功能已就绪' : '启用一键直连'}</h3><p className="text-sm text-slate-400 leading-relaxed px-4">{isRdpReady ? '浏览器已获得调用系统权限，现在点击连接即可直接唤起 Windows 远程桌面。' : '由于浏览器安全限制，请下载并运行注册表脚本以解锁原生级远程桌面体验。'}</p></div>
+        <div className="space-y-2 mb-8"><h3 className="text-2xl font-bold text-white tracking-tight">{isRdpReady ? '直连功能已就绪' : '启用一键直连'}</h3><p className="text-sm text-slate-400 leading-relaxed px-4">{isRdpReady ? '点击连接即可下载 .rdp 文件，打开文件即建立远程桌面连接。' : '由于浏览器安全限制，请下载并运行注册表脚本以解锁原生级远程桌面体验。'}</p></div>
         <div className="w-full space-y-3">
           <button onClick={generateRdpRegistryFile} className="w-full group relative flex items-center justify-between px-5 py-4 bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 rounded-xl transition-all duration-200"><div className="flex items-center gap-4"><div className="p-2 bg-slate-900 rounded-lg text-blue-400 group-hover:text-blue-300 ring-1 ring-white/5 transition-colors"><Download size={20} /></div><div className="text-left"><div className="text-sm font-bold text-slate-200 group-hover:text-white">1. 下载配置脚本</div><div className="text-[11px] text-slate-500 font-mono">RemoteHub-OneClick-Install.reg</div></div></div><ArrowRight size={18} className="text-slate-600 group-hover:text-white group-hover:translate-x-1 transition-all" /></button>
           <button onClick={handleRdpSetupComplete} className="w-full group relative flex items-center justify-center gap-2 px-5 py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-900/20 hover:shadow-blue-900/40 transition-all active:scale-[0.98] ring-1 ring-white/10"><span>2. 我已安装，完成设置</span><Check size={20} /></button>
