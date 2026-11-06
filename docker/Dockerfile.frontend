@@ -1,5 +1,5 @@
 # 多阶段构建：node 编译（tsc -b && vite build）→ nginx:alpine 托管静态产物（研究笔记 §6 标准形态）
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./

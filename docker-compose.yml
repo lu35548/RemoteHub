@@ -34,7 +34,9 @@ services:
       - sqlite-data:/data
       - backup-data:/data/backups
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/api/v1/health').then(r => r.ok ? process.exit(0) : process.exit(1))"]
+      # 显式 IPv4（与 frontend healthcheck 同口径）：容器内 localhost 解析 ::1，node fetch 对 ::1 探测
+      # 恒 refused（IPv4 服务）；127.0.0.1 稳定。未炸是因 listen 无 host 绑定默认双栈——别依赖该巧合
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/v1/health').then(r => r.ok ? process.exit(0) : process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3

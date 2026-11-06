@@ -14,7 +14,7 @@ RemoteHub 是 pnpm workspace monorepo（`packages/{shared,backend,frontend}`）�
 
 ### 后端（packages/backend）
 - **Express 5** + TypeScript（strict）— REST API
-- **Prisma 6.x** + **MySQL 8** — ORM 与数据库（开发/生产统一 MySQL；SQLite 仅限快速演示）
+- **Prisma 6.x** + **SQLite**（WAL）— ORM 与数据库（开发/生产统一 SQLite；ADR 0002 方言豁免）
 - **jose** — JWT（access token，默认 15min）
 - **bcryptjs**（12 轮）— 用户密码哈希
 - **AES-256-GCM** — 连接密码对称加密（单一全局 `ENCRYPTION_KEY`，版本前缀 `v1:`，支持密钥轮换）
@@ -33,7 +33,7 @@ RemoteHub 是 pnpm workspace monorepo（`packages/{shared,backend,frontend}`）�
 - 前后端共享的类型（API DTO）、枚举（Protocol / VpnType / UserRole / MemberRole）、常量、验证器
 
 ### 部署
-- **Docker Compose** + **Caddy 2**（反向代理，自动 HTTPS / 内网证书）
+- **Docker Compose** + **nginx**（反向代理，`docker/nginx.conf`；TLS 由部署环境外层承担）
 - 后端两阶段构建（esbuild 编译 `seed.ts` → `seed.js`）
 - 数据库通过 `prisma migrate deploy` 应用迁移
 
@@ -62,7 +62,7 @@ RemoteHub 是 pnpm workspace monorepo（`packages/{shared,backend,frontend}`）�
 - 共享类型从 `@remotehub/shared` 导入
 
 ### 数据库规范
-- 不用 JSON / Enum 数据库类型（String + 应用层验证），保证 MySQL / SQL Server 兼容
+- 不用 JSON / Enum 数据库类型（String + 应用层验证），保持换库兼容性（ADR 0002：当前 SQLite，未来可迁 MySQL/PostgreSQL）
 - 可能含中文的字段不指定 `@db.VarChar`
 - `createdBy` / `updatedBy` 不建外键（String 存 userId，删除用户保留原值）
 - 生产用 `prisma migrate deploy`，禁止 `db push`
@@ -102,8 +102,8 @@ RemoteHub 是 pnpm workspace monorepo（`packages/{shared,backend,frontend}`）�
 ## Important Constraints
 
 ### 技术约束
-- **部署形态**：Docker Compose 单机部署，Caddy 反向代理，目标几百人并发
-- **数据库**：MySQL 统一（开发 + 生产）；SQL Server 为可选非默认路径（需独立迁移目录）
+- **部署形态**：Docker Compose 单机部署，nginx 反向代理，目标几百人并发
+- **数据库**：SQLite 统一（开发 + 生产，WAL 模式；ADR 0002 方言豁免）
 - **Prisma 版本锁定 6.x**（不用 v7，生产稳定性争议）
 - **密钥管理**：`JWT_SECRET`、`ENCRYPTION_KEY` 从环境变量读取，缺失即启动报错；支持 `ENCRYPTION_KEY_OLD` 懒迁移轮换
 
@@ -121,8 +121,8 @@ RemoteHub 是 pnpm workspace monorepo（`packages/{shared,backend,frontend}`）�
 ## External Dependencies
 
 ### 运行时
-- **MySQL 8.0** — 主数据库
-- **Caddy 2** — 反向代理 + 自动 HTTPS
+- **SQLite 3**（WAL）— 主数据库
+- **nginx** — 反向代理
 - **Docker** — 容器化部署
 
 ### 关键 npm 依赖

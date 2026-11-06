@@ -238,7 +238,7 @@ describe('ConnectionCard 复制/密码系统（T6）', () => {
     renderCard();
 
     fireEvent.click(screen.getByTitle('未配置直连'));
-    expect(screen.getByText('启用一键直连')).toBeInTheDocument();
+    expect(screen.getByText('配置 RDP 直连')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /下载配置脚本/ }));
     expect(rdpMocks.generateRdpRegistryFile).toHaveBeenCalled();
@@ -246,7 +246,7 @@ describe('ConnectionCard 复制/密码系统（T6）', () => {
     fireEvent.click(screen.getByRole('button', { name: /我已安装，完成设置/ }));
     expect(rdpMocks.markRdpConfigured).toHaveBeenCalled();
     expect(screen.getByTitle('已配置直连')).toBeInTheDocument();
-    expect(screen.queryByText('启用一键直连')).not.toBeInTheDocument();
+    expect(screen.queryByText('配置 RDP 直连')).not.toBeInTheDocument();
   });
 });
 

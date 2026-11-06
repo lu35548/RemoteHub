@@ -43,6 +43,17 @@ export const VPN_TYPE_LABELS: Record<VpnType, string> = {
   OTHER: '其他客户端',
 };
 
+// 卡片复制位目标标识 → 反馈文案表（#52 copyTarget 魔法串收敛：'host_main'/'user_row'/'pass_row'
+// 散布于 ConnectionCard 的 state/JSX/handleCopy，label 原靠 target.includes('user'/'pass') 猜测）。
+// 键即复制位标识，类型化后拼写错误编译期报错；文案逐键与原 includes 判定等价（行为零变化）。
+export const COPY_TARGET_LABELS = {
+  host_main: '地址',
+  user_row: '用户名',
+  pass_row: '密码',
+} as const;
+
+export type CopyTarget = keyof typeof COPY_TARGET_LABELS;
+
 // v1 getProtocolColor 的 default 分支（无显式 case 的协议共用紫色调）
 const DEFAULT_PROTOCOL_COLOR = 'text-purple-400 bg-purple-500/10 border-purple-500/50';
 

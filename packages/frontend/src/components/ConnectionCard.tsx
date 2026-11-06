@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { MoreVertical, Copy, Check, Download, Edit2, Loader2, Trash2, Shield, Power, Eye, EyeOff, User as UserIcon, Clock, ExternalLink, ArrowRight, Zap } from 'lucide-react';
 import type { ConnectionListItem } from '@remotehub/shared';
-import { PROTOCOL_SHORT_LABELS, PROPRIETARY_PROTOCOLS, PROTOCOL_ACTION_META, VPN_TYPE_LABELS, getProtocolColor } from '../constants';
+import { PROTOCOL_SHORT_LABELS, PROPRIETARY_PROTOCOLS, PROTOCOL_ACTION_META, VPN_TYPE_LABELS, getProtocolColor, COPY_TARGET_LABELS, type CopyTarget } from '../constants';
 import { useDecryptPassword, launchConnection } from '../api/queries';
 import { downloadRdpFile, generateRdpRegistryFile, isRdpConfigured, markRdpConfigured } from '../utils';
 import { ProtocolIcon } from './Icons';
@@ -36,7 +36,7 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({ connection, vpnDependen
   const [plainPassword, setPlainPassword] = useState('');
   // v1 等价复制反馈链：2s 内命中按钮显示 Check
   const [isCopied, setIsCopied] = useState(false);
-  const [copyTarget, setCopyTarget] = useState<string | null>(null);
+  const [copyTarget, setCopyTarget] = useState<CopyTarget | null>(null);
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // RDP 直连配置引导（v1 等价）：就绪标记来自 localStorage（rh-rdp:// 协议处理器配置状态，Zap 引导用）
@@ -51,14 +51,15 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({ connection, vpnDependen
     };
   }, []);
 
-  const handleCopy = (text: string, target: string) => {
+  const handleCopy = (text: string, target: CopyTarget) => {
     navigator.clipboard.writeText(text);
     if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
 
     setCopyTarget(target);
     setIsCopied(true);
 
-    const label = target.includes('user') ? '用户名' : target.includes('pass') ? '密码' : '地址';
+    // #52 魔法串收敛：label 改查 COPY_TARGET_LABELS 表（原 includes('user'/'pass') 猜测，逐键等价）
+    const label = COPY_TARGET_LABELS[target];
     toast('success', '已复制', `${label} 已复制到剪贴板`);
 
     copyTimeoutRef.current = setTimeout(() => {
@@ -350,16 +351,16 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({ connection, vpnDependen
       </div>
     </div>
 
-    {/* RDP 直连配置引导（v1 等价；底部文案照 v1 运行态：点击仅关闭弹窗） */}
+    {/* RDP 直连配置引导（#52 文案订正：承诺式口径改实际行为——连接=下载 .rdp；底部按钮点击仅关闭弹窗） */}
     <Modal isOpen={showRdpSetup} onClose={() => setShowRdpSetup(false)} className="max-w-md rounded-2xl overflow-hidden">
       <div className="relative p-8 flex flex-col items-center text-center bg-slate-950">
         <div className="relative mb-6"><div className={`w-20 h-20 rounded-3xl flex items-center justify-center shadow-2xl transition-all duration-500 ring-1 ring-white/10 ${isRdpReady ? 'bg-gradient-to-br from-emerald-500 to-teal-600 shadow-emerald-500/20' : 'bg-gradient-to-br from-blue-600 to-indigo-600 shadow-blue-500/20'}`}><Zap size={40} className="text-white fill-current drop-shadow-lg" /></div></div>
-        <div className="space-y-2 mb-8"><h3 className="text-2xl font-bold text-white tracking-tight">{isRdpReady ? '直连功能已就绪' : '启用一键直连'}</h3><p className="text-sm text-slate-400 leading-relaxed px-4">{isRdpReady ? '点击连接即可下载 .rdp 文件，打开文件即建立远程桌面连接。' : '由于浏览器安全限制，请下载并运行注册表脚本以解锁原生级远程桌面体验。'}</p></div>
+        <div className="space-y-2 mb-8"><h3 className="text-2xl font-bold text-white tracking-tight">{isRdpReady ? '直连功能已就绪' : '配置 RDP 直连'}</h3><p className="text-sm text-slate-400 leading-relaxed px-4">{isRdpReady ? '点击连接即可下载 .rdp 文件，打开文件即建立远程桌面连接。' : '下载并运行注册表脚本完成直连配置；之后点击连接即可下载 .rdp 文件建立远程桌面连接。'}</p></div>
         <div className="w-full space-y-3">
           <button onClick={generateRdpRegistryFile} className="w-full group relative flex items-center justify-between px-5 py-4 bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 rounded-xl transition-all duration-200"><div className="flex items-center gap-4"><div className="p-2 bg-slate-900 rounded-lg text-blue-400 group-hover:text-blue-300 ring-1 ring-white/5 transition-colors"><Download size={20} /></div><div className="text-left"><div className="text-sm font-bold text-slate-200 group-hover:text-white">1. 下载配置脚本</div><div className="text-[11px] text-slate-500 font-mono">RemoteHub-OneClick-Install.reg</div></div></div><ArrowRight size={18} className="text-slate-600 group-hover:text-white group-hover:translate-x-1 transition-all" /></button>
           <button onClick={handleRdpSetupComplete} className="w-full group relative flex items-center justify-center gap-2 px-5 py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-900/20 hover:shadow-blue-900/40 transition-all active:scale-[0.98] ring-1 ring-white/10"><span>2. 我已安装，完成设置</span><Check size={20} /></button>
         </div>
-        <button onClick={() => setShowRdpSetup(false)} className="mt-6 text-xs text-slate-500 hover:text-slate-300 transition-colors border-b border-transparent hover:border-slate-500 pb-0.5">暂不配置，仅下载 .rdp 文件</button>
+        <button onClick={() => setShowRdpSetup(false)} className="mt-6 text-xs text-slate-500 hover:text-slate-300 transition-colors border-b border-transparent hover:border-slate-500 pb-0.5">暂不配置</button>
       </div>
     </Modal>
     </>
