@@ -1,10 +1,11 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LayoutGrid, Plus, Monitor, Network, PanelLeftClose, PanelLeftOpen, Search, X, LogOut, Settings, MoreVertical, Edit2, Trash2, LayoutDashboard, Users } from 'lucide-react';
+import { LayoutGrid, Plus, Monitor, Network, PanelLeftClose, PanelLeftOpen, Search, X, LogOut, Settings, MoreVertical, Edit2, Trash2, LayoutDashboard, Users, Archive, FolderDown, ArrowLeftRight, RotateCcw, ChevronDown } from 'lucide-react';
 import type { ProjectListItem, UserPublic } from '@remotehub/shared';
 import { Tooltip } from './UIComponents';
 import { Pagination } from './Pagination';
 import { ProjectIcon } from './ProjectIcons';
+import type { ProjectListItemWithStatus } from '../api/queries';
 
 interface SidebarProps {
   projects: ProjectListItem[];
@@ -27,6 +28,20 @@ interface SidebarProps {
   /** #49 移动抽屉（<md 生效；桌面常驻不受影响） */
   isMobileOpen?: boolean;
   onMobileClose?: () => void;
+  // ── #48 项目管理增强 ──
+  /** 归档项目列表（App 层拉取传入，Sidebar 保持哑组件；空数组/缺省 = 归档区不渲染） */
+  archivedProjects?: ProjectListItemWithStatus[];
+  /** 归档总数（折叠钮计数 + 归档分页 total） */
+  archivedTotal?: number;
+  /** 归档列表受控分页（归档区展开且跨页时显示 Pagination） */
+  archivedPage?: number;
+  onArchivedPageChange?: (page: number) => void;
+  /** 归档菜单入口回调（App 层 confirm + mutation；缺省 = 入口不渲染，向后兼容旧 props 基准） */
+  onArchiveProject?: (project: ProjectListItem) => void;
+  onCopyProject?: (project: ProjectListItem) => void;
+  onTransferProject?: (project: ProjectListItem) => void;
+  /** 恢复入口回调（App 层 mutation；缺省 = 归档区不渲染） */
+  onRestoreProject?: (project: ProjectListItemWithStatus) => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -47,10 +62,20 @@ const Sidebar: React.FC<SidebarProps> = ({
   onProjectPageChange,
   isMobileOpen = false,
   onMobileClose,
+  archivedProjects,
+  archivedTotal = 0,
+  archivedPage = 1,
+  onArchivedPageChange,
+  onArchiveProject,
+  onCopyProject,
+  onTransferProject,
+  onRestoreProject,
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [projectMenuOpenId, setProjectMenuOpenId] = useState<string | null>(null);
+  // #48 归档折叠区开合（默认收起：归档项目非工作台主角，「默认隐藏」语义）
+  const [archivedOpen, setArchivedOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const navigate = useNavigate();
@@ -303,6 +328,30 @@ const Sidebar: React.FC<SidebarProps> = ({
                                   <Users size={12} /> 成员管理
                                 </div>
                               )}
+                              {/* #48 管理操作入口：owner 或 admin 直通可见（对齐五端点 projectRole('owner')+admin 门）；
+                                  handler 缺省点击无动作（App 恒传），可见性只由权限决定 */}
+                              {(currentUser.role === 'admin' || project.currentUserRole === 'owner') && (
+                                <>
+                                  <div
+                                    onClick={(e) => { e.stopPropagation(); setProjectMenuOpenId(null); onArchiveProject?.(project); }}
+                                    className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white flex items-center gap-2 cursor-pointer transition-colors"
+                                  >
+                                    <Archive size={12} /> 归档项目
+                                  </div>
+                                  <div
+                                    onClick={(e) => { e.stopPropagation(); setProjectMenuOpenId(null); onCopyProject?.(project); }}
+                                    className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white flex items-center gap-2 cursor-pointer transition-colors"
+                                  >
+                                    <FolderDown size={12} /> 复制项目
+                                  </div>
+                                  <div
+                                    onClick={(e) => { e.stopPropagation(); setProjectMenuOpenId(null); onTransferProject?.(project); }}
+                                    className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white flex items-center gap-2 cursor-pointer transition-colors"
+                                  >
+                                    <ArrowLeftRight size={12} /> 转让所有权
+                                  </div>
+                                </>
+                              )}
                               <div
                                 onClick={(e) => { e.stopPropagation(); setProjectMenuOpenId(null); onEditProject(project); }}
                                 className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white flex items-center gap-2 cursor-pointer transition-colors"
@@ -324,6 +373,55 @@ const Sidebar: React.FC<SidebarProps> = ({
               </Tooltip>
             ))}
           </div>
+
+          {/* #48 归档折叠视图：默认收起（归档项目「工作台默认隐藏」语义）、折叠态隐藏（紧凑模式）。
+              条目点击进入归档项目视图（App 层识别 status 切只读态）；恢复入口 owner|admin 可见（对齐后端 restore 权限门） */}
+          {!isCollapsed && (archivedProjects?.length ?? 0) > 0 && (
+            <div className="mt-2 pt-3 border-t border-white/5">
+              <button
+                type="button"
+                onClick={() => setArchivedOpen(!archivedOpen)}
+                aria-expanded={archivedOpen}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-white/5 transition-colors"
+              >
+                <Archive size={12} />
+                <span className="text-[11px] font-bold uppercase tracking-widest">已归档 ({archivedTotal})</span>
+                <ChevronDown size={12} className={`ml-auto transition-transform ${archivedOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {archivedOpen && (
+                <div className="mt-1 space-y-1" aria-label="已归档项目区">
+                  {archivedProjects!.map((p) => {
+                    const canRestore = currentUser.role === 'admin' || p.currentUserRole === 'owner';
+                    return (
+                      <div key={p.id} className="flex items-center gap-1 group/arch rounded-lg hover:bg-white/5 transition-colors">
+                        <button
+                          onClick={() => { onSelectViewMode('all'); onSelectProject(p.id); }}
+                          className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 text-left text-xs text-slate-500 hover:text-slate-200 truncate"
+                        >
+                          <ProjectIcon name={p.icon} size={14} className="text-slate-600 flex-shrink-0" />
+                          <span className="truncate">{p.name}</span>
+                        </button>
+                        {canRestore && onRestoreProject && (
+                          <button
+                            onClick={() => onRestoreProject(p)}
+                            aria-label={`恢复 ${p.name}`}
+                            title="恢复项目"
+                            className="p-1.5 mr-1 rounded-md text-slate-600 hover:text-emerald-400 hover:bg-white/10 opacity-0 group-hover/arch:opacity-100 transition-all active:scale-90"
+                          >
+                            <RotateCcw size={12} />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {/* 归档分页：跨页才渲染 footer（单页不占位，复用 Pagination 先例） */}
+                  {archivedTotal > archivedProjects!.length && onArchivedPageChange && (
+                    <Pagination page={archivedPage} total={archivedTotal} pageSize={100} onPageChange={onArchivedPageChange} className="px-1 pt-1" />
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* #49 项目列表受控分页 footer：total>0 才渲染；折叠态隐藏（紧凑模式不放分页） */}

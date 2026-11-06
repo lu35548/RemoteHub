@@ -262,3 +262,121 @@ describe('#49 rev M3 二次修复：transitionend 同步移焦（关→开循环
     }
   });
 });
+
+// ── #48 项目管理增强:菜单三入口(归档/复制/转让,owner|admin 可见) + 归档折叠视图 ──
+describe('#48 项目操作菜单权限边界', () => {
+  // MoreVertical 按钮 opacity-0 hover 才显示——fireEvent 直点(#40 先例)
+  const openProjectMenu = (name: string) => {
+    fireEvent.click(screen.getByRole('button', { name: `项目操作 ${name}` }));
+  };
+  const ownerUser: UserPublic = { id: 'u1', username: 'owner1', nickname: '项目所有者', role: 'user', isActive: true, lastActiveAt: null, createdAt: '2026-01-01' };
+  const ownerProjects: ProjectListItem[] = [
+    { ...projects[0]!, currentUserRole: 'owner' },
+    { ...projects[1]!, currentUserRole: 'viewer' },
+  ];
+
+  it('owner:菜单含「归档项目」「复制项目」「转让所有权」', () => {
+    render(
+      <MemoryRouter>
+        <Sidebar {...props} projects={ownerProjects} currentUser={ownerUser} />
+      </MemoryRouter>,
+    );
+    openProjectMenu('某某科技 - 私有云');
+    expect(screen.getByText('归档项目')).toBeInTheDocument();
+    expect(screen.getByText('复制项目')).toBeInTheDocument();
+    expect(screen.getByText('转让所有权')).toBeInTheDocument();
+  });
+
+  it('admin 直通:非成员 admin 菜单同样含三入口', () => {
+    render(
+      <MemoryRouter>
+        <Sidebar {...props} currentUser={admin} />
+      </MemoryRouter>,
+    );
+    openProjectMenu('测试项目');
+    expect(screen.getByText('归档项目')).toBeInTheDocument();
+    expect(screen.getByText('复制项目')).toBeInTheDocument();
+    expect(screen.getByText('转让所有权')).toBeInTheDocument();
+  });
+
+  it('非 owner 非 admin(viewer):三入口全遮蔽(AC 权限边界),编辑/删除不受影响', () => {
+    render(
+      <MemoryRouter>
+        <Sidebar {...props} projects={ownerProjects} currentUser={ownerUser} />
+      </MemoryRouter>,
+    );
+    openProjectMenu('测试项目'); // currentUserRole: viewer
+    expect(screen.queryByText('归档项目')).not.toBeInTheDocument();
+    expect(screen.queryByText('复制项目')).not.toBeInTheDocument();
+    expect(screen.queryByText('转让所有权')).not.toBeInTheDocument();
+    expect(screen.getByText('编辑')).toBeInTheDocument();
+    expect(screen.getByText('删除')).toBeInTheDocument();
+  });
+});
+
+describe('#48 归档折叠视图', () => {
+  const ownerUser: UserPublic = { id: 'u1', username: 'owner1', nickname: '项目所有者', role: 'user', isActive: true, lastActiveAt: null, createdAt: '2026-01-01' };
+  const archived = [
+    { id: 'pa1', name: '归档项目甲', icon: 'server', status: 'archived' as const, currentUserRole: 'owner' as const, createdBy: { id: 'u1', nickname: '项目所有者' }, updatedBy: { id: 'u1', nickname: '项目所有者' }, createdAt: '2026-01-01', updatedAt: '2026-01-01' },
+    { id: 'pa2', name: '归档项目乙', icon: 'cloud', status: 'archived' as const, currentUserRole: 'viewer' as const, createdBy: { id: 'u1', nickname: '项目所有者' }, updatedBy: { id: 'u1', nickname: '项目所有者' }, createdAt: '2026-01-01', updatedAt: '2026-01-01' },
+  ];
+
+  it('归档区折叠钮「已归档 (2)」+ aria-expanded;默认收起不显示归档项目名', () => {
+    render(
+      <MemoryRouter>
+        <Sidebar {...props} archivedProjects={archived} archivedTotal={2} onRestoreProject={vi.fn()} />
+      </MemoryRouter>,
+    );
+    const toggle = screen.getByRole('button', { name: /已归档/ });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('归档项目甲')).not.toBeInTheDocument();
+  });
+
+  it('展开 → 归档项目名可见;点击归档项目名 → onSelectProject(id)', async () => {
+    const onSelectProject = vi.fn();
+    const events = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <Sidebar {...props} archivedProjects={archived} archivedTotal={2} onRestoreProject={vi.fn()} onSelectProject={onSelectProject} />
+      </MemoryRouter>,
+    );
+    await events.click(screen.getByRole('button', { name: /已归档/ }));
+    await events.click(screen.getByText('归档项目甲'));
+    expect(onSelectProject).toHaveBeenCalledWith('pa1');
+  });
+
+  it('owner 归档项带「恢复」按钮,点击 → onRestoreProject(归档项目对象)', async () => {
+    const onRestoreProject = vi.fn();
+    const events = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <Sidebar {...props} currentUser={ownerUser} archivedProjects={archived} archivedTotal={2} onRestoreProject={onRestoreProject} />
+      </MemoryRouter>,
+    );
+    await events.click(screen.getByRole('button', { name: /已归档/ }));
+    await events.click(screen.getByRole('button', { name: '恢复 归档项目甲' }));
+    expect(onRestoreProject).toHaveBeenCalledWith(archived[0]);
+  });
+
+  it('非 owner 非 admin 的归档项(viewer)无恢复按钮', async () => {
+    const events = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <Sidebar {...props} currentUser={ownerUser} archivedProjects={archived} archivedTotal={2} onRestoreProject={vi.fn()} />
+      </MemoryRouter>,
+    );
+    await events.click(screen.getByRole('button', { name: /已归档/ }));
+    expect(screen.queryByRole('button', { name: '恢复 归档项目乙' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '恢复 归档项目甲' })).toBeInTheDocument();
+  });
+
+  it('折叠态(isCollapsed)归档区隐藏', () => {
+    render(
+      <MemoryRouter>
+        <Sidebar {...props} archivedProjects={archived} archivedTotal={2} onRestoreProject={vi.fn()} />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '折叠侧栏' }));
+    expect(screen.queryByRole('button', { name: /已归档/ })).not.toBeInTheDocument();
+  });
+});

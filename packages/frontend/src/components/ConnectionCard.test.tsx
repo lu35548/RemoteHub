@@ -338,3 +338,20 @@ describe('ConnectionCard 一键直连 launch 分派（#46）', () => {
     }
   });
 });
+
+// ── #48 归档项目只读态：写操作入口整体遮蔽(编辑/克隆/删除藏于「更多操作」菜单,
+// 整菜单不渲染;连接主按钮属使用语义保留) ──
+describe('#48 ConnectionCard 只读态(readOnly)', () => {
+  it('readOnly=true → 无「更多操作」菜单按钮,主连接按钮保留', () => {
+    renderCard({ readOnly: true });
+
+    expect(screen.queryByRole('button', { name: '更多操作' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /一键直连/ })).toBeInTheDocument();
+  });
+
+  it('缺省(非归档视图) → 菜单按钮照常渲染(既有行为零变化)', () => {
+    renderCard();
+
+    expect(screen.getByRole('button', { name: '更多操作' })).toBeInTheDocument();
+  });
+});

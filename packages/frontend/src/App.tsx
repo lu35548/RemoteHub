@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Plus, Layout, Network, Server, Menu } from 'lucide-react';
+import { Search, Plus, Layout, Network, Server, Menu, Archive, RotateCcw } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ConnectionDetail, ConnectionListItem, ConnectionListQuery, CreateConnectionRequest, ProjectListItem, ProjectDetail, UserPublic } from '@remotehub/shared';
 import { api, setAccessToken } from './api/client';
-import { useMe, useLogout, useProjects, useConnections, useConnectionStats, useCreateProject, useUpdateProject, useDeleteProject, useCreateConnection, useUpdateConnection, useDeleteConnection, useCloneConnection, NOTIFICATION_QUERY_KEY } from './api/queries';
+import { useMe, useLogout, useProjects, useArchivedProjects, useArchiveProject, useRestoreProject, useCopyProject, useConnections, useConnectionStats, useCreateProject, useUpdateProject, useDeleteProject, useCreateConnection, useUpdateConnection, useDeleteConnection, useCloneConnection, NOTIFICATION_QUERY_KEY } from './api/queries';
+import type { ProjectListItemWithStatus } from './api/queries';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { useWs } from './hooks/useWs';
 import { dispatchWsMessage } from './lib/notificationDispatch';
@@ -13,10 +14,12 @@ import ConnectionCard from './components/ConnectionCard';
 import ConnectionModal from './components/ConnectionModal';
 import ProjectModal, { type ProjectFormInput } from './components/ProjectModal';
 import ProjectMembersModal from './components/ProjectMembersModal';
+import ProjectTransferModal from './components/ProjectTransferModal';
 import UserManagementModal from './components/UserManagementModal';
 import NotificationCenter from './components/NotificationCenter';
 import ConnectionFilterBar, { type TagOption, type ConnectionSortTarget } from './components/ConnectionFilterBar';
 import { useUI } from './components/UIComponents';
+import { errMsg } from './utils';
 import { Pagination } from './components/Pagination';
 import { getAvatarColor } from './utils/avatar';
 
@@ -42,6 +45,10 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
   const createProjectMutation = useCreateProject();
   const updateProjectMutation = useUpdateProject();
   const deleteProjectMutation = useDeleteProject();
+  // #48 项目操作 mutation(归档/恢复/复制;转让在 ProjectTransferModal 内自持 hook)
+  const archiveMutation = useArchiveProject();
+  const restoreMutation = useRestoreProject();
+  const copyMutation = useCopyProject();
   const createConnectionMutation = useCreateConnection();
   const updateConnectionMutation = useUpdateConnection();
   const deleteConnectionMutation = useDeleteConnection();
@@ -62,6 +69,21 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
 
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'all' | 'vpn'>('all');
+
+  // #48 归档列表（挂载即拉：折叠钮计数需要 total；queryKey ['projects','archived',…] 归属 projects 前缀族，
+  // 四操作 mutation invalidate ['projects'] 时主列表与归档列表同步刷新）
+  const [archivedPage, setArchivedPage] = useState(1);
+  const { data: archivedPageData } = useArchivedProjects(archivedPage, 100);
+  const archivedProjects = useMemo(() => archivedPageData?.data ?? [], [archivedPageData]);
+  const archivedTotal = archivedPageData?.pagination.total ?? 0;
+  // M2（#49 rev）同款越界恢复：归档列表缩页时钳回有效页
+  const archivedTotalPages = Math.max(1, Math.ceil(archivedTotal / 100));
+  if (archivedPage > archivedTotalPages) setArchivedPage(archivedTotalPages);
+  // 当前视图是否归档项目（只读失效态判定）：activeProjectId 命中归档列表
+  const activeArchived = useMemo(
+    () => archivedProjects.find((p) => p.id === activeProjectId) ?? null,
+    [archivedProjects, activeProjectId],
+  );
 
   // #42 过滤态从 URL 还原（q/tag/sort）：URL 是唯一真相源，无本地镜像态
   const [searchParams, setSearchParams] = useSearchParams();
@@ -224,6 +246,49 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
     });
   };
 
+  // ── #48 项目四操作(归档/恢复/复制/转让) ──
+
+  const handleArchiveProject = (project: ProjectListItem) => {
+    confirm({
+      title: '归档项目',
+      message: `归档后「${project.name}」将从工作台默认列表隐藏，可随时在侧栏「已归档」区恢复。`,
+      confirmText: '确认归档',
+      onConfirm: async () => {
+        try {
+          await archiveMutation.mutateAsync(project.id);
+          // 归档后不跳走：留在项目视图切只读态（activeArchived 由归档列表 invalidate 后命中）
+          toast('success', '项目已归档', `「${project.name}」已移入归档区`);
+        } catch (err) {
+          toast('error', '归档失败', errMsg(err, '无法归档项目'));
+        }
+      },
+    });
+  };
+
+  // 恢复 = 正向幂等操作（已 active 再恢复=成功），直接执行不 confirm
+  const handleRestoreProject = async (project: ProjectListItemWithStatus) => {
+    try {
+      await restoreMutation.mutateAsync(project.id);
+      toast('success', '项目已恢复', `「${project.name}」已回到工作台列表`);
+    } catch (err) {
+      toast('error', '恢复失败', errMsg(err, '无法恢复项目'));
+    }
+  };
+
+  const handleCopyProject = async (project: ProjectListItem) => {
+    try {
+      // 响应真形状（projectService.copyProject）：detail + clonedFrom + connectionCount（toast 消费连接数）
+      const copy = await copyMutation.mutateAsync(project.id);
+      toast('success', '复制成功', `已创建 "${copy.name}"，含 ${copy.connectionCount} 个连接`);
+    } catch (err) {
+      // PROJ_001（重名竞态 P2002 映射 409）等经 errMsg 透出后端中文消息
+      toast('error', '复制失败', errMsg(err, '无法复制项目'));
+    }
+  };
+
+  // #48 转让入口 → 打开弹窗（成员选择与提交在 ProjectTransferModal；转让者身份校验后端 owner 门兜底）
+  const [transferProject, setTransferProject] = useState<ProjectListItem | null>(null);
+
   const handleSaveConnection = async (data: CreateConnectionRequest, editingId?: string) => {
     try {
       const saved = editingId
@@ -300,11 +365,12 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
     void queryClient.invalidateQueries({ queryKey: ['connections'] });
   };
 
-  // #49 header 标题查找：底表 + 展示页并集（activeProject 可能在任一页）。
+  // #49 header 标题查找：底表 + 展示页 + 归档列表并集（activeProject 可能在任一页；#48 归档项目
+  // 只读视图标题也要命中——归档后留在项目视图的窗口期主列表已无此项）
   // m2 已知边界：底表只持 page=1，展示页只持当前页——activeProject 恰在「非当前展示页且非第一页」
   // 的窗口期（如翻走后又切回该项目视图）两表都不含，回退默认标题「所有远程资源」；重新翻回即恢复
   const getHeaderTitle = () => {
-    const project = [...projectsBase, ...projectsDisplay].find(p => p.id === activeProjectId);
+    const project = [...projectsBase, ...projectsDisplay, ...archivedProjects].find(p => p.id === activeProjectId);
     if (project) return project.name;
     if (viewMode === 'vpn') return 'VPN 网络通道管理';
     return '所有远程资源';
@@ -330,6 +396,15 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
         onEditProject={runThenCloseDrawer(handleEditProject)}
         onDeleteProject={runThenCloseDrawer(handleDeleteProject)}
         onManageMembers={runThenCloseDrawer(setMembersProject)}
+        // #48 归档视图 + 管理操作入口（抽屉内动作完成后收抽屉）
+        archivedProjects={archivedProjects}
+        archivedTotal={archivedTotal}
+        archivedPage={archivedPage}
+        onArchivedPageChange={setArchivedPage}
+        onArchiveProject={runThenCloseDrawer(handleArchiveProject)}
+        onCopyProject={runThenCloseDrawer(handleCopyProject)}
+        onTransferProject={runThenCloseDrawer(setTransferProject)}
+        onRestoreProject={runThenCloseDrawer(handleRestoreProject)}
         onLogout={runThenCloseDrawer(handleLogout)}
         currentUser={currentUser}
         onOpenUserModal={runThenCloseDrawer(() => setIsUserModalOpen(true))}
@@ -421,9 +496,12 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
                 className="bg-slate-900 border border-slate-800 rounded-lg pl-10 pr-4 py-2 text-sm w-64 focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none transition-all"
               />
             </div>
+            {/* #48 归档项目只读态:新建入口禁用(title 说明恢复路径) */}
             <button
               onClick={() => { setEditingConnection(null); setIsConnectionModalOpen(true); }}
-              className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all shadow-lg shadow-blue-900/20 hover:shadow-blue-900/40 active:scale-95"
+              disabled={!!activeArchived}
+              title={activeArchived ? '项目已归档，恢复后可新建资源' : undefined}
+              className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all shadow-lg shadow-blue-900/20 hover:shadow-blue-900/40 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none"
             >
               <Plus size={16} />
               新建资源
@@ -442,6 +520,26 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
             protocolStats={activeProjectId ? statsQuery.data?.protocols : undefined}
           />
         </div>
+
+        {/* #48 归档项目只读提示条：直达连接失效态的显性说明 + 恢复入口（owner|admin 可见，对齐 restore 权限门） */}
+        {activeArchived && (
+          <div className="px-4 md:px-8 pt-4">
+            <div className="flex items-center justify-between gap-3 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3 animate-in fade-in slide-in-from-top-2 duration-300">
+              <div className="flex items-center gap-2 text-sm text-amber-300 min-w-0">
+                <Archive size={16} className="flex-shrink-0" />
+                <span className="truncate">本项目已归档，资源只读展示；恢复项目后可继续编辑。</span>
+              </div>
+              {(currentUser.role === 'admin' || activeArchived.currentUserRole === 'owner') && (
+                <button
+                  onClick={() => handleRestoreProject(activeArchived)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-200 hover:text-white bg-amber-500/20 hover:bg-amber-500/30 rounded-lg transition-colors flex-shrink-0"
+                >
+                  <RotateCcw size={14} /> 恢复项目
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto px-4 py-6 md:p-8 custom-scrollbar scroll-smooth">
           {hosts.length === 0 && vpns.length === 0 && (
@@ -470,6 +568,7 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
                     <ConnectionCard
                       key={conn.id}
                       connection={conn}
+                      readOnly={!!activeArchived}
                       onEdit={handleEditConnection}
                       onDelete={handleDeleteConnection}
                       onClone={handleCloneConnection}
@@ -494,6 +593,7 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
                       key={conn.id}
                       connection={conn}
                       vpnDependency={allConnections.find(c => c.id === conn.requiredVpnId) ?? undefined}
+                      readOnly={!!activeArchived}
                       onEdit={handleEditConnection}
                       onDelete={handleDeleteConnection}
                       onClone={handleCloneConnection}
@@ -547,6 +647,15 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
         project={membersProject}
         currentUser={currentUser}
         onLeft={handleLeftProject}
+      />
+
+      {/* #48 转让所有权弹窗（转让成功后 useTransferProject invalidate projects/members，
+          项目列表 currentUserRole 与菜单入口随角色变化自动显隐） */}
+      <ProjectTransferModal
+        isOpen={!!transferProject}
+        onClose={() => setTransferProject(null)}
+        project={transferProject}
+        currentUser={currentUser}
       />
     </div>
   );

@@ -14,6 +14,8 @@ interface ConnectionCardProps {
   onDelete: (id: string) => void;
   /** #43 克隆入口（回调上浮 App 统一处理，与 onEdit/onDelete 同模式） */
   onClone: (conn: ConnectionListItem) => void;
+  /** #48 归档项目只读态：写操作入口（编辑/克隆/删除，藏于菜单）整体遮蔽；主连接按钮属使用语义保留 */
+  readOnly?: boolean;
 }
 
 const getRelativeTime = (dateStr?: string) => {
@@ -27,7 +29,7 @@ const getRelativeTime = (dateStr?: string) => {
   return `${Math.floor(hours / 24)}天前`;
 };
 
-const ConnectionCard: React.FC<ConnectionCardProps> = ({ connection, vpnDependency, onEdit, onDelete, onClone }) => {
+const ConnectionCard: React.FC<ConnectionCardProps> = ({ connection, vpnDependency, onEdit, onDelete, onClone, readOnly = false }) => {
   const { toast } = useUI();
   const decrypt = useDecryptPassword();
   const [showMenu, setShowMenu] = useState(false);
@@ -207,13 +209,14 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({ connection, vpnDependen
             </div>
           </div>
 
-          {/* 右上操作区 */}
+          {/* 右上操作区（#48 readOnly：菜单写操作全禁 → 整菜单不渲染；RDP 引导钮属本地配置一并遮蔽） */}
           <div className="flex items-center gap-1">
-            {connection.protocol === 'RDP' && (
+            {connection.protocol === 'RDP' && !readOnly && (
               <button onClick={(e) => { e.stopPropagation(); setShowRdpSetup(true); }} className={`p-1.5 rounded-lg transition-all active:scale-90 ${isRdpReady ? 'text-amber-400 hover:bg-amber-500/10' : 'text-slate-600 hover:text-slate-400 hover:bg-white/5'}`} title={isRdpReady ? '已配置直连' : '未配置直连'}>
                 <Zap size={16} className={isRdpReady ? 'fill-current' : ''} />
               </button>
             )}
+            {!readOnly && (
             <div className="relative">
               <button aria-label="更多操作" onClick={() => setShowMenu(!showMenu)} className="p-1.5 text-slate-500 hover:text-white rounded-lg hover:bg-white/10 transition-colors active:scale-90"><MoreVertical size={16} /></button>
               {showMenu && (
@@ -231,6 +234,7 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({ connection, vpnDependen
                 </div>
               )}
             </div>
+            )}
           </div>
         </div>
 

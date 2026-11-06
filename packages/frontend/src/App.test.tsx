@@ -14,6 +14,9 @@ const state = vi.hoisted(() => ({
   allConnections: undefined as Array<Record<string, unknown>> | undefined,
   onlineUsers: [] as Array<Record<string, unknown>>,
   projects: [] as Array<Record<string, unknown>>,
+  // #48 归档列表（useArchivedProjects 消费）+ 受控 total
+  archivedProjects: [] as Array<Record<string, unknown>>,
+  archivedTotal: undefined as number | undefined,
   stats: undefined as { protocols: Record<string, number>; tags: Record<string, number> } | undefined,
   paginationTotal: undefined as number | undefined,
   // #49 分页参数捕获：展示/底表两侧 page 独立记录（翻页只动展示查询，底表保持 page=1）
@@ -27,6 +30,13 @@ const connMutations = vi.hoisted(() => ({
   updateAsync: vi.fn(),
   deleteAsync: vi.fn(),
   cloneAsync: vi.fn(),
+}));
+// #48 项目四操作 mutation（归档/恢复/复制/转让）
+const projectMutations = vi.hoisted(() => ({
+  archiveAsync: vi.fn(),
+  restoreAsync: vi.fn(),
+  copyAsync: vi.fn(),
+  transferAsync: vi.fn(),
 }));
 
 // mock 数据层：useMe 返回 admin，列表 hooks 返回扁平分页 body（真实运行时形状，T4 教训）
@@ -55,6 +65,14 @@ vi.mock('./api/queries', () => ({
   useDeleteConnection: vi.fn(() => ({ mutateAsync: connMutations.deleteAsync })),
   // 票 #43：克隆 mutation（factory 与 queries.ts 导出同步——缺 key 炸 "No export defined on the mock"）
   useCloneConnection: vi.fn(() => ({ mutateAsync: connMutations.cloneAsync })),
+  // 票 #48：项目四操作 mutation + 归档列表查询（factory 与 queries.ts 导出同步——缺 key 炸 "No export defined on the mock"）
+  useArchivedProjects: vi.fn((page: number = 1) => {
+    return { data: { success: true as const, data: state.archivedProjects, pagination: { page, pageSize: 100, total: state.archivedTotal ?? state.archivedProjects.length } }, isPending: false };
+  }),
+  useArchiveProject: vi.fn(() => ({ mutateAsync: projectMutations.archiveAsync })),
+  useRestoreProject: vi.fn(() => ({ mutateAsync: projectMutations.restoreAsync })),
+  useCopyProject: vi.fn(() => ({ mutateAsync: projectMutations.copyAsync })),
+  useTransferProject: vi.fn(() => ({ mutateAsync: projectMutations.transferAsync })),
   useLogout: vi.fn(() => ({ mutateAsync: vi.fn(), mutate: vi.fn() })),
   // T6：ConnectionCard 渲染期调用（App 用例不触发解密，给空实现即可）
   useDecryptPassword: vi.fn(() => ({ mutateAsync: vi.fn() })),
@@ -117,13 +135,15 @@ const renderApp = (initialEntry = '/') =>
     </UIProvider>,
   );
 
-// 三个 describe 共用的重置逻辑（原各自 beforeEach 完全相同，提升至此）
+// 三个 describe 共用的重置逻辑（原各自 beforeEach 用例内重置，提升至此）
 beforeEach(() => {
   vi.clearAllMocks();
   state.connections = [];
   state.allConnections = undefined;
   state.onlineUsers = [];
   state.projects = [];
+  state.archivedProjects = [];
+  state.archivedTotal = undefined;
   state.stats = undefined;
   state.paginationTotal = undefined;
   state.projectsTotal = undefined;
@@ -430,5 +450,97 @@ describe('#49 rev 修复（M2 越界恢复 + 顺手③ tag 重置 + 汉堡 a11y�
     state.projects = [projectItem];
     renderApp();
     expect(screen.getByRole('button', { name: '打开导航菜单' })).toHaveAttribute('aria-controls', 'mobile-sidebar');
+  });
+});
+
+// ── #48 项目管理增强:四操作接线 + 归档视图切换 + 只读失效态 ──
+describe('#48 项目管理增强(归档/复制/转让/归档视图)', () => {
+  const ownerProject = {
+    id: 'p1', name: '默认项目', icon: 'server', currentUserRole: 'owner',
+    createdBy: { id: 'u1', nickname: '管理员' }, updatedBy: { id: 'u1', nickname: '管理员' },
+    createdAt: '2026-01-01', updatedAt: '2026-01-01',
+  };
+  const archivedProject = {
+    id: 'p-arch', name: '已归档项目', icon: 'cloud', status: 'archived', currentUserRole: 'owner',
+    createdBy: { id: 'u1', nickname: '管理员' }, updatedBy: { id: 'u1', nickname: '管理员' },
+    createdAt: '2026-01-01', updatedAt: '2026-01-01',
+  };
+
+  it('归档菜单 → confirm 确认 → archiveAsync(id) → 成功 toast', async () => {
+    state.projects = [ownerProject];
+    projectMutations.archiveAsync.mockResolvedValueOnce({ id: 'p1', name: '默认项目', status: 'archived' });
+    const events = userEvent.setup();
+    renderApp();
+
+    fireEvent.click(screen.getByRole('button', { name: '项目操作 默认项目' }));
+    await events.click(screen.getByText('归档项目'));
+    // confirm 弹窗(归档可逆,info 变体文案说明后果与恢复路径)
+    expect(screen.getByText('归档后「默认项目」将从工作台默认列表隐藏，可随时在侧栏「已归档」区恢复。')).toBeInTheDocument();
+    await events.click(screen.getByRole('button', { name: '确认归档' }));
+    await waitFor(() => expect(projectMutations.archiveAsync).toHaveBeenCalledWith('p1'));
+    expect(await screen.findByText('项目已归档')).toBeInTheDocument();
+  });
+
+  it('复制菜单 → copyAsync(id) → toast 消费响应真形状 connectionCount(含 N 个连接)', async () => {
+    state.projects = [ownerProject];
+    projectMutations.copyAsync.mockResolvedValueOnce({
+      id: 'p-copy', name: '默认项目 (副本)', status: 'active', clonedFrom: 'p1', connectionCount: 3,
+      createdBy: { id: 'u1', nickname: '管理员' }, updatedBy: { id: 'u1', nickname: '管理员' },
+      createdAt: '2026-01-01', updatedAt: '2026-01-01',
+    });
+    const events = userEvent.setup();
+    renderApp();
+
+    fireEvent.click(screen.getByRole('button', { name: '项目操作 默认项目' }));
+    await events.click(screen.getByText('复制项目'));
+    // 锁真形状:connectionCount 字段名来自 projectService.copyProject 响应(非票面猜测)
+    expect(await screen.findByText('已创建 "默认项目 (副本)"，含 3 个连接')).toBeInTheDocument();
+    expect(projectMutations.copyAsync).toHaveBeenCalledWith('p1');
+  });
+
+  it('转让入口(owner) → 打开转让弹窗', async () => {
+    state.projects = [ownerProject];
+    const events = userEvent.setup();
+    renderApp();
+
+    fireEvent.click(screen.getByRole('button', { name: '项目操作 默认项目' }));
+    await events.click(screen.getByText('转让所有权'));
+    expect(await screen.findByText('转让所有权')).toBeInTheDocument();
+  });
+
+  it('归档视图切换:归档区展开 → 点归档项目进入只读态(提示条 + 新建资源禁用 + 卡片菜单遮蔽)→ 恢复回正常', async () => {
+    state.archivedProjects = [archivedProject];
+    state.connections = [hostConn];
+    const events = userEvent.setup();
+    renderApp();
+
+    // 归档区默认收起;展开后归档项目名可见
+    const toggle = screen.getByRole('button', { name: /已归档/ });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await events.click(toggle);
+    await events.click(screen.getByText('已归档项目'));
+
+    // 只读失效态三件套:提示条 + 新建资源禁用 + ConnectionCard 写操作菜单遮蔽
+    expect(screen.getByText(/本项目已归档/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /新建资源/ })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '更多操作' })).not.toBeInTheDocument();
+
+    // 提示条内恢复入口 → restoreAsync(恢复后 invalidate,activeArchived 消失,只读态解除——
+    // mock 恒返回归档列表故 UI 层不断言提示条消失,数据回路由 queries 层缓存失效语义保证)
+    await events.click(screen.getByRole('button', { name: '恢复项目' }));
+    await waitFor(() => expect(projectMutations.restoreAsync).toHaveBeenCalledWith('p-arch'));
+  });
+
+  it('归档区恢复入口:owner 归档项「恢复 X」→ restoreAsync(id) → 成功 toast', async () => {
+    state.archivedProjects = [archivedProject];
+    projectMutations.restoreAsync.mockResolvedValueOnce({ id: 'p-arch', name: '已归档项目', status: 'active' });
+    const events = userEvent.setup();
+    renderApp();
+
+    await events.click(screen.getByRole('button', { name: /已归档/ }));
+    // 恢复按钮 opacity-0 hover 才显示 → fireEvent 直点(#40 菜单按钮同坑先例)
+    fireEvent.click(screen.getByRole('button', { name: '恢复 已归档项目' }));
+    await waitFor(() => expect(projectMutations.restoreAsync).toHaveBeenCalledWith('p-arch'));
+    expect(await screen.findByText('项目已恢复')).toBeInTheDocument();
   });
 });

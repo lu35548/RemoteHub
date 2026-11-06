@@ -184,6 +184,90 @@ export function useDeleteProject() {
   });
 }
 
+// ─── #48 项目管理增强（归档/恢复/复制/转让）───
+// API 形状两个事实（读 #47 backend projectService 定案，非猜测）：
+// ① 列表项/详情均含 status（'active'|'archived' 纯 string）——shared 类型本批被 impl-50 独占，
+//    走本地镜像（BackupListItem 先例），合流后迁 shared；
+// ② copy 响应 = detail + clonedFrom + connectionCount（toast「含 N 个连接」消费 connectionCount）。
+
+/** 项目 status 值域（spec §12：active/archived；后端纯 string，SQLite 方言禁 VarChar） */
+export type ProjectStatusValue = 'active' | 'archived';
+
+/** 项目列表项 + status（本地镜像 API 形状，#47 后端 select 直出） */
+export interface ProjectListItemWithStatus extends ProjectListItem {
+  status: ProjectStatusValue;
+}
+
+/** 项目详情 + status（archive/restore/copy 响应体） */
+export interface ProjectDetailWithStatus extends ProjectDetail {
+  status: ProjectStatusValue;
+}
+
+/** POST /projects/:id/copy 响应（深拷贝副本：恒 active + clonedFrom + 连接数） */
+export interface ProjectCopyResult extends ProjectDetailWithStatus {
+  clonedFrom: string;
+  connectionCount: number;
+}
+
+/** POST /projects/:id/transfer-ownership 响应（fromUserId=原 owner，toUserId=新 owner） */
+export interface ProjectTransferResult {
+  projectId: string;
+  fromUserId: string;
+  toUserId: string;
+}
+
+/** 归档项目列表（分页端点走 getRaw）。queryKey 挂 ['projects','archived',…] 子族——
+ * invalidateQueries(['projects']) 前缀匹配同时刷新主列表与归档列表（归档/恢复后两侧同步）。 */
+export function useArchivedProjects(page = 1, pageSize = 100) {
+  return useQuery({
+    queryKey: ['projects', 'archived', page, pageSize],
+    queryFn: () => api.getRaw<PaginatedResponse<ProjectListItemWithStatus>>(`/projects?page=${page}&pageSize=${pageSize}&archived=true`),
+    // 翻页拉新数据期间保持上一页 data 渲染（#49 分页 hooks 同口径）
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** 归档（POST /:id/archive）：已归档再归档=幂等成功；成功后主列表/归档列表双刷新 */
+export function useArchiveProject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post<ProjectDetailWithStatus>(`/projects/${id}/archive`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['projects'] }),
+  });
+}
+
+/** 恢复（POST /:id/restore）：已 active 再恢复=幂等成功 */
+export function useRestoreProject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post<ProjectDetailWithStatus>(`/projects/${id}/restore`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['projects'] }),
+  });
+}
+
+/** 复制（POST /:id/copy，201）：副本恒 active、「(副本)」递增避重名；响应含 connectionCount 供 toast */
+export function useCopyProject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post<ProjectCopyResult>(`/projects/${id}/copy`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['projects'] }),
+  });
+}
+
+/** 转让所有权（POST /:id/transfer-ownership，body {userId}）：原 owner 降 editor——
+ * 项目列表 currentUserRole 与成员列表角色徽章随之变化，两族缓存都失效 */
+export function useTransferProject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ projectId, userId }: { projectId: string; userId: string }) =>
+      api.post<ProjectTransferResult>(`/projects/${projectId}/transfer-ownership`, { userId }),
+    onSuccess: (_d, vars) => {
+      void qc.invalidateQueries({ queryKey: ['projects'] });
+      void qc.invalidateQueries({ queryKey: ['members', vars.projectId] });
+    },
+  });
+}
+
 // ─── Connections ───
 
 /** #42 连接列表 URL 拼 query：只拼已设置项，键序固定（projectId→tag→q→sort，对齐审计页 auditLogParams 模式） */
