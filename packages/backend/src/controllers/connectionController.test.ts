@@ -243,6 +243,21 @@ describe('connectionController', () => {
       expect(next).not.toHaveBeenCalled();
     });
 
+    it('#44 admin 角色第 4 参透传（直通语义的上游锁）', async () => {
+      const mockData = { id: 'c1', projectId: 'p1', name: '更新后' };
+      (connectionService.updateConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockData);
+
+      const { req, res, next } = mockReqRes(
+        { id: 'c1' }, undefined,
+        { name: '更新后' },
+        { id: 'u1', role: 'admin' },
+      );
+      await connectionController.updateConnection(req, res, next);
+
+      expect(connectionService.updateConnection).toHaveBeenCalledWith('u1', 'c1', { name: '更新后' }, 'admin');
+      expect(res.json).toHaveBeenCalledWith({ success: true, data: mockData });
+    });
+
     it('连接不存在 → 传递 CONN_002 到 next', async () => {
       const error = new Error('CONN_002') as any;
       error.code = 'CONN_002';

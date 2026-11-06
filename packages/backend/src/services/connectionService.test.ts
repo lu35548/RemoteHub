@@ -43,7 +43,7 @@ vi.mock('../utils/appError.js', async (importOriginal) => {
 
 import { prisma } from '../utils/prisma.js';
 import { encrypt, decrypt } from '../utils/encryption.js';
-import { createAppError } from '../utils/appError.js';
+import { createAppError, handlePrismaUniqueViolation } from '../utils/appError.js';
 import {
   createConnection,
   updateConnection,
@@ -436,12 +436,14 @@ describe('connectionService', () => {
         encryptedPass: null,
       });
 
-      await updateConnection('user-1', 'conn-1', { password: '' });
+      const result = await updateConnection('user-1', 'conn-1', { password: '' });
 
       expect(prisma.connection.update).toHaveBeenCalledWith({
         where: { id: 'conn-1' },
         data: expect.objectContaining({ encryptedPass: null, updatedBy: 'user-1' }),
       });
+      // #44 rev 补强（spec 轴 minor-2）：toDetail 派生键直接断言——清空按钮显示与卡片 PASS 态的源头
+      expect(result.hasPassword).toBe(false);
     });
 
     it('不传 password 键 → update data 不含 encryptedPass（留空 = 保持不变）', async () => {
@@ -545,6 +547,16 @@ describe('connectionService', () => {
         data: expect.objectContaining({ projectId: 'proj-2', updatedBy: 'user-1' }),
       });
       expect(result.projectId).toBe('proj-2');
+      // #44 rev 补强（std 轴缺口①）：换项目通知双发——目标在前、源在后，payload.projectId 各归各项目
+      expect(emitToProjectMembers).toHaveBeenCalledTimes(2);
+      expect(emitToProjectMembers).toHaveBeenNthCalledWith(1, 'proj-2', expect.objectContaining({
+        type: 'CONNECTION_UPDATED',
+        payload: expect.objectContaining({ projectId: 'proj-2', connectionId: 'conn-1', action: 'updated' }),
+      }));
+      expect(emitToProjectMembers).toHaveBeenNthCalledWith(2, 'proj-1', expect.objectContaining({
+        type: 'CONNECTION_UPDATED',
+        payload: expect.objectContaining({ projectId: 'proj-1', connectionId: 'conn-1', action: 'updated' }),
+      }));
     });
 
     it('目标项目不存在 → PROJ_002', async () => {
@@ -621,6 +633,51 @@ describe('connectionService', () => {
 
       expect(prisma.project.findUnique).not.toHaveBeenCalled();
       expect(result.projectId).toBe('proj-1');
+    });
+
+    it('换项目不传 requiredVpnId 键：沿用存量依赖，VPN 属源项目 → VAL_001（缺省分支路径锁）', async () => {
+      // connection.findUnique 调用序：① current（存量 requiredVpnId）② validateVpnDependency 内 target
+      setupFindUnique(
+        { ...mockConnection, id: 'conn-1', requiredVpnId: 'vpn-1' },
+        { ...mockVpnConnection, id: 'vpn-1', projectId: 'proj-1' }, // VPN 属源项目
+      );
+      setupProjectFindUnique({ id: 'proj-2', name: '目标项目' });
+      setupMemberFindUnique({ role: 'editor' });
+
+      await expect(
+        updateConnection('user-1', 'conn-1', { projectId: 'proj-2' }),
+      ).rejects.toThrow('AppError:VAL_001');
+    });
+
+    it('VPN 无 dependents 搬家成功（CONN_004 矩阵的 happy path）', async () => {
+      setupFindUnique({ ...mockVpnConnection, id: 'vpn-1' });
+      setupProjectFindUnique({ id: 'proj-2', name: '目标项目' });
+      setupMemberFindUnique({ role: 'editor' });
+      (prisma.connection.count as MockFn).mockResolvedValue(0);
+      (prisma.connection.update as MockFn).mockResolvedValue({ ...mockVpnConnection, id: 'vpn-1', projectId: 'proj-2' });
+
+      const result = await updateConnection('user-1', 'vpn-1', { projectId: 'proj-2' });
+
+      expect(result.projectId).toBe('proj-2');
+    });
+
+    it('换项目撞目标项目同名连接 → CONN_005（P2002 映射）', async () => {
+      setupFindUnique({ ...mockConnection, id: 'conn-1' });
+      setupProjectFindUnique({ id: 'proj-2', name: '目标项目' });
+      setupMemberFindUnique({ role: 'editor' });
+      const p2002 = Object.assign(new Error('Unique constraint failed on the fields: `projectId`,`name`'), {
+        name: 'PrismaClientKnownRequestError',
+        code: 'P2002',
+        meta: { target: ['projectId', 'name'] },
+      });
+      (prisma.connection.update as MockFn).mockRejectedValue(p2002);
+
+      // 本文件 mock 工厂把 handlePrismaUniqueViolation 换成透传重抛(映射表本身由 appError.test 锁定:
+      // P2002 target=[projectId,name] → CONN_005),此处只锁「update catch 接线调用了映射器」
+      await expect(
+        updateConnection('user-1', 'conn-1', { projectId: 'proj-2' }),
+      ).rejects.toThrow('Unique constraint failed');
+      expect(handlePrismaUniqueViolation).toHaveBeenCalledWith(p2002);
     });
   });
 
