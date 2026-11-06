@@ -13,8 +13,8 @@
 - [x] **`RemoteHub/.env.local` 磁盘去留（2026-08-31 T12 发现）**——✅ 用户拍板保留：git rm 后磁盘残留的唯一未跟踪文件（352B，曾因 v1 `.gitignore` 层被 porcelain 隐藏），密钥模式 1 命中。保留为未跟踪文件——根 `.gitignore:4` 的 `.env.local` 规则覆盖之，`git status` 不显示（初判「会显示 `?? RemoteHub/`」系未验证预测，已自查纠正）。
 - [x] **shared `AuditLog` 接口与 Prisma model 同名不同形**（2026-09-04 票 #15 review 发现）——✅ 票 #16 裁决（见下 section）：**不改名、不强制映射**。约定 = 后端文件不同时裸名导入两侧；DB 行类型如需引用走 `Prisma.*` 命名空间（audit.ts 顶部注释固化）。P0-2 实际未出现同文件双导入（中间件只写库不读 DTO）；DTO 映射函数推迟到 P0-3 查询端点按需落地。
 - [x] **frontend ConnectionModal/ProjectModal/App userEvent 测试全量默认并发下 5s 超时**（2026-09-04 首暴露 2 条；2026-09-23 #24 验收实证恶化：默认并发 7 败/99，失败集漂移；单文件恒绿、2 线程全量 99/99 绿——jsdom 14 文件并行挤爆本机资源所致，非用例缺陷）——✅ 已修关（#26 方案 A：vite.config.ts 锁 threads 池 2 线程，commit 6f8a5b5，默认命令 99/99 绿 54.5s）。
-- [ ] **首个 SQLite 方言 migration vs project.md「MySQL 统一」约定**——已移交 P1 #52（ADR 豁免 + project.md 四处订正，spec D6 裁决）。
-- [ ] **净化豁免清单未含 Project `description`**——已裁决（P1 spec D6）：接受误杀面并明示边界，随 #52 ADR 固化。
+- [x] **首个 SQLite 方言 migration vs project.md「MySQL 统一」约定**——✅ 批 9 #52 落地（ADR-0002 + project.md 四处订正 + Caddy→nginx + health 口径，commit `0ef2560`）。
+- [x] **净化豁免清单未含 Project `description`**——✅ 批 9 #52 落地（ADR-0002 误杀边界明示，spec D6 兑现）。
 - [ ] **AUTH_LOGIN 审计行操作人恒为「系统」**（票 #22 Spec 轴 review 发现）：login 未认证 userId=null 是 P0-5 spec 口径，但登录人信息（IP/UA）其实已记录，是否让 login 审计带 userId 待裁决。
 - [x] **#40 真机四操作验收**（2026-11-04 implementer 挂）——✅ 同日 lead 真机双用户全过（添加/改角色/移除/自离 + viewer 三层遮蔽 + onLeft 缓存失效双实证），证据贴 #40 关票评论。
 - [ ] **mfa 二段流审计口径**（批 2 #30 review + 未决①）：mfa/verify 成功/失败零审计（2FA 爆破不可见）；mfaPending 第一段被记 AUTH_LOGIN success 但无 session 建立语义失真。修复需新增审计 action 枚举（跨 shared AUDIT_ACTIONS + 前端 #23 标签映射）+ 恢复码使用事件可见性（OWASP 建议），属契约变更交用户裁决。
@@ -27,6 +27,48 @@
 - [ ] **#43 克隆不重跑全量字段校验**（批 8）：只校验新名，存量字段免新规则拦截——与 #45「存量零破坏」口径一致；若产品要求克隆强制全量校验再改。
 - [ ] **Zap「配置直连」引导链路去留**（批 8）：launch 端点时代该链路承诺（唤起 mstsc）与实际行为（下载 .rdp）矛盾，本批只修文案；整链砍除属功能裁决（砍则 triggerRdpProtocol/isRdpReady/showRdpSetup/downloadRdpFile 引用链一并）。
 - [ ] **编辑态 username:'none' 协议遗留值不可清**（批 8）：存量 HTTPS/TODESK 行历史 username 回填后输入框隐藏、静默重提交不可清（数据无损）——是否需要编辑态查表清值交裁决。
+
+---
+
+## [2026-11-06] P1 批 9：#44 编辑换项目+密码清空 ∥ #52 清理订正（两段式）✅
+
+**收官数据**：质量门终值 lead 亲测 **backend 669 / shared 59 / frontend 246**（基线 655/59/246→#44 后 669/246；#52 删除后持平）九门全 EXIT=0；4 commits（`37441ef` #44 feat → `03a3bdc` #44 review 补强 → `0ef2560` #52 全量 128 文件 +127/−44342 → 本 docs commit）；#44 已关票带证据评论，#52 关票收尾。真机：#44 四路径全过 + #52 compose 栈 build/up/重建复验全闭环。**#52 落地 = v1 `backend/` 时代终结，#51（Swagger）后续唯一参照是 research 快照与 git 考古。**
+
+团队形态：2 implementer 并行（A=impl-44 独占 packages 全域 / B=impl-52 两段式：Phase 1 删除+ADR+CI 零相交先行，Phase 2 copyTarget/setup 文案等 #44 commit 后接续）+ 4 reviewer 双轴（审 commit 锚定 diff）+ lead 亲测六门/真机/push/关票。**中途事故：session 中断带 impl-44/impl-52 双双消亡**——impl-44 报告在手（未 commit），impl-52 无报告但文件面已全部落地（工作树考古+交接文档）；lead 亲测后 commit `37441ef`，新 spawn impl-52b 接手验证+Phase 2。
+
+### Design decisions
+- [2026-11-06] 决策：#44 显式清空信号选 **password:null 键存在语义**（票面授权选项一）——`'password' in updatePayload` 现状分派天然支持三态（键缺省=不变/null/''=清），service 零改动；dedicated 字段（clearPassword:true）否决：协议面变宽+同传优先级纠缠。前端三态机：标记态→输入复位→留空态。
+- [2026-11-06] 决策：#44 requiredVpnId 跨项目=**后端拒绝零新错误码**——依赖侧合并项目视图校验（VAL_001），被依赖侧 dependents 反向保护（CONN_004 409）；自动清空依赖否决（静默丢配置），级联搬运 dependents 否决（越权面积大）。
+- [2026-11-06] 决策：#44 目标项目写权校验落 **service 层**（路由 projectRoleMiddleware 的 paramId 分支短路 body.projectId 兜底，无法表达目标≠源），admin 直通对齐路由层；源项目侧现状不收紧。
+- [2026-11-06] 决策：#52 CI actions 用**浮动 major tag**（checkout/setup-node@v7、action-setup@v6→实际解析 v6.1.1=票面 v6.1.0 同 minor 线）——与其他 actions 浮动口径一致，pin patch 增维护负担无收益。
+- [2026-11-06] 决策：#52 删 v1 前提炼 swagger 注解实践 47 行研究笔记（#51 票面「删前参照」时序与 #52 删除冲突的化解）；#51 blocked-by 偏离为**有记录的裁量**（spec 178 权威口径仅要求金矿票后，#41/#43 已关）。
+
+### Deviations
+- **lead 核对疏漏（被 impl-52b 纠正）**：批 9 开工考古「磁盘 backend/ 目录空」用了 `ls` 未带 `-A`，dotfiles 残留 `.env`/`.env.local`（ignored，v1 开发占位无真实凭据）漏检——impl-52b 补删+rmdir。教训与 git-rm-ignored-residue 同源：残留核对必须 `ls -A`。
+- **spawn 生成层损坏 ×2**：impl-52b 的 subagent_type 参数损坏（容错成默认类型，工具集反而更全未重 spawn）+ prompt 数处乱码（上下文兜底自纠，diff 复核干净）。
+- **compose v2 recreate 传播**：`up -d --force-recreate backend` 连带 recreate depends_on 的 frontend（引擎行为），rev-52-std 建议的「frontend 不动」复验形态不可达——等价验证改为 backend recreate 换 IP 后反代恢复（静态解析会在换 IP 后恒 502，运行时 resolver 解析生效实证）+ ADR health 五字段 JSON 真机可见。
+- impl-52b 观察到「backend 两 test 文件非我改动 M」悬案——实为 lead 03a3bdc 补强的 commit 前中间态（快照过期），commit 后 clean，零悬案。
+- #44 挂账候选中「VPN 下拉未按项目过滤」在真机复现（T11 编辑可见 P010 的 VPN 选项，警示兜底设计正是为此）。
+
+### Tradeoffs
+- **review 战果（4 份双轴报告，零 blocker/major）**：#44 = 2 minor（决策持久化载体→关票评论+notes 兑现；hasPassword 派生键零断言→03a3bdc 补）+ 测试密度补强五处（通知双发断言/VAL_001 缺省分支锁/VPN 搬家 happy path/CONN_005 接线锁/admin 透传）；#52 = 2 minor（backend 重建复验证据→compose 复验补做；openspec/changes/integrate-backend-api/tasks.md 11 处悬空引用→历史文档挂账不阻塞）+ 2 nit（ADR 备选完整度/notes 未勾选→本次收尾勾选）。
+- #44 TOCTOU（updateConnection 前置检查与 update 无事务）挂账单独小票：窗口毫秒级，$transaction 包裹属热路径结构改动，回归面大于收益。
+- CONN_005 撞名测试在 connectionService.test.ts 只能锁「catch 接线调用映射器」——该文件 mock 工厂把 handlePrismaUniqueViolation 换成透传重抛，映射表本身由 appError.test 锁定，双文件合璧闭环（mock 代际陷阱再 +1 形态）。
+
+### Open questions
+- **保存失败 toast 为 App 层统一文案**（CONN_004/VAL_001/PROJ_002/AUTH_003 细粒度中文消息未透传）——是否透传交产品裁决。
+- **VPN 下拉未按目标项目过滤**（全项目混排靠 #44 警示兜底）——按项目过滤需先选项目再拉选项的顺序耦合，是否立项待裁决。
+- **VPN 被依赖侧（CONN_004）提交前无预检警示**（与依赖侧不对称；前端列表项无 dependents 数据）——是否补预检交裁决。
+- **#44 TOCTOU $transaction 小票**是否立项。
+- **setup Modal 流程存废**（#46 launch 时代 rh-rdp:// 处理器引导链路，批 8 Zap OQ 同源）——isRdpReady 现仅剩 UI 标记作用，砍/留交裁决。
+- **openspec/changes/integrate-backend-api/tasks.md 11 处 backend/ 悬空引用**——随 openspec 归档流程处理（纯历史文档，不参与构建/CI）。
+- **批 8 旧账延续**：#43 克隆不重跑全量校验 / Zap 链路砍除 / username:'none' 遗留值 / #45 切协议 port 残留 / #42 tag 多选与全局分布（见顶部清单，均待裁决，勿重复评审）。
+
+### 真机验收（2026-11-06 lead 亲测，Chrome DevTools MCP isolatedContext）
+- **#44 AC1 四路径全过**：①换项目成功链：编辑态下拉解锁（disabled=false）→选 T11→「保存成功」→源列表消失→目标到达，`PATCH [200]`；②密码清空：按钮 aria-pressed 切换（清空密码↔撤销清空）→保存→**卡片 PASS 行整行消失**→重开编辑按钮不显+项目回填新值，`PATCH [200]`；③跨项目警示：依赖侧 role=alert 提交前出现（文案含改选指引）→保存被拒 `PATCH [422]` VAL_001 弹窗不关；④CONN_004：VPN 被依赖换项目 `PATCH [409]` ×2。
+- 真机配方再 +2：React 状态点击后同步读恒旧值（须 await 一帧再断言）；按钮文案切换型组件（清空密码→撤销清空）按旧文案定位会误判「消失」。
+- **#52 compose 全链**：build 双镜像（backend 668MB/frontend 95MB）→ up 双容器 healthy（healthcheck 127.0.0.1 修复运行级实证）→ 烟测（frontend 页面 200 / API 登录 success 签发 accessToken / health 经 nginx 反代 200）→ force-recreate backend 复验（反代恢复+五字段 JSON）。本机 docker daemon 由 lead 拉起（Docker Desktop 用户级安装路径）。
+- 端口映射真相：compose frontend 8080→80（nginx），backend 只 expose 不映射（API 全走反代）；宿主侧 `localhost` curl 亦可能走 ::1（与容器内同坑的宿主变体），烟测一律 127.0.0.1。
 
 ---
 
