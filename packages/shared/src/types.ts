@@ -222,6 +222,9 @@ export interface ConnectionDetail {
   createdAt: string;
   updatedAt: string;
   encryptedPass?: string | null;
+  /** #44 密码存在性（encryptedPass != null 派生）：编辑弹窗据此显示「清空密码」动作；
+   * 克隆响应同样携带（克隆件编辑态密码存在性判断不依赖条件脱敏的 encryptedPass 字段） */
+  hasPassword: boolean;
   /** #43 克隆来源连接 id（仅 POST /connections/:id/clone 响应携带；审计 detail.after 经响应体自动留痕） */
   clonedFrom?: string;
 }
@@ -242,10 +245,12 @@ export interface CreateConnectionRequest {
 }
 
 export interface UpdateConnectionRequest {
+  /** #44 跨项目移动：显式传且 ≠ 当前值时后端校验目标项目写权（editor+）；不传/同值 = 不移动 */
+  projectId?: string;
   name?: string;
   host?: string;
   port?: number | null;
-  username?: string | null;
+  /** #44 显式清空信号：键存在且为 null/'' = 清空密文列（hasPassword 变 false）；键缺省 = 保持不变 */
   password?: string | null;
   protocol?: Protocol;
   vpnType?: VpnType | null;

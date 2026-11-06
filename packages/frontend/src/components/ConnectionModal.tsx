@@ -31,6 +31,11 @@ interface ConnectionFormState {
   protocol: Protocol;
   username: string;
   password: string;
+  // #44 密码显式清空标记：true 时提交 password:null（后端键存在语义 = 清密文列）；
+  // 与「留空 = 不提交键（保持不变）」严格区分。用户在密码框输入时复位。
+  clearPassword: boolean;
+  // #44 回填的密码存在性（detail.hasPassword / 列表项 hasPassword）：清空按钮显示条件
+  hasPassword: boolean;
   notes: string;
   tags: string[];
   requiredVpnId: string;
@@ -66,6 +71,8 @@ const createEmptyHost = (projectId?: string): ConnectionFormState => ({
   protocol: 'RDP',
   username: '',
   password: '',
+  clearPassword: false,
+  hasPassword: false,
   notes: '',
   tags: [],
   requiredVpnId: '',
@@ -80,6 +87,8 @@ const createEmptyVpn = (projectId?: string): ConnectionFormState => ({
   vpnType: 'OTHER',
   username: '',
   password: '',
+  clearPassword: false,
+  hasPassword: false,
   notes: '',
   tags: [],
   requiredVpnId: '',
@@ -93,6 +102,8 @@ const toFormState = (c: ConnectionDetail): ConnectionFormState => ({
   protocol: c.protocol,
   username: c.username ?? '',
   password: '', // v2 加密模型无明文可回填；留空 = 不提交 password（保持原密码）
+  clearPassword: false,
+  hasPassword: c.hasPassword,
   notes: c.notes ?? '',
   tags: c.tags ? c.tags.split(',').filter(Boolean) : [],
   requiredVpnId: c.requiredVpnId ?? '',
@@ -146,6 +157,8 @@ const ConnectionModal: React.FC<ConnectionModalProps> = ({
               protocol: linkedVpn.protocol,
               username: linkedVpn.username ?? '',
               password: '',
+              clearPassword: false,
+              hasPassword: linkedVpn.hasPassword,
               notes: '',
               tags: linkedVpn.tags ? linkedVpn.tags.split(',').filter(Boolean) : [],
               requiredVpnId: '',
@@ -186,7 +199,17 @@ const ConnectionModal: React.FC<ConnectionModalProps> = ({
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    setCurrentData(prev => ({ ...prev, [name]: value }));
+    setCurrentData(prev => ({
+      ...prev,
+      [name]: value,
+      // #44 密码框输入即复位清空标记（标记只在「点了清空且未再输入」窗口内生效）
+      ...(name === 'password' && { clearPassword: false }),
+    }));
+  };
+
+  // #44 清空密码 toggle：标记 + 清输入框；再点恢复保留语义（输入框输入同样复位）
+  const toggleClearPassword = () => {
+    setCurrentData(prev => ({ ...prev, clearPassword: !prev.clearPassword, password: '' }));
   };
 
   // #46 协议切换字段联动：port 预填 registry 默认端口（SSH 22 / RDP 3389 / HTTPS 443 / HTTP 80 / VNC 5900；
@@ -226,8 +249,10 @@ const ConnectionModal: React.FC<ConnectionModalProps> = ({
       username: data.username || null,
       tags: data.tags.length > 0 ? data.tags.join(',') : null,
     };
-    // 编辑时密码留空 = 不动原密码（提交 null/'' 会清空）；新建时空 = null
-    if (!isEdit || data.password) payload.password = data.password || null;
+    // #44 密码三态：clearPassword 标记 → 提交 password:null（后端键存在语义 = 清密文列，
+    // hasPassword 变 false）；编辑态留空仍 = 不提交键（保持不变）；新建空 = null
+    if (data.clearPassword) payload.password = null;
+    else if (!isEdit || data.password) payload.password = data.password || null;
     // host 联动编辑关联 VPN 时，notes 来自列表项（无该字段），空 = 未回填而非用户清空 → 不提交以保留原值；
     // 直接编辑（detail 回填）时空 = 用户清空 → 正常提交 null
     if (!isLinkedVpnEdit || data.notes) payload.notes = data.notes || null;
@@ -293,8 +318,8 @@ const ConnectionModal: React.FC<ConnectionModalProps> = ({
     setVpnEditingId(null);
   };
 
-  // 编辑既有连接时锁定所属项目：backend updateConnection 白名单不含 projectId（v2 项目是权限边界，
-  // 跨项目移动需专门权限设计，归 phase2——ADR-0001 auth 例外同款处理，显式 Deviation 记 notes）
+  // #44 编辑态开放换项目（backend updateConnection 白名单已含 projectId，目标项目写权由后端
+  // service 层校验 editor+/admin）；isEditingExisting 仍用于密码 placeholder 等编辑态文案
   const isEditingExisting = !!editingConnection || !!vpnEditingId;
   // #46 HOST 表单按 PROTOCOL_REGISTRY 动态渲染（协议切换字段联动）；VPN tab 保留既有字段
   // （vpnType 驱动，不在 registry 管辖）。显隐标志全部 mode 感知——hostRegistry 查的是
@@ -307,6 +332,9 @@ const ConnectionModal: React.FC<ConnectionModalProps> = ({
   const showUsername = mode === 'VPN' || hostRegistry.fields.username !== 'none';
   const isVpnWeb = mode === 'VPN' && currentData.vpnType === 'SSL_VPN';
   const vpnOptions = connections.filter(c => c.protocol === 'VPN' && c.id !== editingConnection?.id);
+  // #44 跨项目警示：选中的 VPN 与表单当前项目不同 → 保存将被后端拒绝（VAL_001「依赖的 VPN 连接不在同一项目」）
+  const selectedVpn = connections.find(c => c.id === currentData.requiredVpnId);
+  const vpnCrossProject = selectedVpn != null && selectedVpn.projectId !== currentData.projectId;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
@@ -370,7 +398,7 @@ const ConnectionModal: React.FC<ConnectionModalProps> = ({
                 </div>
                 <div className="space-y-2">
                    <label className="text-sm font-medium text-slate-300 flex items-center justify-between"><span>客户 / 项目</span><button type="button" onClick={onAddProjectRequest} disabled={isSaving} className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-1 disabled:opacity-50"><Plus size={10} /> 新建项目</button></label>
-                  <select name="projectId" value={currentData.projectId || ''} onChange={handleChange} disabled={isSaving || isEditingExisting} title={isEditingExisting ? 'v2 暂不支持移动项目（规划中）' : undefined} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none appearance-none disabled:opacity-50">
+                  <select name="projectId" value={currentData.projectId || ''} onChange={handleChange} disabled={isSaving} title="更换所属项目需对目标项目有编辑权限" className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none appearance-none disabled:opacity-50">
                     {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                   </select>
                 </div>
@@ -388,8 +416,16 @@ const ConnectionModal: React.FC<ConnectionModalProps> = ({
                     <div className="space-y-2"><label className="text-sm font-medium text-slate-300">用户名 / 账号</label><input name="username" value={currentData.username || ''} onChange={handleChange} disabled={isSaving} placeholder="root / administrator" className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50" /></div>
                   )}
                   <div className={`space-y-2 ${showUsername ? '' : 'md:col-span-2'}`}>
-                    <label className="text-sm font-medium text-slate-300">{isDeviceId ? '验证码 / 临时密码' : '密码 / Key'}</label>
-                    <div className="relative"><input name="password" type="password" value={currentData.password || ''} onChange={handleChange} disabled={isSaving} placeholder={isEditingExisting ? '留空保持不变' : '••••••••'} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50" /><Lock className="absolute right-3 top-2.5 text-slate-600 w-4 h-4" /></div>
+                    <div className="flex items-center justify-between">
+                      <label className="text-sm font-medium text-slate-300">{isDeviceId ? '验证码 / 临时密码' : '密码 / Key'}</label>
+                      {/* #44 显式清空动作：与「留空 = 保持不变」语义/视觉双区分（标记态 label 变红 + placeholder 变化） */}
+                      {isEditingExisting && currentData.hasPassword && (
+                        <button type="button" onClick={toggleClearPassword} disabled={isSaving} aria-pressed={currentData.clearPassword} className={`text-[10px] flex items-center gap-1 disabled:opacity-50 transition-colors ${currentData.clearPassword ? 'text-rose-400 font-semibold' : 'text-slate-400 hover:text-rose-300'}`}>
+                          {currentData.clearPassword ? '撤销清空' : '清空密码'}
+                        </button>
+                      )}
+                    </div>
+                    <div className="relative"><input name="password" type="password" value={currentData.password || ''} onChange={handleChange} disabled={isSaving} placeholder={currentData.clearPassword ? '将清空已存密码' : isEditingExisting ? '留空保持不变' : '••••••••'} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50" /><Lock className="absolute right-3 top-2.5 text-slate-600 w-4 h-4" /></div>
                   </div>
                 </div>
               </div>
@@ -407,6 +443,8 @@ const ConnectionModal: React.FC<ConnectionModalProps> = ({
                       <button type="button" onClick={handleQuickAddVpn} disabled={isSaving} className="px-3 py-2 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors whitespace-nowrap disabled:opacity-50"><Plus size={14} /> 新建 VPN</button>
                   </div>
                   {hostFormData.requiredVpnId && <div className="mt-2 text-[10px] text-indigo-300 flex items-center gap-1"><Check size={10} /> 已关联: {savedVpnName ?? connections.find(c => c.id === hostFormData.requiredVpnId)?.name}</div>}
+                  {/* #44 跨项目依赖警示：换项目后 requiredVpnId 仍指向源项目 VPN → 后端 VAL_001 拒绝，提交前提示 */}
+                  {vpnCrossProject && <div role="alert" className="mt-2 text-[10px] text-amber-400 flex items-center gap-1"><X size={10} /> 所选 VPN 属于其他项目，保存将被拒绝：请改选目标项目的 VPN 或改为直连</div>}
                 </div>
               )}
             </div>

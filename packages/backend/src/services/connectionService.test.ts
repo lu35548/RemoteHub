@@ -427,6 +427,33 @@ describe('connectionService', () => {
       expect(callArgs.data).not.toHaveProperty('password');
     });
 
+    // #44 密码语义矩阵：键存在且 = null/'' → 清密文列；键缺省 → 不触碰 encryptedPass（保持不变）
+    it("password='' → 清空加密密码（显式清空信号与 null 同语义）", async () => {
+      setupFindUnique({ ...mockConnection, id: 'conn-1', encryptedPass: 'old-encrypted' });
+      (prisma.connection.update as MockFn).mockResolvedValue({
+        ...mockConnection,
+        id: 'conn-1',
+        encryptedPass: null,
+      });
+
+      await updateConnection('user-1', 'conn-1', { password: '' });
+
+      expect(prisma.connection.update).toHaveBeenCalledWith({
+        where: { id: 'conn-1' },
+        data: expect.objectContaining({ encryptedPass: null, updatedBy: 'user-1' }),
+      });
+    });
+
+    it('不传 password 键 → update data 不含 encryptedPass（留空 = 保持不变）', async () => {
+      setupFindUnique({ ...mockConnection, id: 'conn-1', encryptedPass: 'old-encrypted' });
+      (prisma.connection.update as MockFn).mockResolvedValue({ ...mockConnection, id: 'conn-1' });
+
+      await updateConnection('user-1', 'conn-1', { name: '只改名' });
+
+      const callArgs = (prisma.connection.update as MockFn).mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(callArgs.data).not.toHaveProperty('encryptedPass');
+    });
+
     it('protocol 从 VPN 改为 SSH + 有 dependents → 抛出 CONN_004', async () => {
       setupFindUnique({ ...mockVpnConnection, id: 'vpn-1' });
       (prisma.connection.count as MockFn).mockResolvedValue(3);
@@ -483,6 +510,117 @@ describe('connectionService', () => {
       ).rejects.toThrow('AppError:CONN_002');
 
       expect(createAppError).toHaveBeenCalledWith('CONN_002');
+    });
+  });
+
+  // ────────────────────────────────────────────────
+  // #44 跨项目移动（updateConnection 白名单加 projectId）
+  // ────────────────────────────────────────────────
+
+  describe('#44 跨项目移动', () => {
+    /** project/projectMember mock 排队器（同 setupFindUnique 模式；mockReset 防跨测试实现泄漏） */
+    function setupProjectFindUnique(...values: any[]) {
+      const fn = prisma.project.findUnique as MockFn;
+      fn.mockReset();
+      values.forEach((v) => fn.mockResolvedValueOnce(v));
+      if (values.length === 0) fn.mockResolvedValue(null);
+    }
+    function setupMemberFindUnique(...values: any[]) {
+      const fn = prisma.projectMember.findUnique as MockFn;
+      fn.mockReset();
+      values.forEach((v) => fn.mockResolvedValueOnce(v));
+      if (values.length === 0) fn.mockResolvedValue(null);
+    }
+
+    it('换项目成功：目标项目存在 + editor 权限 → payload 携带新 projectId', async () => {
+      setupFindUnique({ ...mockConnection, id: 'conn-1' });
+      setupProjectFindUnique({ id: 'proj-2', name: '目标项目' });
+      setupMemberFindUnique({ role: 'editor' });
+      (prisma.connection.update as MockFn).mockResolvedValue({ ...mockConnection, projectId: 'proj-2' });
+
+      const result = await updateConnection('user-1', 'conn-1', { projectId: 'proj-2' });
+
+      expect(prisma.connection.update).toHaveBeenCalledWith({
+        where: { id: 'conn-1' },
+        data: expect.objectContaining({ projectId: 'proj-2', updatedBy: 'user-1' }),
+      });
+      expect(result.projectId).toBe('proj-2');
+    });
+
+    it('目标项目不存在 → PROJ_002', async () => {
+      setupFindUnique({ ...mockConnection, id: 'conn-1' });
+      setupProjectFindUnique(null);
+
+      await expect(
+        updateConnection('user-1', 'conn-1', { projectId: 'proj-x' }),
+      ).rejects.toThrow('AppError:PROJ_002');
+    });
+
+    it('目标项目无 membership → AUTH_003', async () => {
+      setupFindUnique({ ...mockConnection, id: 'conn-1' });
+      setupProjectFindUnique({ id: 'proj-2', name: '目标项目' });
+      setupMemberFindUnique(null);
+
+      await expect(
+        updateConnection('user-1', 'conn-1', { projectId: 'proj-2' }),
+      ).rejects.toThrow('AppError:AUTH_003');
+    });
+
+    it('目标项目 viewer 角色无写权 → AUTH_003', async () => {
+      setupFindUnique({ ...mockConnection, id: 'conn-1' });
+      setupProjectFindUnique({ id: 'proj-2', name: '目标项目' });
+      setupMemberFindUnique({ role: 'viewer' });
+
+      await expect(
+        updateConnection('user-1', 'conn-1', { projectId: 'proj-2' }),
+      ).rejects.toThrow('AppError:AUTH_003');
+    });
+
+    it('admin 无目标项目 membership 直通', async () => {
+      setupFindUnique({ ...mockConnection, id: 'conn-1' });
+      setupProjectFindUnique({ id: 'proj-2', name: '目标项目' });
+      setupMemberFindUnique(null); // 无 membership——admin 绕过
+      (prisma.connection.update as MockFn).mockResolvedValue({ ...mockConnection, projectId: 'proj-2' });
+
+      const result = await updateConnection('user-1', 'conn-1', { projectId: 'proj-2' }, 'admin');
+
+      expect(result.projectId).toBe('proj-2');
+    });
+
+    it('VPN 连接搬家 + 源项目有 dependents → CONN_004（依赖悬空拒绝）', async () => {
+      setupFindUnique({ ...mockVpnConnection, id: 'vpn-1' });
+      setupProjectFindUnique({ id: 'proj-2', name: '目标项目' });
+      setupMemberFindUnique({ role: 'editor' });
+      (prisma.connection.count as MockFn).mockResolvedValue(2);
+
+      await expect(
+        updateConnection('user-1', 'vpn-1', { projectId: 'proj-2' }),
+      ).rejects.toThrow('AppError:CONN_004');
+    });
+
+    it('换项目 + requiredVpnId 指向源项目 VPN → VAL_001（依赖的 VPN 不在同一项目）', async () => {
+      // connection.findUnique 调用序：① current ② validateVpnDependency 内 target
+      setupFindUnique(
+        { ...mockConnection, id: 'conn-1', requiredVpnId: 'vpn-1' },
+        { ...mockVpnConnection, id: 'vpn-1', projectId: 'proj-1' }, // VPN 属源项目
+      );
+      setupProjectFindUnique({ id: 'proj-2', name: '目标项目' });
+      setupMemberFindUnique({ role: 'editor' });
+
+      await expect(
+        updateConnection('user-1', 'conn-1', { projectId: 'proj-2', requiredVpnId: 'vpn-1' }),
+      ).rejects.toThrow('AppError:VAL_001');
+    });
+
+    it('显式传同值 projectId = 不移动（不触发目标项目校验）', async () => {
+      setupFindUnique({ ...mockConnection, id: 'conn-1' });
+      setupProjectFindUnique(); // 若实现误触发校验，project.findUnique 返回 null → PROJ_002 令此测红
+      (prisma.connection.update as MockFn).mockResolvedValue({ ...mockConnection, id: 'conn-1' });
+
+      const result = await updateConnection('user-1', 'conn-1', { projectId: 'proj-1' });
+
+      expect(prisma.project.findUnique).not.toHaveBeenCalled();
+      expect(result.projectId).toBe('proj-1');
     });
   });
 

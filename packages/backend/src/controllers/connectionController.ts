@@ -64,7 +64,8 @@ export async function updateConnection(req: Request, res: Response, next: NextFu
   try {
     const id = req.params['id'];
     if (typeof id !== 'string') throw new Error('缺少 id');
-    const data = await connectionService.updateConnection(req.user.id, id, req.body);
+    // #44 第 4 参透传全局角色：service 层目标项目写权校验的 admin 直通判定用
+    const data = await connectionService.updateConnection(req.user.id, id, req.body, req.user.role);
     res.json({ success: true, data });
   } catch (err) { next(err); }
 }

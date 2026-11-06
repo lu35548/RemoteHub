@@ -237,7 +237,8 @@ describe('connectionController', () => {
       );
       await connectionController.updateConnection(req, res, next);
 
-      expect(connectionService.updateConnection).toHaveBeenCalledWith('u1', 'c1', { name: '更新后' });
+      // #44：第 4 参透传全局角色（service 层目标项目写权校验的 admin 直通用）
+      expect(connectionService.updateConnection).toHaveBeenCalledWith('u1', 'c1', { name: '更新后' }, 'editor');
       expect(res.json).toHaveBeenCalledWith({ success: true, data: mockData });
       expect(next).not.toHaveBeenCalled();
     });

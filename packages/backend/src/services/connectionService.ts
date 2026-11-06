@@ -54,6 +54,8 @@ interface ConnectionCreateData {
 }
 
 interface ConnectionUpdateData {
+  /** #44 跨项目移动：显式传且 ≠ 当前值时触发目标项目写权校验（editor+ / admin 直通） */
+  projectId?: string;
   name?: string;
   host?: string;
   port?: number | null;
@@ -227,18 +229,44 @@ export async function getConnection(connectionId: string, userId: string, userGl
   return toDetail(connection, includeEncryptedPass, userMap);
 }
 
-/** 更新连接 */
-export async function updateConnection(userId: string, connectionId: string, data: ConnectionUpdateData) {
+/** 更新连接。
+ * #44 第 4 参 userGlobalRole：目标项目写权校验的 admin 直通（对齐路由层 projectRoleMiddleware
+ * 对 admin 的直通语义），controller 透传 req.user.role；缺省按非 admin 处理。 */
+export async function updateConnection(userId: string, connectionId: string, data: ConnectionUpdateData, userGlobalRole?: string) {
   // 获取当前连接
   const current = await prisma.connection.findUnique({ where: { id: connectionId } });
   if (!current) throw createAppError('CONN_002');
 
-  // 白名单过滤并构建 update payload
-  const fields = new Set(['name', 'host', 'port', 'username', 'password', 'protocol', 'vpnType', 'vpnLoginUrl', 'requiredVpnId', 'notes', 'tags']);
+  // 白名单过滤并构建 update payload（#44 加 projectId：跨项目移动）
+  const fields = new Set(['name', 'host', 'port', 'username', 'password', 'protocol', 'vpnType', 'vpnLoginUrl', 'requiredVpnId', 'notes', 'tags', 'projectId']);
   const updatePayload: Prisma.ConnectionUncheckedUpdateInput = {};
   for (const [key, value] of Object.entries(data)) {
     if (fields.has(key)) {
       (updatePayload as Record<string, unknown>)[key] = value;
+    }
+  }
+
+  // #44 跨项目移动：显式传 projectId 且 ≠ 当前值才触发校验（不传/同值 = 不移动，幂等零开销）。
+  // 源项目侧权限由路由层 projectRole('editor') 按连接当前项目门禁（现状语义不收紧）；
+  // 目标项目侧权限中间件无法表达「目标≠源」（projectId 兜底分支被 paramId 分支短路），由本层校验。
+  const targetProjectId = updatePayload.projectId as string | undefined;
+  const isMoving = typeof targetProjectId === 'string' && targetProjectId !== current.projectId;
+  if (isMoving) {
+    const targetProject = await prisma.project.findUnique({ where: { id: targetProjectId } });
+    if (!targetProject) throw createAppError('PROJ_002');
+    if (userGlobalRole !== 'admin') {
+      const membership = await prisma.projectMember.findUnique({
+        where: { projectId_userId: { projectId: targetProjectId, userId } },
+      });
+      if (membership?.role !== 'owner' && membership?.role !== 'editor') {
+        throw createAppError('AUTH_003');
+      }
+    }
+    // VPN 搬家保护：该连接是 VPN 且被依赖 → 移走后源项目依赖悬空（dependents 现状全在源项目，
+    // 由同项目约束保证）。复用 CONN_004「VPN 仍被其他连接依赖」；级联搬运 dependents 越权面积大，不做。
+    if (current.protocol === 'VPN') {
+      const dependents = await prisma.connection.count({ where: { requiredVpnId: connectionId } });
+      if (dependents > 0) throw createAppError('CONN_004');
     }
   }
 
@@ -304,10 +332,13 @@ export async function updateConnection(userId: string, connectionId: string, dat
     }
   }
 
-  // VPN 依赖检查
+  // VPN 依赖检查（#44：projectId 用合并视图——换项目后按目标项目校验，requiredVpnId 指向
+  // 源项目 VPN 时命中 validateVpnDependency 现有「依赖的 VPN 连接不在同一项目」VAL_001 拒绝，
+  // 零新错误码；自动清空依赖备选因静默丢用户配置而否决）
   const vpnId = updatePayload.requiredVpnId !== undefined ? updatePayload.requiredVpnId as string | null : current.requiredVpnId;
   if (vpnId) {
-    await validateVpnDependency(vpnId, current.projectId, connectionId);
+    const vpnProjectId = isMoving ? (targetProjectId as string) : current.projectId;
+    await validateVpnDependency(vpnId, vpnProjectId, connectionId);
   }
 
   // 密码处理
@@ -335,6 +366,13 @@ export async function updateConnection(userId: string, connectionId: string, dat
       type: 'CONNECTION_UPDATED',
       payload: { projectId: connection.projectId, connectionId, action: 'updated', name: connection.name },
     }).catch((err: Error) => logger.error('连接更新通知下发失败（不传播）', { projectId: connection.projectId, connectionId, error: err.message }));
+    // #44 换项目通知双发：源项目成员的连接列表同样变化（感知对称；payload.projectId 归属各自项目）
+    if (isMoving) {
+      void emitToProjectMembers(current.projectId, {
+        type: 'CONNECTION_UPDATED',
+        payload: { projectId: current.projectId, connectionId, action: 'updated', name: connection.name },
+      }).catch((err: Error) => logger.error('连接更新通知下发失败（不传播）', { projectId: current.projectId, connectionId, error: err.message }));
+    }
     const userMap = await resolveUserRefs([connection.createdBy, connection.updatedBy]);
     return toDetail(connection, false, userMap);
   } catch (error) {
@@ -761,6 +799,8 @@ function toDetail(c: {
     host: c.host,
     port: c.port,
     username: c.username,
+    // #44 密码存在性派生键（不泄露密文本身；克隆响应同样携带，克隆件编辑态判断不依赖条件脱敏字段）
+    hasPassword: c.encryptedPass != null,
     ...(includeEncryptedPass && { encryptedPass: c.encryptedPass }),
     protocol: c.protocol,
     vpnType: c.vpnType,

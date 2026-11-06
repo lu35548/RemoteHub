@@ -29,6 +29,7 @@ const detail = (over: Partial<ConnectionDetail> = {}): ConnectionDetail => ({
   id: 'c1', projectId: 'p1', name: '既有主机', host: '10.0.0.1', port: 22,
   username: 'root', protocol: 'SSH', vpnType: null, vpnLoginUrl: null,
   requiredVpnId: 'vpn-1', notes: '备注', tags: 'a,b', lastAccessed: null,
+  hasPassword: false,
   createdBy: user, updatedBy: user,
   createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
   ...over,
@@ -124,8 +125,8 @@ describe('ConnectionModal（T5）', () => {
     expect(screen.getByText('b')).toBeInTheDocument();
     expect(screen.getByText(/已关联: 总部 VPN/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '保存修改' })).toBeInTheDocument();
-    // 编辑态锁定所属项目（backend update 不支持换项目，防静默假成功）
-    expect(screen.getByDisplayValue('默认项目')).toBeDisabled();
+    // #44 编辑态开放所属项目下拉（backend updateConnection 已支持显式 projectId 换项目）
+    expect(screen.getByDisplayValue('默认项目')).not.toBeDisabled();
 
     await events.click(screen.getByRole('button', { name: '保存修改' }));
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
@@ -263,5 +264,70 @@ describe('ConnectionModal 协议注册表动态表单（#46）', () => {
     await events.click(screen.getByRole('button', { name: '保存修改' }));
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     expect(onSave.mock.calls[0]?.[0]).toMatchObject({ protocol: 'TODESK', port: null, host: '882 331 992' });
+  });
+});
+
+// ── #44 编辑换项目 + 密码清空 ──
+// 编辑态开放所属项目下拉（换项目 = updateConnection 显式传 projectId，后端校验目标项目写权）；
+// 密码「清空密码」显式按钮（clearPassword 标记 → 提交 password:null）与「留空=不变」严格区分。
+describe('ConnectionModal 编辑换项目 + 密码清空（#44）', () => {
+  const projects2 = [
+    { id: 'p1', name: '默认项目', icon: 'folder', createdBy: user, updatedBy: user, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
+    { id: 'p2', name: '目标项目', icon: 'folder', createdBy: user, updatedBy: user, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
+  ] as ProjectListItem[];
+
+  it('编辑态项目下拉解锁：改选 p2 → payload.projectId=p2（换项目提交）', async () => {
+    const onSave = vi.fn().mockResolvedValue(detail());
+    const events = userEvent.setup();
+    renderModal({ onSave, projects: projects2, editingConnection: detail() });
+
+    const select = screen.getByDisplayValue('默认项目');
+    expect(select).not.toBeDisabled();
+    await events.selectOptions(select, 'p2');
+
+    await events.click(screen.getByRole('button', { name: '保存修改' }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect((onSave.mock.calls[0]?.[0] as Record<string, unknown>).projectId).toBe('p2');
+  });
+
+  it('清空密码按钮：hasPassword 连接点击后提交 password=null（显式清空）', async () => {
+    const onSave = vi.fn().mockResolvedValue(detail());
+    const events = userEvent.setup();
+    renderModal({ onSave, editingConnection: detail({ hasPassword: true }) });
+
+    await events.click(screen.getByRole('button', { name: '清空密码' }));
+    expect(screen.getByPlaceholderText('将清空已存密码')).toBeInTheDocument();
+
+    await events.click(screen.getByRole('button', { name: '保存修改' }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect((onSave.mock.calls[0]?.[0] as Record<string, unknown>).password).toBeNull();
+  });
+
+  it('清空标记后再输入新密码 → password 提交输入值（标记被输入复位）', async () => {
+    const onSave = vi.fn().mockResolvedValue(detail());
+    const events = userEvent.setup();
+    renderModal({ onSave, editingConnection: detail({ hasPassword: true }) });
+
+    await events.click(screen.getByRole('button', { name: '清空密码' }));
+    await events.type(screen.getByPlaceholderText('将清空已存密码'), 'newpass');
+    await events.click(screen.getByRole('button', { name: '保存修改' }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    const payload = onSave.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(payload.password).toBe('newpass');
+  });
+
+  it('无密码连接不显示清空按钮（hasPassword=false）', () => {
+    renderModal({ editingConnection: detail({ hasPassword: false }) });
+    expect(screen.queryByRole('button', { name: '清空密码' })).not.toBeInTheDocument();
+  });
+
+  it('跨项目 VPN 警示：换项目后选中源项目 VPN → 警示出现，切回消失', async () => {
+    const events = userEvent.setup();
+    renderModal({ projects: projects2, editingConnection: detail({ requiredVpnId: 'vpn-1' }) });
+    const select = screen.getByDisplayValue('默认项目');
+    await events.selectOptions(select, 'p2');
+    expect(screen.getByText(/所选 VPN 属于其他项目/)).toBeInTheDocument();
+    await events.selectOptions(select, 'p1');
+    expect(screen.queryByText(/所选 VPN 属于其他项目/)).not.toBeInTheDocument();
   });
 });
