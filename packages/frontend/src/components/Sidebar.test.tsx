@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import Sidebar from './Sidebar';
@@ -203,15 +203,62 @@ describe('#49 rev M3 抽屉键盘可达性', () => {
     expect(open.container.firstElementChild!.className).not.toContain('invisible');
   });
 
-  it('开态移焦至关闭按钮（焦点入抽屉）+ Escape 关闭回调', () => {
+  it('开态移焦至关闭按钮（焦点入抽屉）+ Escape 关闭回调', async () => {
     const onMobileClose = vi.fn();
     render(
       <MemoryRouter>
         <Sidebar {...props} isMobileOpen onMobileClose={onMobileClose} />
       </MemoryRouter>,
     );
-    expect(screen.getByRole('button', { name: '关闭导航菜单' })).toHaveFocus();
+    // 双 rAF 后聚焦（真机 style recalc 时序修复，lead 实证）——waitFor 等帧推进
+    await waitFor(() => expect(screen.getByRole('button', { name: '关闭导航菜单' })).toHaveFocus());
     fireEvent.keyDown(screen.getByRole('button', { name: '关闭导航菜单' }), { key: 'Escape' });
     expect(onMobileClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('false→true 更新路径同样移焦（真机开抽屉路径：mount 时关、重渲染开）', async () => {
+    const view = render(
+      <MemoryRouter>
+        <Sidebar {...props} />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByRole('button', { name: '关闭导航菜单' })).not.toBeInTheDocument();
+    view.rerender(
+      <MemoryRouter>
+        <Sidebar {...props} isMobileOpen />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByRole('button', { name: '关闭导航菜单' })).toHaveFocus());
+  });
+});
+
+describe('#49 rev M3 二次修复：transitionend 同步移焦（关→开循环根治）', () => {
+  it('stub rAF 隔离兜底后：visibility 过渡结束触发移焦，width 过渡不触发（propertyName 过滤）', async () => {
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 0));
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    try {
+      const { container } = render(
+        <MemoryRouter>
+          <Sidebar {...props} isMobileOpen onMobileClose={vi.fn()} />
+        </MemoryRouter>,
+      );
+      const drawer = container.firstElementChild as HTMLElement;
+      const closeBtn = screen.getByRole('button', { name: '关闭导航菜单' });
+      // jsdom TransitionEvent 构造器对 propertyName 初始化透传不可靠（实测 width 负向假绿/正向落空），
+      // 用 Event + defineProperty 稳妥构造 propertyName
+      const fireTransition = (propertyName: string) => {
+        const ev = new Event('transitionend', { bubbles: true });
+        Object.defineProperty(ev, 'propertyName', { value: propertyName });
+        fireEvent(drawer, ev);
+      };
+      // width 过渡（桌面折叠）结束 → 不移焦
+      fireTransition('width');
+      expect(closeBtn).not.toHaveFocus();
+      // visibility 过渡结束（关→开循环场景的可靠信号）→ 移焦
+      fireTransition('visibility');
+      expect(closeBtn).toHaveFocus();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

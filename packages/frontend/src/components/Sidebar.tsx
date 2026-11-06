@@ -55,10 +55,31 @@ const Sidebar: React.FC<SidebarProps> = ({
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const navigate = useNavigate();
 
-  // M3（#49 rev）：抽屉打开即移焦至关闭按钮（焦点入抽屉，Tab 序从抽屉开始 + Escape 可达）
+  // M3（#49 rev）：抽屉打开即移焦至关闭按钮（焦点入抽屉，Tab 序从抽屉开始 + Escape 可达）。
+  // 双路移焦（lead 两轮真机实证定案）：
+  // ① 双 rAF 首帧兜底——首次开抽屉有效；但关→开循环后 rAF 回调与渲染帧合并，等不到 style
+  //    recalc（按钮 used visibility 仍 invisible，Chrome 静默拒绝 focus），循环场景恒失效；
+  // ② transitionend 与 CSS 严格同步——visibility 过渡（300ms）结束事件是可靠信号，根治循环
+  //    失效；桌面 md 以上关态也 visible、无 visibility 过渡，不触发，常驻侧栏不受影响。
+  // focus 幂等（已聚焦再 focus 无害），双路并存无副作用。
   useEffect(() => {
-    if (isMobileOpen) closeButtonRef.current?.focus();
+    if (!isMobileOpen) return;
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => closeButtonRef.current?.focus());
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
   }, [isMobileOpen]);
+
+  /** ② visibility 过渡结束 → 移焦（仅抽屉容器自身的 visibility 过渡；width 折叠过渡不过滤会误触） */
+  const handleDrawerTransitionEnd = (e: React.TransitionEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget && e.propertyName === 'visibility' && isMobileOpen) {
+      closeButtonRef.current?.focus();
+    }
+  };
 
   const filteredProjects = useMemo(() => {
     if (!searchTerm) return projects;
@@ -100,6 +121,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         // M3：焦点在抽屉内（打开即移焦至此）按 Escape 关闭抽屉
         if (e.key === 'Escape') onMobileClose?.();
       }}
+      onTransitionEnd={handleDrawerTransitionEnd}
       className={`
         fixed inset-y-0 left-0 z-40 h-full flex flex-col border-r border-white/5 bg-slate-950/80 backdrop-blur-xl md:static md:z-20 md:shrink-0
         transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1.0)]
