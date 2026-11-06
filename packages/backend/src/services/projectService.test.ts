@@ -145,9 +145,29 @@ describe('#47 archiveProject / restoreProject', () => {
 });
 
 describe('#47 copyProject', () => {
+  const srcRow = { id: 'p1', name: 'proj', description: null, icon: 'folder', status: 'active', createdBy: 'u1', updatedBy: 'u1', createdAt: new Date(), updatedAt: new Date() };
+
   it('源项目不存在 → PROJ_002', async () => {
     prisma.project.findUnique.mockResolvedValue(null);
     await expect(copyProject('u1', 'p404')).rejects.toMatchObject({ code: 'PROJ_002' });
+  });
+
+  it('rev-47 major:并发复制撞 Project.name @unique → P2002 映射 PROJ_001(不再裸抛 500,对齐 createProject)', async () => {
+    prisma.project.findUnique.mockResolvedValue(srcRow);
+    prisma.project.findMany.mockResolvedValue([]); // 递增名「proj (副本)」
+    const p2002 = new Prisma.PrismaClientKnownRequestError('unique constraint failed', {
+      code: 'P2002',
+      clientVersion: '6.19.3',
+      meta: { target: ['name'] },
+    });
+    prisma.project.create.mockRejectedValue(p2002);
+    await expect(copyProject('u1', 'p1')).rejects.toMatchObject({ code: 'PROJ_001' });
+  });
+
+  it('rev-47 minor-1:源名顶格(100)+「 (副本)」超长 → VAL_001', async () => {
+    prisma.project.findUnique.mockResolvedValue({ ...srcRow, name: 'X'.repeat(100) });
+    prisma.project.findMany.mockResolvedValue([]);
+    await expect(copyProject('u1', 'p1')).rejects.toMatchObject({ code: 'VAL_001' });
   });
 });
 

@@ -230,6 +230,43 @@ describe('POST /projects/:id/copy 深拷贝', () => {
     const detail = JSON.parse(logs[0]!.detail ?? '{}') as { after?: Record<string, unknown> };
     expect(detail.after?.clonedFrom).toBe(srcProjId);
   });
+
+  it('rev-47 minor-1:源名顶格(100)copy → 422 VAL_001(「 (副本)」后缀超长)', async () => {
+    const proj = await request(b.app).post('/api/v1/projects')
+      .set('Authorization', `Bearer ${b.adminToken}`).send({ name: 'X'.repeat(100) });
+    expect(proj.status).toBe(201);
+    const res = await apiCopy(b.adminToken, proj.body.data.id as string);
+    expect(res.status).toBe(422);
+    expect(res.body.error.code).toBe('VAL_001');
+  });
+
+  it('rev-47 minor-2:跨项目 VPN 依赖保留原值(idMap 无键保留分支)', async () => {
+    // 独立实验田自包含(不动 srcProj——完整性用例锁 connectionCount=3);
+    // crossVpn 在 crossProj 内 API 合法创建;源项目内依赖连接 prisma 直插(API 的
+    // validateVpnDependency 拦跨项目依赖,直插等价 #44 时代的合法存量形态)
+    const cp = await request(b.app).post('/api/v1/projects')
+      .set('Authorization', `Bearer ${b.adminToken}`).send({ name: `跨项目依赖实验田-${Date.now()}` });
+    expect(cp.status).toBe(201);
+    const crossProjId = cp.body.data.id as string;
+    const cv = await request(b.app).post('/api/v1/connections')
+      .set('Authorization', `Bearer ${b.adminToken}`)
+      .send({ projectId: crossProjId, name: 'CrossVpn', host: 'cv.example.com', username: 'cvop', protocol: 'VPN', vpnType: 'SSL_VPN', vpnLoginUrl: 'https://cv.example.com' });
+    expect(cv.status).toBe(201);
+    const crossVpnId = cv.body.data.id as string;
+
+    const depName = `CrossDep-${Date.now()}`;
+    await b.prisma.connection.create({
+      data: { projectId: srcProjId, name: depName, host: 'cd.example.com', username: 'cdop', protocol: 'SSH', requiredVpnId: crossVpnId, createdBy: adminId, updatedBy: adminId },
+    });
+
+    const res = await apiCopy(b.adminToken, srcProjId);
+    expect(res.status).toBe(201);
+    const copyId = res.body.data.id as string;
+    const copyConns = await b.prisma.connection.findMany({ where: { projectId: copyId } });
+    const dep = copyConns.find((c) => c.name === depName);
+    expect(dep).toBeDefined();
+    expect(dep!.requiredVpnId).toBe(crossVpnId); // 保留原值不重映射(副本外依赖不劫持)
+  });
 });
 
 // ─── 转让 ───

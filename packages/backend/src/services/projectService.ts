@@ -1,4 +1,5 @@
 // packages/backend/src/services/projectService.ts
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma.js';
 import { createAppError, handlePrismaUniqueViolation, hasErrorCode } from '../utils/appError.js';
 import { logger } from '../utils/logger.js';
@@ -222,7 +223,7 @@ export async function copyProject(userId: string, projectId: string) {
   const vName = validateProjectName(name);
   if (!vName.valid) throw createAppError('VAL_001', [{ field: 'name', message: vName.message }]);
 
-  const result = await prisma.$transaction(async (tx) => {
+  const copyInTx = async (tx: Prisma.TransactionClient) => {
     const copy = await tx.project.create({
       data: {
         name, description: original.description, icon: original.icon,
@@ -267,7 +268,18 @@ export async function copyProject(userId: string, projectId: string) {
     }
 
     return { copy, connectionCount: conns.length };
-  });
+  };
+
+  // rev-47 major 修复:递增名在事务外计算,并发复制同源可双方算出同名 → 后者 create 撞
+  // Project.name @unique 裸抛 P2002(500)。对齐 createProject/updateProject 既有模式套
+  // handlePrismaUniqueViolation(target 'name' → PROJ_001 409)。
+  let result: { copy: Prisma.ProjectGetPayload<Record<string, never>>; connectionCount: number };
+  try {
+    result = await prisma.$transaction(copyInTx);
+  } catch (error) {
+    await handlePrismaUniqueViolation(error);
+    throw error;
+  }
 
   const userMap = await resolveUserRefs([result.copy.createdBy, result.copy.updatedBy]);
   // clonedFrom 进响应体 → auditMiddleware detail.after 自动携带（connectionService.cloneConnection 先例）
