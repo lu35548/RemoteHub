@@ -12,7 +12,9 @@ export async function listProjects(req: Request, res: Response, next: NextFuncti
   try {
     const page = Math.max(1, parseInt(qsParam(req.query.page, '1')) || 1);
     const pageSize = parseInt(qsParam(req.query.pageSize, '20')) || 20;
-    const result = await projectService.listProjects(req.user.id, req.user.role, page, pageSize);
+    // #47 归档过滤：缺省/false=仅 active；archived=true=仅归档项目（归档视图专用）
+    const archived = qsParam(req.query.archived, 'false') === 'true';
+    const result = await projectService.listProjects(req.user.id, req.user.role, page, pageSize, archived);
     res.json({ success: true, ...result });
   } catch (err) { next(err); }
 }
@@ -48,5 +50,56 @@ export async function deleteProject(req: Request, res: Response, next: NextFunct
     if (typeof id !== 'string') throw new Error('缺少 id');
     const result = await projectService.deleteProject(id);
     res.json({ success: true, data: result });
+  } catch (err) { next(err); }
+}
+
+// ─── #47 项目管理增强 ───
+
+export async function archiveProject(req: Request, res: Response, next: NextFunction) {
+  try {
+    const id = req.params['id'];
+    if (typeof id !== 'string') throw new Error('缺少 id');
+    const data = await projectService.archiveProject(req.user.id, id);
+    res.json({ success: true, data });
+  } catch (err) { next(err); }
+}
+
+export async function restoreProject(req: Request, res: Response, next: NextFunction) {
+  try {
+    const id = req.params['id'];
+    if (typeof id !== 'string') throw new Error('缺少 id');
+    const data = await projectService.restoreProject(req.user.id, id);
+    res.json({ success: true, data });
+  } catch (err) { next(err); }
+}
+
+export async function copyProject(req: Request, res: Response, next: NextFunction) {
+  try {
+    const id = req.params['id'];
+    if (typeof id !== 'string') throw new Error('缺少 id');
+    const data = await projectService.copyProject(req.user.id, id);
+    res.status(201).json({ success: true, data });
+  } catch (err) { next(err); }
+}
+
+export async function transferProjectOwnership(req: Request, res: Response, next: NextFunction) {
+  try {
+    const id = req.params['id'];
+    if (typeof id !== 'string') throw new Error('缺少 id');
+    const data = await projectService.transferProjectOwnership(id, (req.body ?? {}).userId);
+    res.json({ success: true, data });
+  } catch (err) { next(err); }
+}
+
+export async function batchArchiveProjects(req: Request, res: Response, next: NextFunction) {
+  try {
+    const data = await projectService.batchArchiveProjects({
+      operatorUserId: req.user.id,
+      operatorRole: req.user.role,
+      ip: req.ip,
+      userAgent: typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : undefined,
+      ids: (req.body ?? {}).ids,
+    });
+    res.json({ success: true, data });
   } catch (err) { next(err); }
 }

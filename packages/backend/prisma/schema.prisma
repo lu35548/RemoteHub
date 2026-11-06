@@ -84,6 +84,9 @@ model Project {
   name        String   @unique
   description String?
   icon        String   @default("folder")
+  // #47 归档：active/archived 纯 string（spec §12 修正：不用 design 的 @db.VarChar(20)——SQLite 方言冲突）；
+  // 默认值即存量回填（migration ADD COLUMN DEFAULT 'active'）
+  status      String   @default("active")
   createdBy   String   @map("created_by")
   updatedBy   String   @map("updated_by")
   createdAt   DateTime @default(now()) @map("created_at")
@@ -92,6 +95,7 @@ model Project {
   members     ProjectMember[]
   connections Connection[]
 
+  @@index([status])
   @@map("projects")
 }
 

@@ -248,7 +248,9 @@ describe('retention 串链（手动触发后顺带轮转 + tmp 清理）', () =>
 });
 
 describe('AC 红线：相对 URL + 变 CWD（源库锚定分支真触发——防 setupTestDb 绝对 URL 空转绿）', () => {
-  it('sourceUrl 相对 + CWD 在别处 → 源锚定 prisma/ 真库，备份产物非空', async () => {
+  // #47 后迁移 5→6（add_project_status 表重建迁移）+migrate deploy 冷启动波动，
+  // 该用例 execSync(prisma migrate deploy)+备份链路实测 9-13s > 默认 5s——显式重标定 30s
+  it('sourceUrl 相对 + CWD 在别处 → 源锚定 prisma/ 真库，备份产物非空', { timeout: 30_000 }, async () => {
     const relName = `rel-backup-${process.pid}-${Date.now()}.db`;
     const relUrl = `file:./${relName}`;
     // prisma CLI 相对 URL 锚定 schema 目录 → 产物落在 prisma/ 下（与 resolveSqliteUrl 同语义）

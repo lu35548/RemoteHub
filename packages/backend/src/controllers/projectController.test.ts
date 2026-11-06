@@ -56,7 +56,7 @@ describe('projectController', () => {
       const { req, res, next } = mockReqRes(undefined, { page: '1', pageSize: '20' }, undefined, { id: 'u1', role: 'user' });
       await projectController.listProjects(req, res, next);
 
-      expect(projectService.listProjects).toHaveBeenCalledWith('u1', 'user', 1, 20);
+      expect(projectService.listProjects).toHaveBeenCalledWith('u1', 'user', 1, 20, false); // #47 archived 缺省 false
       expect(res.json).toHaveBeenCalledWith({ success: true, ...mockResult });
       expect(next).not.toHaveBeenCalled();
     });
@@ -71,7 +71,7 @@ describe('projectController', () => {
       const { req, res, next } = mockReqRes(undefined, {}, undefined, { id: 'u1', role: 'admin' });
       await projectController.listProjects(req, res, next);
 
-      expect(projectService.listProjects).toHaveBeenCalledWith('u1', 'admin', 1, 20);
+      expect(projectService.listProjects).toHaveBeenCalledWith('u1', 'admin', 1, 20, false);
       expect(res.json).toHaveBeenCalledWith({ success: true, ...mockResult });
     });
 
