@@ -27,6 +27,13 @@
 - [ ] **#43 克隆不重跑全量字段校验**（批 8）：只校验新名，存量字段免新规则拦截——与 #45「存量零破坏」口径一致；若产品要求克隆强制全量校验再改。
 - [ ] **Zap「配置直连」引导链路去留**（批 8）：launch 端点时代该链路承诺（唤起 mstsc）与实际行为（下载 .rdp）矛盾，本批只修文案；整链砍除属功能裁决（砍则 triggerRdpProtocol/isRdpReady/showRdpSetup/downloadRdpFile 引用链一并）。
 - [ ] **编辑态 username:'none' 协议遗留值不可清**（批 8）：存量 HTTPS/TODESK 行历史 username 回填后输入框隐藏、静默重提交不可清（数据无损）——是否需要编辑态查表清值交裁决。
+- [ ] **#47 归档项目连接域写禁制未加**（批 10）：归档仅改 status，归档项目的连接写入端点无拦截（API 直写仍成功）——spec「只读展示」按前端视图概念处理，#48 归档前端落地时若需端点级强制再补，交裁决。
+- [ ] **#49 移焦真机复验**（批 10）：emulate 环境（2x DPR+mobile 标志+本机 9+ node 负载）渲染延迟秒级、行为飘忽不可信；桌面视口 114ms 正常、单测已锁 transitionend 正向路径（defineProperty 构造）——待真机或低负载环境复验移焦落位。
+- [ ] **M3 focus trap 未做**（批 10）：抽屉开态 Tab 可进背景内容（仅做了 invisible/移焦/Esc/aria-controls）——rev-49-std，交裁决。
+- [ ] **Sidebar 搜索限当前页**（批 10）：>100 项目翻页后搜索只搜当前 100 条（静默缩窄，接入分页前搜索覆盖全量）——是否搜索态禁翻页/走后端 q/加提示，交裁决。
+- [ ] **底表仍限 100**（批 10）：ConnectionModal 项目下拉/Via 依赖查找/全局 chips 走 page=1 底表，>100 时缺项是现状限制——是否扩大，交裁决。
+- [ ] **单项目幂等 vs 批量幂等口径不对称**（批 10）：单项目重复 archive=幂等成功+再落一行审计；批量重复=skipped+零审计——rev-47-std nit,后续票若统一以批量口径为准需同步单项目语义。
+- [ ] **越界页码显示边角**（批 10）：末页末条删除瞬间 footer 可显示「第 2/1 页」（消费方钳制已修,Pagination 组件自身不自正）——rev-49-std nit,记录备查。
 
 ---
 
@@ -1139,3 +1146,61 @@ D1–D10 全部拍板；剩余见顶部「待办」。
 - Plan B Step5 `git push` 触发 CI（待用户在有远端的仓库执行）。
 - Plan A Task8 docker build/load 验证（本环境无 Docker 守护进程）—— D7 plan 验证项未实际执行。
 - D7 终验依赖 docker build。
+
+## [2026-11-06] P1 批 10：#49 分页 UI 三处 + 关键页响应式 + a11y（implementer impl-49）
+
+### Design decisions
+- [2026-11-06] 决策：分页 footer 抽通用组件 `Pagination.tsx`（props: page/total/pageSize/onPageChange/className），DataTable footer 重构为消费它（结构/文案/测试 role+name 不变）。理由：三列表（用户卡片/项目 Sidebar/连接卡片）+ 表格态四处同款 footer，DRY 且风格统一。备选：三处各自内联（重复 3 份样式）——否。
+- [2026-11-06] 决策：**三处 footer 渲染条件 = total>0**（工作台空态块/Sidebar 空态文案已承载空态语义，共 0 条 footer 与空态并存怪）。偏离审计页 DataTable 常驻先例（表格内嵌 footer 与表格一体，语义不同）。
+- [2026-11-06] 决策：**projects 双查询拆分**——底表 `useProjects(1,100)` 固定（ConnectionModal 项目下拉 + header 标题查找，依赖数据需全量口径）+ 展示 `useProjects(projectPage,100)` 受控翻页。page=1 时同 queryKey react-query 自动去重为单请求（allConnections 先例）。connections 同构：底表 `useConnections({})` 维持 page=1（Via 查找/chips 聚合），展示列表受控。**底表仍限 100**——>100 时依赖下拉/Via 缺项是现状限制，不属本票范围（AC 只要求展示列表可翻页）。
+- [2026-11-06] 决策：connPage 重置用「render 期比较 prev」模式（`useState(prev)` + render 期条件 setState），react-hooks v7 `set-state-in-effect` 规则禁 effect 内同步 setState（lint 红→改模式→lint 绿）。UserManagementModal 关闭重置 page 同模式。
+- [2026-11-06] 决策：工作台卡片网格断点**维持现状** `grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4`（已含票面骨架 grid-cols-1 md:grid-cols-2；改 xl:grid-cols-3/砍 2xl 是视觉退化，超集保留）。
+- [2026-11-06] 决策：375px 可用性收窄——header px-4 md:px-8、在线头像栈 hidden md:flex、工作台搜索框 hidden md:block（服务端 q 过滤仍可经 URL 进入）、过滤栏/内容区 padding 断点化。搜索框隐藏是布局收窄非功能删除。
+- [2026-11-06] 决策：a11y 范围=账号凭据表单（LoginPage/UserManagementModal 改密+新建用户/ResetPassword/ForgotPassword/MfaChallenge）；ConnectionModal 不动（远程凭据非账号表单，勿扩大）。
+
+### Deviations
+- **前端 constants.ts 补 4 个 PROJECT_* 审计中文标签**：并行 implementer 的 #47 给 shared enums 加 4 action（dist 已 build 25 键），前端 `Record<AuditAction,string>` 类型完整性强制全键——tsc 门必挂，属 shared 变更的前端必要接线（前端文件归我域）。文案：归档/恢复/转让/复制项目。
+- 票面「与 #42 串行」约束失效确认：queries.ts 本批无实质实现改动（useUsers page 参数化已存在于先前版本），只动注释与测试。
+
+### Tradeoffs
+- 分页 footer 常驻 vs 溢出才显示：选 total>0 条件渲染——空态语义干净、测试可锁负断言；代价与审计页「常驻」不一致（语义场景不同，可接受）。
+- 测试 mock 100 条 vs 5 条：UserManagementModal 分页用例最初造 100 条卡片 mock，jsdom 渲染贴 5s 超时线（单跑 5.8s 惊险过、全量并发爆）；降 5 条 + total=105（形状不变：数组+pagination），锁的行为（footer 文案+hook page 契约）与 page1 条数无关。
+
+### Open questions
+- [ ] **真机验收未做**（AC1「>100 条翻页真机 + 375px 视口」）：并行对方占 backend+shared 工作树，起 dev 栈会读 backend 半成品——留给 lead 收口统一真机验收（造 >100 数据 + 375px 视口两路径）。
+- [ ] **shared 4 新 action 的审计标签映射归口**：我补的 4 个中文文案（归档项目/恢复项目/转让项目/复制项目）未经 #47 票面确认，若 #47 有既定文案以彼为准（constants.ts 注释已标来源）。
+
+### 质量门（implementer 亲测）
+- test：268/268 全绿 EXIT=0（基线 246 → +22 用例；期间两次 ConnectionModal timeout 漂移集为资源型 flaky——单跑 19/19 恒绿，第三次全量全绿坐实）
+- lint：EXIT=0 / tsc --noEmit：EXIT=0
+
+### [2026-11-06] #49 双轴 review 修复（rev-49-std M1-M3 + 顺手四小项，implementer impl-49 追加）
+- M1 翻页闪空态：queries.ts 三分页 hook（useProjects/useConnections/useUsers）加 `placeholderData: keepPreviousData`（react-query v5 具名导出）——翻页/切过滤拉新数据期间旧 data 保持渲染。底表调用（固定 1,100 / {}）key 恒同不触发此行为，一处改两种调用语义正确。测试落在 queries.test 契约锁（三 hook options 均携带 placeholderData；mock factory 补 keepPreviousData key 防 "No export defined on the mock"）。
+- M2 越界恢复：三处（App 连接/项目 + UM Modal）render 期幂等钳制 `if (page > Math.max(1, ceil(total/pageSize))) setPage(...)`——条件自身幂等无需 prev 跟踪；keepPreviousData 期间 total 为旧页值不误钳，新页 total 到达即钳。测试用 mock total 突变 + rerender 锁「第 2/2 页 → 钳回 1/1」。
+- M3 抽屉键盘可达：关态 `invisible md:visible`（visibility 离散动画末切换，动画期间保持可见；hidden 不可 Tab 聚焦——translate 移出屏外不影响 tab order，invisible 才是真修复）；开态 useEffect 移焦至关闭按钮 + 容器 onKeyDown Escape 调 onMobileClose；汉堡 aria-controls 配对抽屉 id="mobile-sidebar"。focus trap 未做（记 OQ lead 处理）。jsdom 断言用类锁（'invisible' 子串陷阱：开态断 not.toContain('invisible') 而非 toContain('visible')）。
+- 顺手：①Pagination 翻页 button type="button" ②UM 关闭重开重置 page 测试 ③tag chip 点击重置 connPage 测试 ④getHeaderTitle 并集查找窗口期回退注释（activeProject 在非当前展示页且非第一页的窗口期回退默认标题）。
+- 质量门终值：test 276/276 EXIT=0（268→+8）/ lint EXIT=0 / tsc EXIT=0（rtk proxy 取码亲测）。
+
+### [2026-11-06] #49 M3 移焦时序修复（lead 真机实证：Chrome invisible 静默拒绝 focus）
+- 现象：真机 375px 开抽屉 activeElement 恒 BODY；单测绿因 jsdom focus 无 focusability 检查 + 用例只覆盖 mount 即开路径，真机 false→true 更新路径 focus 落空。
+- 根因（lead monkey-patch 实证）：transition-all 让 visibility 参与过渡，effect 同步跑在 style recalc 前，按钮 used visibility 仍 invisible → Chrome 静默拒绝 focus。
+- 修复：双 rAF 包裹（raf1 内套 raf2 → focus），cleanup 双 cancelAnimationFrame；等渲染帧 recalc 生效后再聚焦。
+- 测试适配：移焦断言改 waitFor 等帧推进（jsdom rAF 真实异步）；补「false→true 更新路径」用例（原用例只锁 mount 即开）。教训固化：**transition + visibility 与 effect 同步 focus 的组合必有时序洞，真机 focusability 检查 jsdom 不模拟——移焦类断言一律 waitFor 异步等**。
+- 质量门：test 277/277 EXIT=0（276→+1 更新路径用例）/ lint EXIT=0 / tsc EXIT=0。改动文件：Sidebar.tsx + Sidebar.test.tsx 两文件。
+
+### [2026-11-06] #49 M3 二次修复：transitionend 同步移焦（双 rAF 循环失效根治，方案 A 选型）
+- lead 真机复验：双 rAF 首次开成功、关→开循环后持续失效（rAF 回调与渲染帧合并等不到 recalc）。选型方案 A（transitionend 驱动）弃 B（固定 350ms 魔法数与过渡时长耦合）：容器 onTransitionEnd 过滤 `target===currentTarget && propertyName==='visibility' && isMobileOpen` 后移焦；双 rAF 保留作首帧兜底（focus 幂等双路无害）；桌面 md 以上关态也 visible 无 visibility 过渡，天然不触发，常驻侧栏不受影响。
+- 测试教训（新坑入库）：jsdom `fireEvent.transitionEnd(el, { propertyName })` 构造器透传不可靠——width 负向假绿（propertyName 均 undefined 双双不触发，负向天然过）+ visibility 正向落空；改 `Event('transitionend') + Object.defineProperty(ev, 'propertyName', ...)` 后负向真过滤、正向真聚焦。**jsdom 合成 TransitionEvent 带初始化属性一律用 defineProperty 构造**。
+- 质量门：test 278/278 EXIT=0（277→+1）/ lint EXIT=0 / tsc EXIT=0。改动文件：Sidebar.tsx + Sidebar.test.tsx 两文件。
+
+### [2026-11-06] 批 10 收口（lead）
+- **commit 链（6）**：`5731b17` #47 feat（11 文件 +902/−15）→ `b22828a` #49 feat（19 文件 +514/−88）→ `87810b9` #47 fix（+71/−2）→ `dcbc393` #49 fix M1-M3（9 文件 +188/−7）→ `fa66c80` #49 fix 移焦双路（+74/−5）→ 本 docs commit。**#49 commit 前置约束**：#49 消费 #47 的 shared 枚举，反序产生 checkout 即挂中间点——先 #47 后 #49。
+- **#49 首轮 commit 漏 add 事故复盘**：首 commit 仅入 9/19 文件（`git add` 路径手滑 + `2>/dev/null` 吞错 + `&&` 短路,第二批 add 才提交）——amend 补齐+message 生成层损坏（`Claude Code: Claude Code`）同修；message 改 Write 文件 + `-F` 提交防再触生成层损坏。
+- **质量门终值（lead 九门亲测全 EXIT=0）**：backend **715** / shared **59** / frontend **278**（基线 669/59/246 → +46/+0/+32）。
+- **真机验收（lead 亲测，Chrome DevTools MCP isolatedContext）**：
+  - #47 API 真链路 23/23（归档/过滤双态/恢复/深拷贝[连接数/成员隔离/(副本)递增/副本恒 active]/转让[角色互变/owner 唯一]/批量[成功/幂等/ghost id]）；中文标签「归档项目/转让项目」等已在 admin 仪表盘审计流真机可见（impl-49 补的 4 标签缝合点自证）。
+  - #49 三列表 >100 翻页全过（项目 119/连接 152/用户 112,各 2 页）；375px 工作台可用（汉堡+单列卡片+搜索框小屏隐藏+无溢出,截图实证）；console 零 error/warn。
+  - 移焦真机复验受阻：emulate 环境（2x DPR+mobile+本机负载）渲染延迟秒级（开抽屉 1-2s 才 visible、Esc 关 2.1s），同代码 reload 间行为飘忽——**环境伪影非代码回归**（桌面 114ms 正常）；单测已锁 transitionend 正向路径,挂 OQ 待真机复验。教训：**emulate≠真机,行为飘忽时先做桌面基线对照**（112ms vs 秒级立判环境伪影）。
+- **脚本造数**：105 用户+111 项目+110 连接（b-* 前缀直插）；dev DB 应用 migration 遇 database is locked → 停 backend 后 migrate（backend 启动自带 auto-migrate,后两次 deploy 报锁为活进程,验证 status 列在位后确认）。
+- **挂账移交**：顶部 OQ 清单批 10 新增 8 条（归档写禁制/移焦复验/focus trap/搜索限页/底表 100/幂等不对称/越界显示/……）；impl-49「真机验收未做」OQ 已由 lead 真机闭环销账。
+- **团队收尾**：2 implementer（sonnet）+4 reviewer（sonnet）全 idle 交付,收口后 shutdown;批 9 遗留 5 idle agent 一并清。
