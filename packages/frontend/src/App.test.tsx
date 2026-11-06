@@ -388,3 +388,47 @@ describe('#49 分页（连接列表 + Sidebar 项目列表）', () => {
     expect(state.lastProjectsPages).toContain(2);
   });
 });
+
+describe('#49 rev 修复（M2 越界恢复 + 顺手③ tag 重置 + 汉堡 a11y）', () => {
+  const projectItem = {
+    id: 'p1', name: '默认项目', icon: 'server',
+    createdBy: { id: 'u1', nickname: '管理员' }, updatedBy: { id: 'u1', nickname: '管理员' },
+    createdAt: '2026-01-01', updatedAt: '2026-01-01',
+  };
+
+  it('M2：删末页末条 total 跨页界回退 → 页码钳回有效页', () => {
+    state.connections = [hostConn];
+    state.paginationTotal = 105;
+    const view = renderApp();
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+    expect(screen.getByText('第 2 / 2 页')).toBeInTheDocument();
+    // 模拟删末页末条：total 105→100，重渲染让新 total 到达
+    state.paginationTotal = 100;
+    view.rerender(
+      <UIProvider>
+        <QueryClientProvider client={new QueryClient()}>
+          <MemoryRouter initialEntries={['/']}>
+            <App />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </UIProvider>,
+    );
+    expect(screen.getByText('第 1 / 1 页')).toBeInTheDocument();
+  });
+
+  it('顺手③：tag chip 点击重置连接分页回第 1 页', () => {
+    state.connections = [hostConn];
+    state.paginationTotal = 200;
+    renderApp();
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+    expect(state.lastConnectionsDisplayPage).toBe(2);
+    fireEvent.click(screen.getByRole('button', { name: /#生产环境/ }));
+    expect(state.lastConnectionsDisplayPage).toBe(1);
+  });
+
+  it('汉堡按钮 aria-controls 配对抽屉 id（M3）', () => {
+    state.projects = [projectItem];
+    renderApp();
+    expect(screen.getByRole('button', { name: '打开导航菜单' })).toHaveAttribute('aria-controls', 'mobile-sidebar');
+  });
+});

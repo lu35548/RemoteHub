@@ -185,3 +185,33 @@ describe('#49 Sidebar 分页与移动抽屉', () => {
     void container;
   });
 });
+
+describe('#49 rev M3 抽屉键盘可达性', () => {
+  it('关态容器含 invisible（visibility:hidden 不可 Tab 聚焦）；开态无 invisible', () => {
+    const { container, unmount } = render(
+      <MemoryRouter>
+        <Sidebar {...props} />
+      </MemoryRouter>,
+    );
+    expect(container.firstElementChild!.className).toContain('invisible');
+    unmount();
+    const open = render(
+      <MemoryRouter>
+        <Sidebar {...props} isMobileOpen />
+      </MemoryRouter>,
+    );
+    expect(open.container.firstElementChild!.className).not.toContain('invisible');
+  });
+
+  it('开态移焦至关闭按钮（焦点入抽屉）+ Escape 关闭回调', () => {
+    const onMobileClose = vi.fn();
+    render(
+      <MemoryRouter>
+        <Sidebar {...props} isMobileOpen onMobileClose={onMobileClose} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole('button', { name: '关闭导航菜单' })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole('button', { name: '关闭导航菜单' }), { key: 'Escape' });
+    expect(onMobileClose).toHaveBeenCalledTimes(1);
+  });
+});

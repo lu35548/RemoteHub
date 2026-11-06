@@ -56,6 +56,9 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
   const projectsBase = useMemo(() => projectsBasePage?.data ?? [], [projectsBasePage]);
   const projectsDisplay = useMemo(() => projectsDisplayPage?.data ?? [], [projectsDisplayPage]);
   const projectsTotal = projectsDisplayPage?.pagination.total ?? 0;
+  // M2（#49 rev）越界恢复：同连接列表钳制逻辑
+  const projectTotalPages = Math.max(1, Math.ceil(projectsTotal / 100));
+  if (projectPage > projectTotalPages) setProjectPage(projectTotalPages);
 
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'all' | 'vpn'>('all');
@@ -106,6 +109,10 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
   }
   const { data: connectionsPage } = useConnections(listQuery, connPage, 100);
   const connections = useMemo(() => connectionsPage?.data ?? [], [connectionsPage]);
+  // M2（#49 rev）越界恢复：删末页末条 total 跨页界回退时钳回有效页（keepPreviousData 期间 total
+  // 为旧页值不误钳，新页 total 到达即钳；条件幂等，钳后不再触发）
+  const connTotalPages = Math.max(1, Math.ceil((connectionsPage?.pagination.total ?? 0) / 100));
+  if (connPage > connTotalPages) setConnPage(connTotalPages);
 
   // #42 全量底表（无过滤）：ConnectionModal 依赖下拉 + Via 依赖查找 + 全局视图 chips 聚合源。
   // 与展示列表在「全局无过滤」时 queryKey 相同 → react-query 自动去重为单请求
@@ -293,7 +300,9 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
     void queryClient.invalidateQueries({ queryKey: ['connections'] });
   };
 
-  // #49 header 标题查找：底表 + 展示页并集（activeProject 可能在任一页）
+  // #49 header 标题查找：底表 + 展示页并集（activeProject 可能在任一页）。
+  // m2 已知边界：底表只持 page=1，展示页只持当前页——activeProject 恰在「非当前展示页且非第一页」
+  // 的窗口期（如翻走后又切回该项目视图）两表都不含，回退默认标题「所有远程资源」；重新翻回即恢复
   const getHeaderTitle = () => {
     const project = [...projectsBase, ...projectsDisplay].find(p => p.id === activeProjectId);
     if (project) return project.name;
@@ -334,12 +343,13 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
       <main className="flex-1 flex flex-col h-full overflow-hidden relative bg-slate-950">
         <header className="h-16 border-b border-slate-800 flex items-center justify-between px-4 md:px-8 bg-slate-950/80 backdrop-blur-md z-10 sticky top-0">
           <div className="flex items-center gap-4">
-             {/* #49 移动端汉堡：开 Sidebar 抽屉（<md 显示）；aria-expanded 随开合状态 */}
+             {/* #49 移动端汉堡：开 Sidebar 抽屉（<md 显示）；aria-expanded 随开合状态，aria-controls 配对抽屉 id */}
              <button
                type="button"
                onClick={() => setMobileSidebarOpen(true)}
                aria-label="打开导航菜单"
                aria-expanded={isMobileSidebarOpen}
+               aria-controls="mobile-sidebar"
                className="md:hidden text-slate-400 hover:text-white p-2 -ml-2 rounded-lg hover:bg-white/5 transition-colors"
              >
                <Menu size={22} />

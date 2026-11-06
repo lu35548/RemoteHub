@@ -37,6 +37,10 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen, onClo
   const usersQuery = useUsers(userPage, isOpen && isAdmin);
   const users: UserListItem[] = usersQuery.data?.data ?? [];
   const usersTotal = usersQuery.data?.pagination.total ?? 0;
+  // M2（#49 rev）越界恢复：删末页末条 total 跨页界回退时钳回有效页（条件幂等；keepPreviousData
+  // 期间 total 为旧页值不误钳，新页 total 到达即钳）
+  const usersTotalPages = Math.max(1, Math.ceil(usersTotal / 100));
+  if (userPage > usersTotalPages) setUserPage(usersTotalPages);
 
   const createUser = useCreateUser();
   const deleteUser = useDeleteUser();

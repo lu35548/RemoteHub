@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { API_BASE, api, ensureRefreshed, getAccessToken, setAccessToken, mfaRequest } from './client.js';
 import { downloadBlob } from '../utils';
@@ -145,6 +145,9 @@ export function useProjects(page = 1, pageSize = 20) {
   return useQuery({
     queryKey: ['projects', page, pageSize],
     queryFn: () => api.getRaw<PaginatedResponse<ProjectListItem>>(`/projects?page=${page}&pageSize=${pageSize}`),
+    // M1（#49 rev）：翻页拉新数据期间保持上一页 data 渲染（isPlaceholderData），消除闪空态/footer 闪没；
+    // 底表调用（固定 1,100）key 恒同不触发此行为，无害
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -203,6 +206,8 @@ export function useConnections(filters: Omit<ConnectionListQuery, 'page' | 'page
   return useQuery({
     queryKey: ['connections', filters, page, pageSize],
     queryFn: () => api.getRaw<PaginatedResponse<ConnectionListItem>>(`/connections?${connectionListParams(filters, page, pageSize)}`),
+    // M1（#49 rev）：同 useProjects——翻页/切过滤期间保持旧 data 渲染；底表调用（{} 固定）不受影响
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -312,12 +317,14 @@ export function useRemoveMember() {
 
 // ─── Users (Admin) ───
 
-// pageSize=100 一次拉全（v1 全量列表等价，spec 决策 3）；enabled 供弹窗按需加载（打开且 admin 才请求）
+// pageSize=100 与后端 MAX_PAGE_SIZE 同口径（#49 分页消费：page 受控翻页）；enabled 供弹窗按需加载（打开且 admin 才请求）
 export function useUsers(page = 1, enabled = true) {
   return useQuery({
     queryKey: ['users', page],
     queryFn: () => api.getRaw<PaginatedResponse<UserListItem>>(`/users?page=${page}&pageSize=100`),
     enabled,
+    // M1（#49 rev）：翻页拉新数据期间保持上一页 data 渲染
+    placeholderData: keepPreviousData,
   });
 }
 

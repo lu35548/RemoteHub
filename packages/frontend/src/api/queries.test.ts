@@ -16,6 +16,8 @@ vi.mock('@tanstack/react-query', () => ({
     return { mutateAsync: vi.fn(), isPending: false };
   }),
   useQueryClient: vi.fn(() => ({ invalidateQueries: vi.fn() })),
+  // M1（#49 rev）：queries.ts 三分页 hook 新消费 keepPreviousData——factory 随 import 扩展
+  keepPreviousData: (prev: unknown) => prev,
 }));
 
 vi.mock('react-router-dom', () => ({
@@ -31,7 +33,8 @@ vi.mock('./client.js', () => ({
   ensureRefreshed: vi.fn().mockResolvedValue(null),
 }));
 
-import { exportAuditLogsCsv, launchConnection, useAuditLogs, useDashboard, useForgotPassword, useProjectStats, useResetPassword, useAdminResetLink, useUserStats, useNotifications, useMarkNotificationRead, NOTIFICATION_QUERY_KEY, useAdminBackups, useTriggerBackup, downloadBackup, BACKUP_QUERY_KEY, useConnections, useConnectionStats, useDeleteConnection, useCloneConnection, useUsers } from './queries';
+import { exportAuditLogsCsv, launchConnection, useAuditLogs, useDashboard, useForgotPassword, useProjectStats, useResetPassword, useAdminResetLink, useUserStats, useNotifications, useMarkNotificationRead, NOTIFICATION_QUERY_KEY, useAdminBackups, useTriggerBackup, downloadBackup, BACKUP_QUERY_KEY, useConnections, useConnectionStats, useDeleteConnection, useCloneConnection, useUsers, useProjects } from './queries';
+import { keepPreviousData } from '@tanstack/react-query';
 import { api, ensureRefreshed } from './client.js';
 import type { AuditLogQuery } from '@remotehub/shared';
 
@@ -610,5 +613,24 @@ describe('useUsers 分页契约（#49）', () => {
   it('useUsers() 默认 page=1', () => {
     useUsers();
     expect(captured).toMatchObject({ queryKey: ['users', 1] });
+  });
+});
+
+
+describe('M1 placeholderData 契约（#49 rev：翻页期间保持旧 data 渲染）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    captured = undefined;
+  });
+
+  it('useUsers/useProjects/useConnections 三 hook options 均携带 placeholderData=keepPreviousData', () => {
+    useUsers(1);
+    expect(captured!.placeholderData).toBe(keepPreviousData);
+    captured = undefined;
+    useProjects(2, 100);
+    expect(captured!.placeholderData).toBe(keepPreviousData);
+    captured = undefined;
+    useConnections({}, 3, 100);
+    expect(captured!.placeholderData).toBe(keepPreviousData);
   });
 });

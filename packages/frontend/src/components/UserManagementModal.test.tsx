@@ -297,3 +297,53 @@ describe('用户列表分页（#49）', () => {
     expect(state.lastUsersPage).toBe(2);
   });
 });
+
+describe('#49 rev 修复（M2 越界钳制 + 顺手② 关闭重开重置）', () => {
+  beforeEach(() => {
+    state.users = [];
+    state.usersTotal = 0;
+    state.lastUsersPage = undefined;
+  });
+
+  it('M2：删末页末条 total 跨页界回退 → 页码钳回有效页', () => {
+    state.users = Array.from({ length: 5 }, (_, i) => userItem({ id: `u${i}`, username: `user${i}` }));
+    state.usersTotal = 105;
+    const view = renderModal();
+    openUsersTab();
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+    expect(screen.getByText('第 2 / 2 页')).toBeInTheDocument();
+    state.usersTotal = 100;
+    view.rerender(
+      <MemoryRouter>
+        <UIProvider>
+          <UserManagementModal isOpen onClose={vi.fn()} currentUser={adminUser} />
+        </UIProvider>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText('第 1 / 1 页')).toBeInTheDocument();
+  });
+
+  it('顺手②：关闭重开重置 page 回第 1 页', () => {
+    state.users = Array.from({ length: 5 }, (_, i) => userItem({ id: `u${i}`, username: `user${i}` }));
+    state.usersTotal = 105;
+    const view = renderModal();
+    openUsersTab();
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+    expect(state.lastUsersPage).toBe(2);
+    view.rerender(
+      <MemoryRouter>
+        <UIProvider>
+          <UserManagementModal isOpen={false} onClose={vi.fn()} currentUser={adminUser} />
+        </UIProvider>
+      </MemoryRouter>,
+    );
+    view.rerender(
+      <MemoryRouter>
+        <UIProvider>
+          <UserManagementModal isOpen onClose={vi.fn()} currentUser={adminUser} />
+        </UIProvider>
+      </MemoryRouter>,
+    );
+    expect(state.lastUsersPage).toBe(1);
+  });
+});

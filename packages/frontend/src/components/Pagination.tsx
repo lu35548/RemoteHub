@@ -26,6 +26,7 @@ export function Pagination(props: PaginationProps): React.JSX.Element {
       <span>共 {total} 条</span>
       <div className="flex items-center gap-3">
         <button
+          type="button"
           onClick={() => onPageChange(page - 1)}
           disabled={!canPrev}
           className="px-3 py-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors disabled:opacity-40 disabled:pointer-events-none"
@@ -34,6 +35,7 @@ export function Pagination(props: PaginationProps): React.JSX.Element {
         </button>
         <span>第 {page} / {totalPages} 页</span>
         <button
+          type="button"
           onClick={() => onPageChange(page + 1)}
           disabled={!canNext}
           className="px-3 py-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors disabled:opacity-40 disabled:pointer-events-none"

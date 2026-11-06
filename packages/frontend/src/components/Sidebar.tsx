@@ -52,7 +52,13 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [projectMenuOpenId, setProjectMenuOpenId] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
   const navigate = useNavigate();
+
+  // M3（#49 rev）：抽屉打开即移焦至关闭按钮（焦点入抽屉，Tab 序从抽屉开始 + Escape 可达）
+  useEffect(() => {
+    if (isMobileOpen) closeButtonRef.current?.focus();
+  }, [isMobileOpen]);
 
   const filteredProjects = useMemo(() => {
     if (!searchTerm) return projects;
@@ -89,10 +95,15 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <div
+      id="mobile-sidebar"
+      onKeyDown={(e) => {
+        // M3：焦点在抽屉内（打开即移焦至此）按 Escape 关闭抽屉
+        if (e.key === 'Escape') onMobileClose?.();
+      }}
       className={`
         fixed inset-y-0 left-0 z-40 h-full flex flex-col border-r border-white/5 bg-slate-950/80 backdrop-blur-xl md:static md:z-20 md:shrink-0
         transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1.0)]
-        ${isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+        ${isMobileOpen ? 'translate-x-0 visible' : '-translate-x-full md:translate-x-0 invisible md:visible'}
         w-[280px] ${isCollapsed ? 'md:w-[80px]' : 'md:w-[280px]'}
       `}
       aria-label="主导航"
@@ -116,9 +127,10 @@ const Sidebar: React.FC<SidebarProps> = ({
         >
           {isCollapsed ? <PanelLeftOpen size={20} /> : <PanelLeftClose size={20} />}
         </button>
-        {/* #49 移动抽屉关闭按钮（仅抽屉打开时渲染，<md 显示） */}
+        {/* #49 移动抽屉关闭按钮（仅抽屉打开时渲染，<md 显示；M3 打开即移焦至此） */}
         {isMobileOpen && (
           <button
+            ref={closeButtonRef}
             onClick={onMobileClose}
             aria-label="关闭导航菜单"
             className="text-slate-500 hover:text-white transition-colors p-2 rounded-lg hover:bg-white/5 active:scale-90 duration-200 md:hidden"
