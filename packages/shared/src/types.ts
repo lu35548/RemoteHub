@@ -396,3 +396,89 @@ export interface PerformanceStats {
   bufferSize: number;
   uptimeSeconds: number;
 }
+
+// ─── 数据导入导出（票 #50，admin 门禁；spec §14）───
+
+/** 导出文件内单条用户。passwordHash 永不入导出文件（票面红线）；totpSecret 为 AES-256-GCM
+ * 密文（#30 encrypt 存储），同 KEY 前提下原样搬运导入后可直接解密验证。 */
+export interface ExportUser {
+  id: string;
+  username: string;
+  nickname: string;
+  role: UserRole;
+  isActive: boolean;
+  twoFactorEnabled: boolean;
+  totpSecret: string | null;
+  lastActiveAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 导出文件内单条项目（含 #47 status 字段）。createdBy/updatedBy 为用户 id 原值（导入按 id 恢复引用）。 */
+export interface ExportProject {
+  id: string;
+  name: string;
+  description: string | null;
+  icon: string;
+  status: string;
+  createdBy: string;
+  updatedBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 导出文件内单条连接。encryptedPass 密文字文原样搬运（同 KEY 前提，不重加密）；
+ * requiredVpnId 保留原 id，导入两阶段回填（自引用依赖）。 */
+export interface ExportConnection {
+  id: string;
+  projectId: string;
+  name: string;
+  host: string;
+  port: number | null;
+  username: string | null;
+  encryptedPass: string | null;
+  protocol: Protocol;
+  vpnType: VpnType | null;
+  vpnLoginUrl: string | null;
+  requiredVpnId: string | null;
+  notes: string | null;
+  tags: string | null;
+  lastAccessed: string | null;
+  createdBy: string;
+  updatedBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 导出文件内单条项目成员。 */
+export interface ExportMember {
+  id: string;
+  projectId: string;
+  userId: string;
+  role: MemberRole;
+  addedAt: string;
+}
+
+/** POST /admin/export 响应 data = 导出文件全文（前端自行落盘为 .json）。
+ * 审计日志表不含（AuditLog 不导出）；encryptionKeyFingerprint 供导入端校验（不匹配 422 拒绝）。 */
+export interface ExportData {
+  version: 1;
+  exportedAt: string;
+  /** ENCRYPTION_KEY 的 SHA-256 前 8 hex（base64 解码后字节口径） */
+  encryptionKeyFingerprint: string;
+  users: ExportUser[];
+  projects: ExportProject[];
+  connections: ExportConnection[];
+  members: ExportMember[];
+}
+
+/** POST /admin/import 响应 data：事务 upsert 计数。 */
+export interface ImportResult {
+  projects: number;
+  connections: number;
+  members: number;
+  usersCreated: number;
+  usersUpdated: number;
+  /** 导入时新建的用户 username（库中无此 id，密码为随机占位）——admin 据此走重置流程恢复其访问 */
+  usersRequirePasswordReset: string[];
+}

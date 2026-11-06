@@ -25,6 +25,12 @@ const server = createServer(app);
 
 // ─── Global middleware stack (in order) ───
 
+// 0. 票 #50:/api/v1/admin/import 专属 50mb parser(design §9 先例口径)。必须预挂在全局
+//    1mb parser **之前**——body-parser 对已解析 body(req._body)短路跳过,路由级后挂的
+//    大 limit 永不生效;预挂后本端点由 50mb parser 消费,全局 1mb parser 检测 req._body
+//    直接放行,后续全局栈(限流/净化/CORS)对本端点照常生效。
+app.use('/api/v1/admin/import', express.json({ limit: '50mb' }));
+
 // 1. JSON body parser
 app.use(express.json({ limit: '1mb' }));
 
@@ -129,6 +135,7 @@ import { auditRoutes } from './routes/auditRoutes.js';
 import { monitoringRoutes } from './routes/monitoringRoutes.js';
 import { notificationRoutes } from './routes/notificationRoutes.js';
 import { backupRoutes } from './routes/backupRoutes.js';
+import { adminRoutes } from './routes/adminRoutes.js';
 
 // K8s 探针（票 #33）：挂 app 根（K8s 惯例路径 /healthz /readyz，无 /api/v1 前缀）。
 // 探针路径已入 RATE_LIMIT_SKIP_PATHS 白名单：ipMonitor 根挂载处计数豁免 + generalLimiter skip 同源；
@@ -143,6 +150,8 @@ app.use('/api/v1/connections', connectionRoutes);
 app.use('/api/v1/audit-logs', auditRoutes);
 app.use('/api/v1/admin', monitoringRoutes);
 app.use('/api/v1/admin/backups', backupRoutes);
+// 票 #50 数据导入导出(内部仅定义 /export /import,不影响前挂载点的 backups/monitoring 路由)
+app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
 
 // ─── 404 ───
