@@ -98,6 +98,11 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   PROJECT_CREATE: '创建项目',
   PROJECT_UPDATE: '更新项目',
   PROJECT_DELETE: '删除项目',
+  // #47 shared 枚举扩展的前端标签接线（Record<AuditAction> 类型完整性强制全键；文案与后端 #47 行为对齐）
+  PROJECT_ARCHIVE: '归档项目',
+  PROJECT_RESTORE: '恢复项目',
+  PROJECT_TRANSFER: '转让项目',
+  PROJECT_COPY: '复制项目',
   MEMBER_ADD: '添加成员',
   MEMBER_UPDATE: '更新成员',
   MEMBER_REMOVE: '移除成员',

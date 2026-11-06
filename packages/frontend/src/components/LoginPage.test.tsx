@@ -114,3 +114,15 @@ describe('LoginPage（T3）', () => {
     });
   });
 });
+
+describe('a11y：input name/autocomplete 属性落位（#49 backlog 落位）', () => {
+  it('账号 input name=username + autoComplete=username；密码 input name=password + autoComplete=current-password', () => {
+    renderLogin();
+    const userInput = screen.getByPlaceholderText('请输入用户名');
+    expect(userInput).toHaveAttribute('name', 'username');
+    expect(userInput).toHaveAttribute('autocomplete', 'username');
+    const passInput = screen.getByPlaceholderText('••••••••');
+    expect(passInput).toHaveAttribute('name', 'password');
+    expect(passInput).toHaveAttribute('autocomplete', 'current-password');
+  });
+});

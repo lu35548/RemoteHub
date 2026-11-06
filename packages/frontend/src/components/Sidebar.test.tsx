@@ -119,3 +119,69 @@ describe('成员管理入口（#40）', () => {
     expect(screen.getByText('编辑')).toBeInTheDocument();
   });
 });
+
+describe('#49 Sidebar 分页与移动抽屉', () => {
+  it('项目分页 footer：projectTotal 205 → 「共 205 条」，下一页回调携带 page=2', () => {
+    const onProjectPageChange = vi.fn();
+    render(
+      <MemoryRouter>
+        <Sidebar {...props} projectTotal={205} onProjectPageChange={onProjectPageChange} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText('共 205 条')).toBeInTheDocument();
+    expect(screen.getByText('第 1 / 3 页')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+    expect(onProjectPageChange).toHaveBeenCalledWith(2);
+  });
+
+  it('projectTotal=0 → 无分页 footer（默认 props 不渲染，冒烟场景零影响）', () => {
+    render(
+      <MemoryRouter>
+        <Sidebar {...props} />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByText(/共 \d+ 条/)).not.toBeInTheDocument();
+  });
+
+  it('折叠态 → 分页 footer 隐藏（桌面紧凑模式；经折叠按钮切内部 state）', () => {
+    render(
+      <MemoryRouter>
+        <Sidebar {...props} projectTotal={205} onProjectPageChange={vi.fn()} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText('共 205 条')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '折叠侧栏' }));
+    expect(screen.queryByText('共 205 条')).not.toBeInTheDocument();
+  });
+
+  it('移动抽屉：默认关态容器含 -translate-x-full，isMobileOpen=true 切 translate-x-0', () => {
+    const { container, unmount } = render(
+      <MemoryRouter>
+        <Sidebar {...props} />
+      </MemoryRouter>,
+    );
+    expect(container.firstElementChild!.className).toContain('-translate-x-full');
+    unmount();
+    const open = render(
+      <MemoryRouter>
+        <Sidebar {...props} isMobileOpen />
+      </MemoryRouter>,
+    );
+    expect(open.container.firstElementChild!.className).toContain('translate-x-0');
+    expect(open.container.firstElementChild!.className).not.toContain('-translate-x-full');
+  });
+
+  it('关闭按钮 a11y（aria-label）+ 点击回调 onMobileClose；折叠按钮在移动抽屉隐藏（md:hidden）', () => {
+    const onMobileClose = vi.fn();
+    const { container } = render(
+      <MemoryRouter>
+        <Sidebar {...props} isMobileOpen onMobileClose={onMobileClose} />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '关闭导航菜单' }));
+    expect(onMobileClose).toHaveBeenCalledTimes(1);
+    // 桌面折叠按钮在移动抽屉隐藏（md:hidden 实现类锁定；jsdom 无视口，只能锁类）
+    expect(screen.getByRole('button', { name: '折叠侧栏' }).className).toContain('hidden');
+    void container;
+  });
+});

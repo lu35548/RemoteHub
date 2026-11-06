@@ -9,6 +9,10 @@ import UserManagementModal from './UserManagementModal';
 const { state } = vi.hoisted(() => ({
   state: {
     users: [] as UserListItem[],
+    // #49 分页：total 独立于返回数组（page1 持 100 条但 total=105 的真实截断形状）
+    usersTotal: 0,
+    // #49 捕获 useUsers 的 page 实参（翻页 → hook 以新 page 重查的契约锁）
+    lastUsersPage: undefined as number | undefined,
     createUser: vi.fn(),
     deleteUser: vi.fn(),
     changePassword: vi.fn(),
@@ -17,11 +21,14 @@ const { state } = vi.hoisted(() => ({
   },
 }));
 vi.mock('../api/queries', () => ({
-  useUsers: () => ({
-    data: {
-      data: state.users,
-      pagination: { page: 1, pageSize: 100, total: state.users.length },
-    },
+  useUsers: vi.fn((page: number) => {
+    state.lastUsersPage = page;
+    return {
+      data: {
+        data: state.users,
+        pagination: { page, pageSize: 100, total: state.usersTotal > 0 ? state.usersTotal : state.users.length },
+      },
+    };
   }),
   useCreateUser: () => ({ mutateAsync: state.createUser, isPending: false }),
   useDeleteUser: () => ({ mutateAsync: state.deleteUser, isPending: false }),
@@ -248,5 +255,45 @@ describe('UserManagementModal（T7）', () => {
       expect(state.updateUser).toHaveBeenCalledWith({ id: 'u2', data: { twoFactorEnabled: false } });
     });
     expect(await screen.findByText('已关闭 2FA')).toBeInTheDocument();
+  });
+});
+
+describe('用户列表分页（#49）', () => {
+  beforeEach(() => {
+    state.users = [];
+    state.usersTotal = 0;
+    state.lastUsersPage = undefined;
+    state.createUser.mockReset();
+    state.deleteUser.mockReset();
+    state.changePassword.mockReset();
+  });
+
+  it('total 105 → footer「共 105 条 / 第 1 / 2 页」渲染（footer 驱动翻页，取代 backlog 截断问题）', () => {
+    // page1 持 5 条即可：锁的是 footer 文案与 hook page 契约，与 page1 条数无关（100 条实测 jsdom 渲染贴线超时）
+    state.users = Array.from({ length: 5 }, (_, i) => userItem({ id: `u${i}`, username: `user${i}` }));
+    state.usersTotal = 105;
+    renderModal();
+
+    openUsersTab();
+    expect(screen.getByText('共 105 条')).toBeInTheDocument();
+    expect(screen.getByText('第 1 / 2 页')).toBeInTheDocument();
+  });
+
+  it('a11y：改密表单 autoComplete 落位（当前/新/确认三 input）', () => {
+    renderModal();
+    expect(screen.getByLabelText('当前密码')).toHaveAttribute('autocomplete', 'current-password');
+    expect(screen.getByLabelText('新密码')).toHaveAttribute('autocomplete', 'new-password');
+    expect(screen.getByLabelText('确认新密码')).toHaveAttribute('autocomplete', 'new-password');
+  });
+
+  it('点「下一页」→ useUsers 以 page=2 重查（受控分页契约）', async () => {
+    // page1 持 5 条即可：锁的是 footer 文案与 hook page 契约，与 page1 条数无关（100 条实测 jsdom 渲染贴线超时）
+    state.users = Array.from({ length: 5 }, (_, i) => userItem({ id: `u${i}`, username: `user${i}` }));
+    state.usersTotal = 105;
+    renderModal();
+
+    openUsersTab();
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+    expect(state.lastUsersPage).toBe(2);
   });
 });

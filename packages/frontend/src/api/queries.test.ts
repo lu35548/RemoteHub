@@ -31,7 +31,7 @@ vi.mock('./client.js', () => ({
   ensureRefreshed: vi.fn().mockResolvedValue(null),
 }));
 
-import { exportAuditLogsCsv, launchConnection, useAuditLogs, useDashboard, useForgotPassword, useProjectStats, useResetPassword, useAdminResetLink, useUserStats, useNotifications, useMarkNotificationRead, NOTIFICATION_QUERY_KEY, useAdminBackups, useTriggerBackup, downloadBackup, BACKUP_QUERY_KEY, useConnections, useConnectionStats, useDeleteConnection, useCloneConnection } from './queries';
+import { exportAuditLogsCsv, launchConnection, useAuditLogs, useDashboard, useForgotPassword, useProjectStats, useResetPassword, useAdminResetLink, useUserStats, useNotifications, useMarkNotificationRead, NOTIFICATION_QUERY_KEY, useAdminBackups, useTriggerBackup, downloadBackup, BACKUP_QUERY_KEY, useConnections, useConnectionStats, useDeleteConnection, useCloneConnection, useUsers } from './queries';
 import { api, ensureRefreshed } from './client.js';
 import type { AuditLogQuery } from '@remotehub/shared';
 
@@ -590,5 +590,25 @@ describe('downloadBackup（#39）', () => {
 
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+});
+
+
+describe('useUsers 分页契约（#49）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    captured = undefined;
+  });
+
+  it('useUsers(2) → queryKey [users, 2] + URL page=2&pageSize=100（pageSize 与后端 MAX_PAGE_SIZE 同口径）', () => {
+    useUsers(2);
+    expect(captured).toMatchObject({ queryKey: ['users', 2] });
+    (captured!.queryFn as () => unknown)();
+    expect(mockedGetRaw).toHaveBeenCalledWith('/users?page=2&pageSize=100');
+  });
+
+  it('useUsers() 默认 page=1', () => {
+    useUsers();
+    expect(captured).toMatchObject({ queryKey: ['users', 1] });
   });
 });

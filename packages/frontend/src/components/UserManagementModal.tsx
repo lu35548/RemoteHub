@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { UserListItem, UserPublic } from '@remotehub/shared';
 import { Modal, useUI } from './UIComponents';
+import { Pagination } from './Pagination';
 import { UserCog, Plus, Trash2, Key, Shield, ShieldCheck } from 'lucide-react';
 import { useUsers, useCreateUser, useDeleteUser, useChangePassword, useAdminResetLink, useUpdateUser } from '../api/queries';
 import { errMsg } from '../utils';
@@ -24,9 +25,18 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen, onClo
   const { toast, confirm } = useUI();
 
   const isAdmin = currentUser.role === 'admin';
-  // v1：isOpen 且 admin 时加载列表；enabled 每次 false→true 变化（staleTime 0）自动重取，等价「每次打开刷新」
-  const usersQuery = useUsers(1, isOpen && isAdmin);
+  // #49 受控分页：page state 驱动 useUsers 重查（pageSize=100 与后端 MAX_PAGE_SIZE 同口径）；
+  // isOpen 且 admin 时加载；关闭即重置回第 1 页（重开从首页开始）。
+  // 「render 期比较 prev」模式（react-hooks v7 set-state-in-effect 禁 effect 内同步 setState）
+  const [userPage, setUserPage] = useState(1);
+  const [prevIsOpen, setPrevIsOpen] = useState(isOpen);
+  if (prevIsOpen !== isOpen) {
+    setPrevIsOpen(isOpen);
+    if (!isOpen) setUserPage(1);
+  }
+  const usersQuery = useUsers(userPage, isOpen && isAdmin);
   const users: UserListItem[] = usersQuery.data?.data ?? [];
+  const usersTotal = usersQuery.data?.pagination.total ?? 0;
 
   const createUser = useCreateUser();
   const deleteUser = useDeleteUser();
@@ -184,15 +194,15 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen, onClo
                 <form onSubmit={handleChangePassword} className="space-y-4">
                   <div>
                     <label className="block text-xs text-slate-500 uppercase mb-1">当前密码</label>
-                    <input type="password" aria-label="当前密码" value={passChange.old} onChange={e => setPassChange({...passChange, old: e.target.value})} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm focus:border-blue-500 outline-none" required />
+                    <input type="password" name="current-password" autoComplete="current-password" aria-label="当前密码" value={passChange.old} onChange={e => setPassChange({...passChange, old: e.target.value})} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm focus:border-blue-500 outline-none" required />
                   </div>
                   <div>
                     <label className="block text-xs text-slate-500 uppercase mb-1">新密码</label>
-                    <input type="password" aria-label="新密码" value={passChange.new} onChange={e => setPassChange({...passChange, new: e.target.value})} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm focus:border-blue-500 outline-none" required />
+                    <input type="password" name="new-password" autoComplete="new-password" aria-label="新密码" value={passChange.new} onChange={e => setPassChange({...passChange, new: e.target.value})} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm focus:border-blue-500 outline-none" required />
                   </div>
                   <div>
                     <label className="block text-xs text-slate-500 uppercase mb-1">确认新密码</label>
-                    <input type="password" aria-label="确认新密码" value={passChange.confirm} onChange={e => setPassChange({...passChange, confirm: e.target.value})} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm focus:border-blue-500 outline-none" required />
+                    <input type="password" name="confirm-password" autoComplete="new-password" aria-label="确认新密码" value={passChange.confirm} onChange={e => setPassChange({...passChange, confirm: e.target.value})} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm focus:border-blue-500 outline-none" required />
                   </div>
                   <button type="submit" className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm transition-colors">
                     更新密码
@@ -207,15 +217,15 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen, onClo
                   <form onSubmit={handleCreateUser} className="flex gap-4 items-end">
                     <div className="flex-1 space-y-1">
                       <label className="text-xs text-slate-500">登录账号</label>
-                      <input type="text" value={newUser.username} onChange={e => setNewUser({...newUser, username: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm" required placeholder="login_id" />
+                      <input type="text" name="new-username" autoComplete="off" value={newUser.username} onChange={e => setNewUser({...newUser, username: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm" required placeholder="login_id" />
                     </div>
                     <div className="flex-1 space-y-1">
                       <label className="text-xs text-slate-500">显示昵称</label>
-                      <input type="text" value={newUser.nickname} onChange={e => setNewUser({...newUser, nickname: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm" required placeholder="张三" />
+                      <input type="text" name="new-nickname" autoComplete="off" value={newUser.nickname} onChange={e => setNewUser({...newUser, nickname: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm" required placeholder="张三" />
                     </div>
                     <div className="flex-1 space-y-1">
                       <label className="text-xs text-slate-500">初始密码</label>
-                      <input type="text" value={newUser.password} onChange={e => setNewUser({...newUser, password: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm" required placeholder="123456" />
+                      <input type="text" name="new-user-password" autoComplete="off" value={newUser.password} onChange={e => setNewUser({...newUser, password: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm" required placeholder="123456" />
                     </div>
                     <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm h-[38px]">添加</button>
                   </form>
@@ -255,6 +265,11 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen, onClo
                     </div>
                   ))}
                 </div>
+
+                {/* #49 受控分页 footer：total>0 才渲染（空列表由上方列表区呈现空态） */}
+                {usersTotal > 0 && (
+                  <Pagination page={userPage} total={usersTotal} pageSize={100} onPageChange={setUserPage} className="mt-4" />
+                )}
               </div>
             )}
           </div>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Plus, Layout, Network, Server } from 'lucide-react';
+import { Search, Plus, Layout, Network, Server, Menu } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ConnectionDetail, ConnectionListItem, ConnectionListQuery, CreateConnectionRequest, ProjectListItem, ProjectDetail, UserPublic } from '@remotehub/shared';
@@ -17,6 +17,7 @@ import UserManagementModal from './components/UserManagementModal';
 import NotificationCenter from './components/NotificationCenter';
 import ConnectionFilterBar, { type TagOption, type ConnectionSortTarget } from './components/ConnectionFilterBar';
 import { useUI } from './components/UIComponents';
+import { Pagination } from './components/Pagination';
 import { getAvatarColor } from './utils/avatar';
 
 // ── #42 工作台过滤 URL 联动 ──
@@ -46,9 +47,15 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
   const deleteConnectionMutation = useDeleteConnection();
   const cloneConnectionMutation = useCloneConnection();
 
-  // 大 pageSize 一次拉全（后端 MAX_PAGE_SIZE=100 上限，spec 决策 3 的「200」勘误为上限值；个人项目量级足够）
-  const { data: projectsPage } = useProjects(1, 100);
-  const projects = useMemo(() => projectsPage?.data ?? [], [projectsPage]);
+  // #49 项目列表拆双查询：底表（page=1 固定）供 ConnectionModal 项目下拉 + header 标题查找
+  // （依赖数据需全量口径，维持原「一次拉全」语义）；展示查询（受控 page）供 Sidebar 翻页。
+  // page=1 时两查询同 queryKey ['projects',1,100] → react-query 自动去重为单请求
+  const { data: projectsBasePage } = useProjects(1, 100);
+  const [projectPage, setProjectPage] = useState(1);
+  const { data: projectsDisplayPage } = useProjects(projectPage, 100);
+  const projectsBase = useMemo(() => projectsBasePage?.data ?? [], [projectsBasePage]);
+  const projectsDisplay = useMemo(() => projectsDisplayPage?.data ?? [], [projectsDisplayPage]);
+  const projectsTotal = projectsDisplayPage?.pagination.total ?? 0;
 
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'all' | 'vpn'>('all');
@@ -87,7 +94,17 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
     q: urlQ || undefined,
     sort: urlSort || undefined,
   }), [activeProjectId, urlTag, urlQ, urlSort]);
-  const { data: connectionsPage } = useConnections(listQuery);
+  // #49 连接列表受控分页：过滤条件变化即重置回第 1 页（页码属于特定过滤结果集）。
+  // 「render 期比较 prev」模式（react.dev/learn/you-might-not-need-an-effect 首选）——
+  // effect 内同步 setState 触发级联渲染，react-hooks v7 set-state-in-effect 规则禁止；
+  // 底表查询 useConnections({}) 保持 page=1 不受翻页影响
+  const [connPage, setConnPage] = useState(1);
+  const [prevListQuery, setPrevListQuery] = useState(listQuery);
+  if (prevListQuery !== listQuery) {
+    setPrevListQuery(listQuery);
+    setConnPage(1);
+  }
+  const { data: connectionsPage } = useConnections(listQuery, connPage, 100);
   const connections = useMemo(() => connectionsPage?.data ?? [], [connectionsPage]);
 
   // #42 全量底表（无过滤）：ConnectionModal 依赖下拉 + Via 依赖查找 + 全局视图 chips 聚合源。
@@ -115,6 +132,14 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
   const [editingConnection, setEditingConnection] = useState<ConnectionDetail | null>(null);
   // #40 成员管理弹窗：目标项目（Sidebar 项目菜单进入）
   const [membersProject, setMembersProject] = useState<ProjectListItem | null>(null);
+
+  // #49 移动抽屉开合（<md 视口由汉堡开、遮罩/关闭按钮收）；桌面常驻不受影响
+  const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  /** Sidebar 任一导航动作完成后收起移动抽屉（选项目/开弹窗/登出——抽屉不遮后续界面） */
+  const runThenCloseDrawer = <A,>(fn: (...args: A[]) => void) => (...args: A[]) => {
+    fn(...args);
+    setMobileSidebarOpen(false);
+  };
 
   // 分组（#42 后：tag/q 过滤与项目范围已由服务端完成，客户端只保留全局视图 vpn/all 互斥分组）
   const { hosts, vpns } = useMemo(() => {
@@ -268,35 +293,57 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
     void queryClient.invalidateQueries({ queryKey: ['connections'] });
   };
 
+  // #49 header 标题查找：底表 + 展示页并集（activeProject 可能在任一页）
   const getHeaderTitle = () => {
-    if (activeProjectId && projects && projects.length > 0) {
-      const project = projects.find(p => p.id === activeProjectId);
-      if (project) return project.name;
-    }
+    const project = [...projectsBase, ...projectsDisplay].find(p => p.id === activeProjectId);
+    if (project) return project.name;
     if (viewMode === 'vpn') return 'VPN 网络通道管理';
     return '所有远程资源';
   };
 
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 font-sans selection:bg-blue-500/30">
+      {/* #49 移动抽屉遮罩：点击关闭（button 语义由抽屉内关闭按钮承载，遮罩纯视觉便利） */}
+      {isMobileSidebarOpen && (
+        <div
+          aria-hidden="true"
+          onClick={() => setMobileSidebarOpen(false)}
+          className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm md:hidden"
+        />
+      )}
       <Sidebar
-        projects={projects}
+        projects={projectsDisplay}
         activeProjectId={activeProjectId}
         viewMode={viewMode}
-        onSelectProject={setActiveProjectId}
-        onSelectViewMode={setViewMode}
-        onAddProject={() => { setEditingProject(null); setIsProjectModalOpen(true); }}
-        onEditProject={handleEditProject}
-        onDeleteProject={handleDeleteProject}
-        onManageMembers={setMembersProject}
-        onLogout={handleLogout}
+        onSelectProject={runThenCloseDrawer(setActiveProjectId)}
+        onSelectViewMode={runThenCloseDrawer(setViewMode)}
+        onAddProject={runThenCloseDrawer(() => { setEditingProject(null); setIsProjectModalOpen(true); })}
+        onEditProject={runThenCloseDrawer(handleEditProject)}
+        onDeleteProject={runThenCloseDrawer(handleDeleteProject)}
+        onManageMembers={runThenCloseDrawer(setMembersProject)}
+        onLogout={runThenCloseDrawer(handleLogout)}
         currentUser={currentUser}
-        onOpenUserModal={() => setIsUserModalOpen(true)}
+        onOpenUserModal={runThenCloseDrawer(() => setIsUserModalOpen(true))}
+        projectPage={projectPage}
+        projectTotal={projectsTotal}
+        onProjectPageChange={setProjectPage}
+        isMobileOpen={isMobileSidebarOpen}
+        onMobileClose={() => setMobileSidebarOpen(false)}
       />
 
       <main className="flex-1 flex flex-col h-full overflow-hidden relative bg-slate-950">
-        <header className="h-16 border-b border-slate-800 flex items-center justify-between px-8 bg-slate-950/80 backdrop-blur-md z-10 sticky top-0">
+        <header className="h-16 border-b border-slate-800 flex items-center justify-between px-4 md:px-8 bg-slate-950/80 backdrop-blur-md z-10 sticky top-0">
           <div className="flex items-center gap-4">
+             {/* #49 移动端汉堡：开 Sidebar 抽屉（<md 显示）；aria-expanded 随开合状态 */}
+             <button
+               type="button"
+               onClick={() => setMobileSidebarOpen(true)}
+               aria-label="打开导航菜单"
+               aria-expanded={isMobileSidebarOpen}
+               className="md:hidden text-slate-400 hover:text-white p-2 -ml-2 rounded-lg hover:bg-white/5 transition-colors"
+             >
+               <Menu size={22} />
+             </button>
              <h2 className="text-lg font-bold text-white flex items-center gap-2 animate-in fade-in slide-in-from-left-2">
                {viewMode === 'vpn' && !activeProjectId ? <Network className="text-indigo-400" /> : <Server className="text-blue-400" />}
                {getHeaderTitle()}
@@ -307,8 +354,8 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
           </div>
 
           <div className="flex items-center gap-6">
-             {/* Online Users Avatar Stack - Dynamic Spacing & Gradient */}
-             <div className="flex items-center gap-4 animate-in fade-in duration-500">
+             {/* Online Users Avatar Stack - Dynamic Spacing & Gradient（#49 小屏隐藏：375px 宽度放不下，在线人数非移动关键信息） */}
+             <div className="hidden md:flex items-center gap-4 animate-in fade-in duration-500">
                 <div className="flex items-center h-8 pl-2">
                   {onlineUsers.slice(0, 10).map((u, i) => {
                     const count = Math.min(onlineUsers.length, 10);
@@ -353,7 +400,8 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
             {/* #37 通知中心：铃铛 + 未读角标 + 下拉未读列表 */}
             <NotificationCenter />
 
-            <div className="relative group">
+            {/* #49 工作台搜索：小屏隐藏（375px 布局收窄；服务端 q 过滤仍可经 URL 进入） */}
+            <div className="relative group hidden md:block">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 w-4 h-4 group-focus-within:text-blue-400 transition-colors" />
               <input
                 type="text"
@@ -374,7 +422,7 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
         </header>
 
         {/* #42 过滤栏：tag chips（单选切换）+ 最近访问排序切换 + 项目视图协议分布 */}
-        <div className="px-8 border-b border-slate-800/50">
+        <div className="px-4 md:px-8 border-b border-slate-800/50">
           <ConnectionFilterBar
             tagOptions={tagOptions}
             activeTag={urlTag}
@@ -385,7 +433,7 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
           />
         </div>
 
-        <div className="flex-1 overflow-y-auto p-8 custom-scrollbar scroll-smooth">
+        <div className="flex-1 overflow-y-auto px-4 py-6 md:p-8 custom-scrollbar scroll-smooth">
           {hosts.length === 0 && vpns.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-slate-500 pb-20 animate-in zoom-in-95 duration-500">
               <div className="w-24 h-24 bg-slate-900/50 border border-slate-800 rounded-full flex items-center justify-center mb-6">
@@ -398,12 +446,6 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
             </div>
           )}
           <div className="max-w-[1920px] mx-auto space-y-10">
-            {/* #42 截断态提示：单页上限 100（完整分页由 #49 接手，当前口径） */}
-            {connectionsPage && connectionsPage.pagination.total > connections.length && (
-              <div className="text-xs text-amber-400/80 bg-amber-500/5 border border-amber-500/20 rounded-lg px-4 py-2.5">
-                已显示前 {connections.length} 条，共 {connectionsPage.pagination.total} 条（超过单页上限 100 条）
-              </div>
-            )}
             {vpns.length > 0 && (
               <section className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                 {activeProjectId && (
@@ -450,6 +492,17 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
                 </div>
               </section>
             )}
+
+            {/* #49 连接列表受控分页 footer：total>0 才渲染（空态由上方空态块承载） */}
+            {(connectionsPage?.pagination.total ?? 0) > 0 && (
+              <Pagination
+                page={connPage}
+                total={connectionsPage?.pagination.total ?? 0}
+                pageSize={100}
+                onPageChange={setConnPage}
+                className="pt-2 pb-8"
+              />
+            )}
           </div>
         </div>
       </main>
@@ -465,7 +518,7 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
         isOpen={isConnectionModalOpen}
         onClose={() => setIsConnectionModalOpen(false)}
         onSave={handleSaveConnection}
-        projects={projects}
+        projects={projectsBase}
         connections={allConnections}
         editingConnection={editingConnection}
         activeProjectId={activeProjectId}

@@ -78,3 +78,13 @@ describe('ResetPasswordPage（票 #29）', () => {
     expect(await screen.findByText('密码重置令牌无效或已过期')).toBeInTheDocument();
   });
 });
+
+describe('a11y：input name/autocomplete（#49）', () => {
+  it('新密码/确认 input autoComplete=new-password（浏览器密码管理器语义）', () => {
+    renderPage();
+    expect(screen.getByLabelText('新密码')).toHaveAttribute('autocomplete', 'new-password');
+    expect(screen.getByLabelText('新密码')).toHaveAttribute('name', 'password');
+    expect(screen.getByLabelText('确认新密码')).toHaveAttribute('autocomplete', 'new-password');
+    expect(screen.getByLabelText('确认新密码')).toHaveAttribute('name', 'confirm-password');
+  });
+});

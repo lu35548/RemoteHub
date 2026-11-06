@@ -115,6 +115,8 @@ const MfaChallengePage: React.FC = () => {
         <input
           type="text"
           inputMode="numeric"
+          name="one-time-code"
+          autoComplete="one-time-code"
           aria-label="动态验证码"
           maxLength={6}
           value={code}
@@ -126,6 +128,8 @@ const MfaChallengePage: React.FC = () => {
       ) : (
         <input
           type="text"
+          name="recovery-code"
+          autoComplete="off"
           aria-label="恢复码"
           value={code}
           onChange={(e) => setCode(e.target.value)}

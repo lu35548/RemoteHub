@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -16,6 +16,11 @@ const state = vi.hoisted(() => ({
   projects: [] as Array<Record<string, unknown>>,
   stats: undefined as { protocols: Record<string, number>; tags: Record<string, number> } | undefined,
   paginationTotal: undefined as number | undefined,
+  // #49 分页参数捕获：展示/底表两侧 page 独立记录（翻页只动展示查询，底表保持 page=1）
+  projectsTotal: undefined as number | undefined,
+  lastConnectionsDisplayPage: undefined as number | undefined,
+  lastConnectionsBasePage: undefined as number | undefined,
+  lastProjectsPages: [] as number[],
 }));
 const connMutations = vi.hoisted(() => ({
   createAsync: vi.fn(),
@@ -27,13 +32,18 @@ const connMutations = vi.hoisted(() => ({
 // mock 数据层：useMe 返回 admin，列表 hooks 返回扁平分页 body（真实运行时形状，T4 教训）
 vi.mock('./api/queries', () => ({
   useMe: vi.fn(() => ({ data: { id: 'u1', username: 'admin', nickname: '管理员', role: 'admin', isActive: true, lastActiveAt: null, createdAt: '2026-01-01' }, isPending: false, isError: false })),
-  useProjects: vi.fn(() => ({ data: { success: true as const, data: state.projects, pagination: { page: 1, pageSize: 200, total: state.projects.length } }, isPending: false })),
+  // #49 捕获 page 实参（底表恒 page=1；展示受控翻页）；pageSize 对齐真实 clamp 100
+  useProjects: vi.fn((page: number = 1) => {
+    state.lastProjectsPages.push(page);
+    return { data: { success: true as const, data: state.projects, pagination: { page, pageSize: 100, total: state.projectsTotal ?? state.projects.length } }, isPending: false };
+  }),
   // 空 filters = 底表调用（返回独立底表数组）；带 q/tag/sort/projectId = 展示列表调用（过滤后列表）。
-  // 两引用分离——若 mock 对两调用返回同一引用，聚合源错误（用了过滤后列表）在测试下不可检出
-  useConnections: vi.fn((filters: Record<string, unknown> = {}) => {
+  // 两引用分离——若 mock 对两调用返回同一引用，聚合源错误（用了初始列表）在测试下不可检出
+  useConnections: vi.fn((filters: Record<string, unknown> = {}, page: number = 1) => {
     const isBaseTable = !('q' in filters || 'tag' in filters || 'sort' in filters || 'projectId' in filters);
+    if (isBaseTable) state.lastConnectionsBasePage = page; else state.lastConnectionsDisplayPage = page;
     const data = isBaseTable ? (state.allConnections ?? state.connections) : state.connections;
-    return { data: { success: true as const, data, pagination: { page: 1, pageSize: 100, total: state.paginationTotal ?? data.length } }, isPending: false };
+    return { data: { success: true as const, data, pagination: { page, pageSize: 100, total: state.paginationTotal ?? data.length } }, isPending: false };
   }),
   // #42 项目连接统计（仅项目视图消费；全局视图 enabled false → data undefined）
   useConnectionStats: vi.fn(() => ({ data: state.stats })),
@@ -116,6 +126,10 @@ beforeEach(() => {
   state.projects = [];
   state.stats = undefined;
   state.paginationTotal = undefined;
+  state.projectsTotal = undefined;
+  state.lastConnectionsDisplayPage = undefined;
+  state.lastConnectionsBasePage = undefined;
+  state.lastProjectsPages = [];
 });
 
 describe('App 冒烟（T4）', () => {
@@ -308,12 +322,13 @@ describe('工作台过滤栏与 URL 联动（#42）', () => {
     expect(within(screen.getByLabelText('协议分布')).getByText('桌面远程')).toBeInTheDocument();
   });
 
-  it('截断态：total 超单页上限 → 「已显示前 N 条，共 M 条」提示', () => {
+  it('#49 分页 footer 取代截断横幅：total 150 → 「共 150 条」翻页可见全量（横幅删除）', () => {
     state.connections = [hostConn];
     state.paginationTotal = 150;
     renderApp();
 
-    expect(screen.getByText(/已显示前 1 条，共 150 条/)).toBeInTheDocument();
+    expect(screen.getByText('共 150 条')).toBeInTheDocument();
+    expect(screen.queryByText(/已显示前/)).not.toBeInTheDocument();
   });
 
   it('过滤空态：URL q 生效 + 结果为空 → 「未找到匹配的资源」（区别于无资源空态）', () => {
@@ -332,5 +347,44 @@ describe('工作台过滤栏与 URL 联动（#42）', () => {
     // 候选集来自底表：「生产环境」（hostConn）与「备份」（仅底表有）都在
     expect(screen.getByRole('button', { name: /#生产环境/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /#备份/ })).toBeInTheDocument();
+  });
+});
+
+describe('#49 分页（连接列表 + Sidebar 项目列表）', () => {
+  const projectItem = {
+    id: 'p1', name: '默认项目', icon: 'server',
+    createdBy: { id: 'u1', nickname: '管理员' }, updatedBy: { id: 'u1', nickname: '管理员' },
+    createdAt: '2026-01-01', updatedAt: '2026-01-01',
+  };
+
+  it('连接 total 105 → footer「共 105 条」；点下一页 → 展示查询 page=2、底表保持 page=1', () => {
+    state.connections = [hostConn];
+    state.paginationTotal = 105;
+    renderApp();
+    expect(screen.getByText('共 105 条')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+    expect(state.lastConnectionsDisplayPage).toBe(2);
+    expect(state.lastConnectionsBasePage).toBe(1);
+  });
+
+  it('切项目重置连接分页回第 1 页（页码属于特定过滤结果集）', () => {
+    state.connections = [hostConn];
+    state.paginationTotal = 105;
+    state.projects = [projectItem];
+    state.projectsTotal = 0; // Sidebar 分页 footer 不渲染，避免双「下一页」按钮歧义
+    renderApp();
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+    expect(state.lastConnectionsDisplayPage).toBe(2);
+    fireEvent.click(screen.getByText('默认项目'));
+    expect(state.lastConnectionsDisplayPage).toBe(1);
+  });
+
+  it('Sidebar 项目分页：projectsTotal 205 → footer「共 205 条」；下一页 → useProjects 含 page=2 调用', () => {
+    state.projects = [projectItem];
+    state.projectsTotal = 205;
+    renderApp();
+    expect(screen.getByText('共 205 条')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+    expect(state.lastProjectsPages).toContain(2);
   });
 });

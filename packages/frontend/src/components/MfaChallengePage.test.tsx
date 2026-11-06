@@ -187,3 +187,13 @@ describe('MfaChallengePage（票 #31）', () => {
     expect(getMfaPending()).toBeNull();
   });
 });
+
+describe('a11y：input name/autocomplete（#49）', () => {
+  it('动态码 autoComplete=one-time-code', () => {
+    setMfaPending({ mfaPending: true, mfaStage: 'verify', mfaToken: 'mt' });
+    renderPage();
+    expect(screen.getByLabelText('动态验证码')).toHaveAttribute('autocomplete', 'one-time-code');
+    const totpInput = screen.getByLabelText('动态验证码');
+    expect(totpInput).toHaveAttribute('name', 'one-time-code');
+  });
+});

@@ -61,3 +61,11 @@ describe('ForgotPasswordPage（票 #29）', () => {
     expect(screen.queryByText(/请求已提交/)).not.toBeInTheDocument();
   });
 });
+
+describe('a11y：input name/autocomplete（#49）', () => {
+  it('账号 input name=username + autoComplete=username', () => {
+    renderPage();
+    expect(screen.getByLabelText('账号')).toHaveAttribute('name', 'username');
+    expect(screen.getByLabelText('账号')).toHaveAttribute('autocomplete', 'username');
+  });
+});

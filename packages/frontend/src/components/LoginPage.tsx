@@ -64,8 +64,10 @@ const LoginPage: React.FC = () => {
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider ml-1">账号</label>
               <div className="relative group">
                 <User className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-blue-400 transition-colors" size={18} />
-                <input 
-                  type="text" 
+                <input
+                  type="text"
+                  name="username"
+                  autoComplete="username"
                   value={username}
                   onChange={e => setUsername(e.target.value)}
                   className="w-full bg-slate-950/50 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-white placeholder:text-slate-600 focus:ring-2 focus:ring-blue-600/50 focus:border-blue-500/50 outline-none transition-all shadow-inner"
@@ -79,8 +81,10 @@ const LoginPage: React.FC = () => {
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider ml-1">密码</label>
               <div className="relative group">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-blue-400 transition-colors" size={18} />
-                <input 
-                  type="password" 
+                <input
+                  type="password"
+                  name="password"
+                  autoComplete="current-password"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
                   className="w-full bg-slate-950/50 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-white placeholder:text-slate-600 focus:ring-2 focus:ring-blue-600/50 focus:border-blue-500/50 outline-none transition-all shadow-inner"

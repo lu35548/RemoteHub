@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { LayoutGrid, Plus, Monitor, Network, PanelLeftClose, PanelLeftOpen, Search, X, LogOut, Settings, MoreVertical, Edit2, Trash2, LayoutDashboard, Users } from 'lucide-react';
 import type { ProjectListItem, UserPublic } from '@remotehub/shared';
 import { Tooltip } from './UIComponents';
+import { Pagination } from './Pagination';
 import { ProjectIcon } from './ProjectIcons';
 
 interface SidebarProps {
@@ -19,6 +20,13 @@ interface SidebarProps {
   onLogout: () => void;
   currentUser: UserPublic;
   onOpenUserModal: () => void;
+  /** #49 项目列表受控分页（page state 在 App 层，服务端分页） */
+  projectPage?: number;
+  projectTotal?: number;
+  onProjectPageChange?: (page: number) => void;
+  /** #49 移动抽屉（<md 生效；桌面常驻不受影响） */
+  isMobileOpen?: boolean;
+  onMobileClose?: () => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -33,7 +41,12 @@ const Sidebar: React.FC<SidebarProps> = ({
   onManageMembers,
   onLogout,
   currentUser,
-  onOpenUserModal
+  onOpenUserModal,
+  projectPage = 1,
+  projectTotal = 0,
+  onProjectPageChange,
+  isMobileOpen = false,
+  onMobileClose,
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -75,11 +88,14 @@ const Sidebar: React.FC<SidebarProps> = ({
   }, [projectMenuOpenId]);
 
   return (
-    <div 
+    <div
       className={`
-        h-full flex flex-col border-r border-white/5 bg-slate-950/80 backdrop-blur-xl transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1.0)] relative z-20
-        ${isCollapsed ? 'w-[80px]' : 'w-[280px]'}
+        fixed inset-y-0 left-0 z-40 h-full flex flex-col border-r border-white/5 bg-slate-950/80 backdrop-blur-xl md:static md:z-20 md:shrink-0
+        transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1.0)]
+        ${isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+        w-[280px] ${isCollapsed ? 'md:w-[80px]' : 'md:w-[280px]'}
       `}
+      aria-label="主导航"
     >
       {/* Header Area */}
       <div className="h-20 flex items-center justify-between px-6 border-b border-white/5 flex-shrink-0">
@@ -92,12 +108,24 @@ const Sidebar: React.FC<SidebarProps> = ({
           </h1>
         </div>
         
-        <button 
+        {/* #49 桌面折叠按钮：移动抽屉隐藏（折叠是桌面语义）；a11y aria-label 落位 */}
+        <button
           onClick={() => setIsCollapsed(!isCollapsed)}
-          className={`text-slate-500 hover:text-white transition-colors p-2 rounded-lg hover:bg-white/5 active:scale-90 duration-200 ${isCollapsed ? 'mx-auto' : ''}`}
+          aria-label="折叠侧栏"
+          className={`text-slate-500 hover:text-white transition-colors p-2 rounded-lg hover:bg-white/5 active:scale-90 duration-200 hidden md:block ${isCollapsed ? 'mx-auto' : ''}`}
         >
           {isCollapsed ? <PanelLeftOpen size={20} /> : <PanelLeftClose size={20} />}
         </button>
+        {/* #49 移动抽屉关闭按钮（仅抽屉打开时渲染，<md 显示） */}
+        {isMobileOpen && (
+          <button
+            onClick={onMobileClose}
+            aria-label="关闭导航菜单"
+            className="text-slate-500 hover:text-white transition-colors p-2 rounded-lg hover:bg-white/5 active:scale-90 duration-200 md:hidden"
+          >
+            <X size={20} />
+          </button>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-6 custom-scrollbar space-y-8 overflow-x-hidden">
@@ -263,6 +291,11 @@ const Sidebar: React.FC<SidebarProps> = ({
             ))}
           </div>
         </div>
+
+        {/* #49 项目列表受控分页 footer：total>0 才渲染；折叠态隐藏（紧凑模式不放分页） */}
+        {!isCollapsed && projectTotal > 0 && onProjectPageChange && (
+          <Pagination page={projectPage} total={projectTotal} pageSize={100} onPageChange={onProjectPageChange} className="mt-2 px-1" />
+        )}
       </div>
 
       {/* Footer */}
