@@ -5,6 +5,7 @@ import type { ProjectListItem, UserPublic } from '@remotehub/shared';
 import { Tooltip } from './UIComponents';
 import { Pagination } from './Pagination';
 import { ProjectIcon } from './ProjectIcons';
+import { ARCHIVED_LIST_PAGE_SIZE } from '../constants';
 import type { ProjectListItemWithStatus } from '../api/queries';
 
 interface SidebarProps {
@@ -42,6 +43,9 @@ interface SidebarProps {
   onTransferProject?: (project: ProjectListItem) => void;
   /** 恢复入口回调（App 层 mutation；缺省 = 归档区不渲染） */
   onRestoreProject?: (project: ProjectListItemWithStatus) => void;
+  /** #48 rev：归档区条目点击（App 层据此记录归档视图事实——与归档列表当前页解耦的只读态判定，
+   *  见 App.tsx archivedView 注记；在 onSelectProject 之后调用，App 侧顺序依赖） */
+  onSelectArchivedProject?: (project: ProjectListItemWithStatus) => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -70,6 +74,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   onCopyProject,
   onTransferProject,
   onRestoreProject,
+  onSelectArchivedProject,
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -375,7 +380,8 @@ const Sidebar: React.FC<SidebarProps> = ({
           </div>
 
           {/* #48 归档折叠视图：默认收起（归档项目「工作台默认隐藏」语义）、折叠态隐藏（紧凑模式）。
-              条目点击进入归档项目视图（App 层识别 status 切只读态）；恢复入口 owner|admin 可见（对齐后端 restore 权限门） */}
+              条目点击进入归档项目视图（onSelectArchivedProject 回传完整对象，App 层记只读态事实，
+              #48 rev 与归档列表当前页解耦）；恢复入口 owner|admin 可见（对齐后端 restore 权限门） */}
           {!isCollapsed && (archivedProjects?.length ?? 0) > 0 && (
             <div className="mt-2 pt-3 border-t border-white/5">
               <button
@@ -389,13 +395,13 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <ChevronDown size={12} className={`ml-auto transition-transform ${archivedOpen ? 'rotate-180' : ''}`} />
               </button>
               {archivedOpen && (
-                <div className="mt-1 space-y-1" aria-label="已归档项目区">
+                <div role="region" className="mt-1 space-y-1" aria-label="已归档项目区">
                   {archivedProjects!.map((p) => {
                     const canRestore = currentUser.role === 'admin' || p.currentUserRole === 'owner';
                     return (
                       <div key={p.id} className="flex items-center gap-1 group/arch rounded-lg hover:bg-white/5 transition-colors">
                         <button
-                          onClick={() => { onSelectViewMode('all'); onSelectProject(p.id); }}
+                          onClick={() => { onSelectViewMode('all'); onSelectProject(p.id); onSelectArchivedProject?.(p); }}
                           className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 text-left text-xs text-slate-500 hover:text-slate-200 truncate"
                         >
                           <ProjectIcon name={p.icon} size={14} className="text-slate-600 flex-shrink-0" />
@@ -414,9 +420,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                       </div>
                     );
                   })}
-                  {/* 归档分页：跨页才渲染 footer（单页不占位，复用 Pagination 先例） */}
+                  {/* 归档分页：跨页才渲染 footer（单页不占位，复用 Pagination 先例）；页大小与 App 归档查询同常量 */}
                   {archivedTotal > archivedProjects!.length && onArchivedPageChange && (
-                    <Pagination page={archivedPage} total={archivedTotal} pageSize={100} onPageChange={onArchivedPageChange} className="px-1 pt-1" />
+                    <Pagination page={archivedPage} total={archivedTotal} pageSize={ARCHIVED_LIST_PAGE_SIZE} onPageChange={onArchivedPageChange} className="px-1 pt-1" />
                   )}
                 </div>
               )}

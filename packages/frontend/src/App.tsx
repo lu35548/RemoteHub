@@ -20,6 +20,7 @@ import NotificationCenter from './components/NotificationCenter';
 import ConnectionFilterBar, { type TagOption, type ConnectionSortTarget } from './components/ConnectionFilterBar';
 import { useUI } from './components/UIComponents';
 import { errMsg } from './utils';
+import { ARCHIVED_LIST_PAGE_SIZE } from './constants';
 import { Pagination } from './components/Pagination';
 import { getAvatarColor } from './utils/avatar';
 
@@ -69,21 +70,32 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
 
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'all' | 'vpn'>('all');
+  // #48 转让入口 → 打开弹窗（成员选择与提交在 ProjectTransferModal；转让者身份校验后端 owner 门兜底）
+  const [transferProject, setTransferProject] = useState<ProjectListItem | null>(null);
+
+  // #48 rev（review major 修复）：归档只读态的「事实」与归档列表当前页解耦。
+  // 原实现 activeArchived = archivedProjects.find(id)，archivedProjects 只是归档列表当前页
+  // （≤100 条）——用户在侧栏归档区翻页翻走后 find 落空 → 提示条消失/新建恢复/菜单回归，
+  // 只读态静默解除。现改为显式记录「当前视图来自归档区」事实（选中归档条目时 Sidebar 回传
+  // 完整对象，归档当前项目时由归档前列表项 + status 构造），只读判定纯派生：
+  //   activeArchived = activeProjectId === archivedView.id ? archivedView : null
+  // 与归档列表任何一页的数据都无关。事实清除时机：选中非该归档项目（主列表/全局视图）、恢复成功。
+  const [archivedView, setArchivedView] = useState<ProjectListItemWithStatus | null>(null);
 
   // #48 归档列表（挂载即拉：折叠钮计数需要 total；queryKey ['projects','archived',…] 归属 projects 前缀族，
   // 四操作 mutation invalidate ['projects'] 时主列表与归档列表同步刷新）
   const [archivedPage, setArchivedPage] = useState(1);
-  const { data: archivedPageData } = useArchivedProjects(archivedPage, 100);
+  const { data: archivedPageData } = useArchivedProjects(archivedPage, ARCHIVED_LIST_PAGE_SIZE);
   const archivedProjects = useMemo(() => archivedPageData?.data ?? [], [archivedPageData]);
   const archivedTotal = archivedPageData?.pagination.total ?? 0;
   // M2（#49 rev）同款越界恢复：归档列表缩页时钳回有效页
-  const archivedTotalPages = Math.max(1, Math.ceil(archivedTotal / 100));
+  const archivedTotalPages = Math.max(1, Math.ceil(archivedTotal / ARCHIVED_LIST_PAGE_SIZE));
   if (archivedPage > archivedTotalPages) setArchivedPage(archivedTotalPages);
-  // 当前视图是否归档项目（只读失效态判定）：activeProjectId 命中归档列表
-  const activeArchived = useMemo(
-    () => archivedProjects.find((p) => p.id === activeProjectId) ?? null,
-    [archivedProjects, activeProjectId],
-  );
+  // 当前视图是否归档项目（只读失效态判定）：从归档视图事实派生（见上方 archivedView 注记），
+  // 不再依赖归档列表当前页数据——翻页翻走后只读态保持。项目名/恢复按钮权限等展示数据
+  // 均来自事实记录时的快照（归档视图存续期间成员角色不变：归档项目菜单整遮蔽，无角色变更入口）
+  const activeArchived =
+    activeProjectId && archivedView?.id === activeProjectId ? archivedView : null;
 
   // #42 过滤态从 URL 还原（q/tag/sort）：URL 是唯一真相源，无本地镜像态
   const [searchParams, setSearchParams] = useSearchParams();
@@ -256,7 +268,9 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
       onConfirm: async () => {
         try {
           await archiveMutation.mutateAsync(project.id);
-          // 归档后不跳走：留在项目视图切只读态（activeArchived 由归档列表 invalidate 后命中）
+          // 归档后不跳走：留在项目视图切只读态。归档事实即时记账（归档前列表项 + status 构造，
+          // currentUserRole 沿用归档前值——归档不改成员角色），不依赖归档列表 invalidate 时序
+          setArchivedView({ ...project, status: 'archived' });
           toast('success', '项目已归档', `「${project.name}」已移入归档区`);
         } catch (err) {
           toast('error', '归档失败', errMsg(err, '无法归档项目'));
@@ -269,6 +283,9 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
   const handleRestoreProject = async (project: ProjectListItemWithStatus) => {
     try {
       await restoreMutation.mutateAsync(project.id);
+      // 恢复成功即清归档视图事实：若正处于该项目视图，只读失效态（提示条/新建禁用/卡片只读）随之解除
+      // （旧实现依赖归档列表 invalidate 后 find 落空，invalidate 时序脆弱）
+      if (archivedView?.id === project.id) setArchivedView(null);
       toast('success', '项目已恢复', `「${project.name}」已回到工作台列表`);
     } catch (err) {
       toast('error', '恢复失败', errMsg(err, '无法恢复项目'));
@@ -285,9 +302,6 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
       toast('error', '复制失败', errMsg(err, '无法复制项目'));
     }
   };
-
-  // #48 转让入口 → 打开弹窗（成员选择与提交在 ProjectTransferModal；转让者身份校验后端 owner 门兜底）
-  const [transferProject, setTransferProject] = useState<ProjectListItem | null>(null);
 
   const handleSaveConnection = async (data: CreateConnectionRequest, editingId?: string) => {
     try {
@@ -390,7 +404,12 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
         projects={projectsDisplay}
         activeProjectId={activeProjectId}
         viewMode={viewMode}
-        onSelectProject={runThenCloseDrawer(setActiveProjectId)}
+        onSelectProject={runThenCloseDrawer((id: string | null) => {
+          setActiveProjectId(id);
+          // #48 rev：主列表/全局视图选择即退出归档视图事实；归档区条目经 onSelectArchivedProject
+          // 在其后重新记账（Sidebar 归档条目 onClick 顺序：onSelectProject → onSelectArchivedProject）
+          setArchivedView(null);
+        })}
         onSelectViewMode={runThenCloseDrawer(setViewMode)}
         onAddProject={runThenCloseDrawer(() => { setEditingProject(null); setIsProjectModalOpen(true); })}
         onEditProject={runThenCloseDrawer(handleEditProject)}
@@ -401,6 +420,11 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
         archivedTotal={archivedTotal}
         archivedPage={archivedPage}
         onArchivedPageChange={setArchivedPage}
+        // #48 rev：归档区条目点击 → 记录归档视图事实（含完整对象快照），只读态从事实派生
+        onSelectArchivedProject={runThenCloseDrawer((p: ProjectListItemWithStatus) => {
+          setActiveProjectId(p.id);
+          setArchivedView(p);
+        })}
         onArchiveProject={runThenCloseDrawer(handleArchiveProject)}
         onCopyProject={runThenCloseDrawer(handleCopyProject)}
         onTransferProject={runThenCloseDrawer(setTransferProject)}
@@ -521,10 +545,11 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
           />
         </div>
 
-        {/* #48 归档项目只读提示条：直达连接失效态的显性说明 + 恢复入口（owner|admin 可见，对齐 restore 权限门） */}
+        {/* #48 归档项目只读提示条：直达连接失效态的显性说明 + 恢复入口（owner|admin 可见，对齐 restore 权限门）。
+            role="status"（#48 rev a11y 修复）：归档/恢复切换只读态时 SR 主动播报 */}
         {activeArchived && (
           <div className="px-4 md:px-8 pt-4">
-            <div className="flex items-center justify-between gap-3 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3 animate-in fade-in slide-in-from-top-2 duration-300">
+            <div role="status" className="flex items-center justify-between gap-3 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3 animate-in fade-in slide-in-from-top-2 duration-300">
               <div className="flex items-center gap-2 text-sm text-amber-300 min-w-0">
                 <Archive size={16} className="flex-shrink-0" />
                 <span className="truncate">本项目已归档，资源只读展示；恢复项目后可继续编辑。</span>

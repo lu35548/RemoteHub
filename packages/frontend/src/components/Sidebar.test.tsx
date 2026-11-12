@@ -354,7 +354,8 @@ describe('#48 归档折叠视图', () => {
       </MemoryRouter>,
     );
     await events.click(screen.getByRole('button', { name: /已归档/ }));
-    await events.click(screen.getByRole('button', { name: '恢复 归档项目甲' }));
+    // 恢复按钮 opacity-0 hover 才显示 → fireEvent 直点(userEvent 会静默失效,#40 菜单按钮同坑先例)
+    fireEvent.click(screen.getByRole('button', { name: '恢复 归档项目甲' }));
     expect(onRestoreProject).toHaveBeenCalledWith(archived[0]);
   });
 
@@ -378,5 +379,41 @@ describe('#48 归档折叠视图', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: '折叠侧栏' }));
     expect(screen.queryByRole('button', { name: /已归档/ })).not.toBeInTheDocument();
+  });
+
+  // #48 rev（review 修复项 6）：归档区 Pagination 跨页渲染分支两侧覆盖
+  // （渲染条件 archivedTotal > archivedProjects.length，页大小 100）
+  const hundredArchived = Array.from({ length: 100 }, (_, i) => ({
+    id: `pa-${i}`, name: `归档项目 ${i}`, icon: 'server', status: 'archived' as const,
+    currentUserRole: 'owner' as const, createdBy: { id: 'u1', nickname: '项目所有者' },
+    updatedBy: { id: 'u1', nickname: '项目所有者' }, createdAt: '2026-01-01', updatedAt: '2026-01-01',
+  }));
+
+  it('跨页(150 > 100)→ Pagination 渲染,下一页回调携带 page=2', async () => {
+    const onArchivedPageChange = vi.fn();
+    const events = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <Sidebar {...props} archivedProjects={hundredArchived} archivedTotal={150} onArchivedPageChange={onArchivedPageChange} onRestoreProject={vi.fn()} />
+      </MemoryRouter>,
+    );
+    await events.click(screen.getByRole('button', { name: /已归档/ }));
+    expect(screen.getByText('共 150 条')).toBeInTheDocument();
+    expect(screen.getByText('第 1 / 2 页')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+    expect(onArchivedPageChange).toHaveBeenCalledWith(2);
+  });
+
+  it('单页(5 = 5)→ Pagination 不渲染', async () => {
+    const five = hundredArchived.slice(0, 5);
+    const events = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <Sidebar {...props} archivedProjects={five} archivedTotal={5} onArchivedPageChange={vi.fn()} onRestoreProject={vi.fn()} />
+      </MemoryRouter>,
+    );
+    await events.click(screen.getByRole('button', { name: /已归档/ }));
+    expect(screen.queryByText('共 5 条')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '下一页' })).not.toBeInTheDocument();
   });
 });

@@ -66,8 +66,11 @@ vi.mock('./api/queries', () => ({
   // 票 #43：克隆 mutation（factory 与 queries.ts 导出同步——缺 key 炸 "No export defined on the mock"）
   useCloneConnection: vi.fn(() => ({ mutateAsync: connMutations.cloneAsync })),
   // 票 #48：项目四操作 mutation + 归档列表查询（factory 与 queries.ts 导出同步——缺 key 炸 "No export defined on the mock"）
+  // #48 rev 按页切片（页大小 100，对齐真实分页端点）：翻页返回不同页数据，
+  // 「翻页翻走后只读态保持」用例依赖第二页不含当前项目（回归 major 修复）
   useArchivedProjects: vi.fn((page: number = 1) => {
-    return { data: { success: true as const, data: state.archivedProjects, pagination: { page, pageSize: 100, total: state.archivedTotal ?? state.archivedProjects.length } }, isPending: false };
+    const data = state.archivedProjects.slice((page - 1) * 100, page * 100);
+    return { data: { success: true as const, data, pagination: { page, pageSize: 100, total: state.archivedTotal ?? state.archivedProjects.length } }, isPending: false };
   }),
   useArchiveProject: vi.fn(() => ({ mutateAsync: projectMutations.archiveAsync })),
   useRestoreProject: vi.fn(() => ({ mutateAsync: projectMutations.restoreAsync })),
@@ -529,6 +532,47 @@ describe('#48 项目管理增强(归档/复制/转让/归档视图)', () => {
     // mock 恒返回归档列表故 UI 层不断言提示条消失,数据回路由 queries 层缓存失效语义保证)
     await events.click(screen.getByRole('button', { name: '恢复项目' }));
     await waitFor(() => expect(projectMutations.restoreAsync).toHaveBeenCalledWith('p-arch'));
+  });
+
+  it('复制重名 409(PROJ_001) → 错误 toast 透出后端中文消息(errMsg 链路)', async () => {
+    state.projects = [ownerProject];
+    // ApiErrorResponse 形状(PROJ_001 重名竞态 P2002 → 409),errMsg 取 error.message——对齐 ProjectTransferModal VAL_001 用例写法
+    projectMutations.copyAsync.mockRejectedValueOnce({ error: { message: '项目名称已存在' } });
+    const events = userEvent.setup();
+    renderApp();
+
+    fireEvent.click(screen.getByRole('button', { name: '项目操作 默认项目' }));
+    await events.click(screen.getByText('复制项目'));
+    expect(await screen.findByText('复制失败')).toBeInTheDocument();
+    expect(await screen.findByText('项目名称已存在')).toBeInTheDocument();
+  });
+
+  it('归档区翻页后只读态保持:第二页不含当前项目,提示条仍在 + 新建仍禁用(只读事实与归档列表当前页解耦)', async () => {
+    // 150 条归档:p-arch 居第 1 页首位,第 2 页(后 50 条)不含它——翻页翻走后只读态不得静默解除
+    const manyArchived = [
+      archivedProject,
+      ...Array.from({ length: 149 }, (_, i) => ({
+        id: `p-arch-${i + 1}`, name: `归档项目 ${i + 1}`, icon: 'cloud', status: 'archived', currentUserRole: 'viewer',
+        createdBy: { id: 'u1', nickname: '管理员' }, updatedBy: { id: 'u1', nickname: '管理员' },
+        createdAt: '2026-01-01', updatedAt: '2026-01-01',
+      })),
+    ];
+    state.archivedProjects = manyArchived;
+    const events = userEvent.setup();
+    renderApp();
+
+    await events.click(screen.getByRole('button', { name: /已归档/ }));
+    // 跨页 → Pagination 渲染(共 150 条);进入归档项目只读态
+    expect(screen.getByText('共 150 条')).toBeInTheDocument();
+    await events.click(screen.getByText('已归档项目'));
+    expect(screen.getByText(/本项目已归档/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /新建资源/ })).toBeDisabled();
+
+    // 翻到第 2 页(mock 按页 slice,第二页不含 p-arch)——只读态必须保持(修复前此处红:提示条消失/新建恢复)
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+    expect(await screen.findByText('归档项目 149')).toBeInTheDocument();
+    expect(screen.getByText(/本项目已归档/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /新建资源/ })).toBeDisabled();
   });
 
   it('归档区恢复入口:owner 归档项「恢复 X」→ restoreAsync(id) → 成功 toast', async () => {

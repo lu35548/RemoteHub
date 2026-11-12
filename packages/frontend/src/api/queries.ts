@@ -186,7 +186,7 @@ export function useDeleteProject() {
 
 // ─── #48 项目管理增强（归档/恢复/复制/转让）───
 // API 形状两个事实（读 #47 backend projectService 定案，非猜测）：
-// ① 列表项/详情均含 status（'active'|'archived' 纯 string）——shared 类型本批被 impl-50 独占，
+// ① 列表项/详情均含 status（'active'|'archived' 纯 string）——shared 类型本批被 #50 独占，
 //    走本地镜像（BackupListItem 先例），合流后迁 shared；
 // ② copy 响应 = detail + clonedFrom + connectionCount（toast「含 N 个连接」消费 connectionCount）。
 

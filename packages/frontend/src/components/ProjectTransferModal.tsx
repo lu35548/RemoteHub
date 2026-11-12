@@ -70,7 +70,8 @@ const ProjectTransferModal: React.FC<ProjectTransferModalProps> = ({ isOpen, onC
           选择一位现有成员接收项目所有权。转让后原所有者将降为编辑者。
         </p>
 
-        <div className="space-y-2 max-h-[45vh] overflow-y-auto custom-scrollbar">
+        {/* #48 rev a11y 修复：候选 role="radio" 需 radiogroup 祖先才暴露给辅助技术（方向键导航增强不做，挂账） */}
+        <div role="radiogroup" aria-label="候选成员" className="space-y-2 max-h-[45vh] overflow-y-auto custom-scrollbar">
           {candidates.map((m) => {
             const isSelected = m.userId === selectedUserId;
             return (
