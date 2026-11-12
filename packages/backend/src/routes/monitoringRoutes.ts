@@ -135,6 +135,12 @@ monitoringRoutes.get('/stats/performance', authMiddleware, roleMiddleware('admin
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
+ *       429:
+ *         description: 该用户重置请求已达上限(RESET_003)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
 monitoringRoutes.post(
   '/users/:id/reset-link',

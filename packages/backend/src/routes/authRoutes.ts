@@ -58,11 +58,12 @@ authRoutes.post('/login', auditMiddleware({ action: 'AUTH_LOGIN', resource: 'sec
  *         application/json:
  *           schema:
  *             type: object
- *             required: [username, password, role]
+ *             required: [username, password, nickname]
  *             properties:
  *               username: { type: string }
  *               password: { type: string, format: password }
- *               role: { type: string, enum: [admin, member] }
+ *               role: { type: string, enum: [admin, user], description: 可选,默认 user }
+ *               nickname: { type: string, description: 昵称(必填) }
  *     responses:
  *       201:
  *         description: 用户已创建
@@ -82,6 +83,8 @@ authRoutes.post('/login', auditMiddleware({ action: 'AUTH_LOGIN', resource: 'sec
  *               $ref: '#/components/schemas/ErrorResponse'
  *       429:
  *         $ref: '#/components/responses/RateLimited'
+ *       422:
+ *         $ref: '#/components/responses/ValidationError'
  */
 authRoutes.post('/register', authMiddleware, auditMiddleware({ action: 'USER_CREATE', resource: 'user' }), roleMiddleware('admin'), authController.register);
 /**
@@ -174,6 +177,8 @@ authRoutes.get('/me', authMiddleware, authController.me);
  *               $ref: '#/components/schemas/ErrorResponse'
  *       401:
  *         $ref: '#/components/responses/Unauthorized'
+ *       422:
+ *         $ref: '#/components/responses/ValidationError'
  */
 authRoutes.post('/change-password', authMiddleware, auditMiddleware({ action: 'AUTH_PASSWORD_CHANGE', resource: 'security' }), authController.changePassword);
 /**
@@ -198,6 +203,8 @@ authRoutes.post('/change-password', authMiddleware, auditMiddleware({ action: 'A
  *               $ref: '#/components/schemas/SuccessResponse'
  *       401:
  *         $ref: '#/components/responses/Unauthorized'
+ *       422:
+ *         $ref: '#/components/responses/ValidationError'
  */
 authRoutes.patch('/profile', authMiddleware, auditMiddleware({ action: 'AUTH_PROFILE_UPDATE', resource: 'security' }), authController.updateProfile);
 /**
@@ -266,6 +273,8 @@ authRoutes.get('/online', authMiddleware, authController.getOnlineUsers);
  *               $ref: '#/components/schemas/SuccessResponse'
  *       429:
  *         $ref: '#/components/responses/RateLimited'
+ *       422:
+ *         $ref: '#/components/responses/ValidationError'
  */
 authRoutes.post(
   '/forgot-password',
@@ -303,6 +312,8 @@ authRoutes.post(
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
+ *       422:
+ *         $ref: '#/components/responses/ValidationError'
  */
 authRoutes.post(
   '/reset-password',
@@ -319,6 +330,7 @@ authRoutes.post(
  * /api/v1/auth/mfa/setup:
  *   post:
  *     summary: 发起 2FA 绑定(mfa 挑战 token;返回 secret+otpauthUri)
+ *     description: security 标 bearerAuth 系折中呈现;实际守卫为 mfaAuthMiddleware(aud:'mfa' 短时挑战 token,login 二段签发),非常规 access token。
  *     tags: [Auth]
  *     security:
  *       - bearerAuth: []
@@ -340,6 +352,7 @@ authRoutes.post('/mfa/setup', mfaSetupConfirmLimiter, mfaAuthMiddleware, authCon
  * /api/v1/auth/mfa/confirm:
  *   post:
  *     summary: 确认 2FA 绑定(校验一次 TOTP 后落库,返回恢复码)
+ *     description: security 标 bearerAuth 系折中呈现;实际守卫为 mfaAuthMiddleware(aud:'mfa' 短时挑战 token,login 二段签发),非常规 access token。
  *     tags: [Auth]
  *     security:
  *       - bearerAuth: []
@@ -374,6 +387,8 @@ authRoutes.post('/mfa/setup', mfaSetupConfirmLimiter, mfaAuthMiddleware, authCon
  *               $ref: '#/components/schemas/ErrorResponse'
  *       429:
  *         $ref: '#/components/responses/RateLimited'
+ *       422:
+ *         $ref: '#/components/responses/ValidationError'
  */
 authRoutes.post('/mfa/confirm', mfaSetupConfirmLimiter, mfaAuthMiddleware, authController.mfaConfirm);
 /**
@@ -381,6 +396,7 @@ authRoutes.post('/mfa/confirm', mfaSetupConfirmLimiter, mfaAuthMiddleware, authC
  * /api/v1/auth/mfa/verify:
  *   post:
  *     summary: 2FA 挑战验证(成功换发 access token)
+ *     description: security 标 bearerAuth 系折中呈现;实际守卫为 mfaAuthMiddleware(aud:'mfa' 短时挑战 token,login 二段签发),非常规 access token。
  *     tags: [Auth]
  *     security:
  *       - bearerAuth: []
@@ -414,5 +430,7 @@ authRoutes.post('/mfa/confirm', mfaSetupConfirmLimiter, mfaAuthMiddleware, authC
  *               $ref: '#/components/schemas/ErrorResponse'
  *       429:
  *         $ref: '#/components/responses/RateLimited'
+ *       422:
+ *         $ref: '#/components/responses/ValidationError'
  */
 authRoutes.post('/mfa/verify', mfaVerifyLimiter, mfaAuthMiddleware, authController.mfaVerify);

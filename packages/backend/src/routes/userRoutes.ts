@@ -110,7 +110,7 @@ userRoutes.get('/:id', authMiddleware, roleMiddleware('admin'), userController.g
  *       content:
  *         application/json:
  *           schema: { type: object }
- *           example: { role: "admin", enabled: true }
+ *           example: { role: "admin", isActive: true }
  *     responses:
  *       200:
  *         description: 更新后的用户
@@ -128,6 +128,8 @@ userRoutes.get('/:id', authMiddleware, roleMiddleware('admin'), userController.g
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
+ *       422:
+ *         $ref: '#/components/responses/ValidationError'
  */
 userRoutes.patch('/:id', authMiddleware, auditMiddleware({ action: 'USER_UPDATE', resource: 'user' }), roleMiddleware('admin'), userController.updateUser);
 /**
@@ -156,6 +158,12 @@ userRoutes.patch('/:id', authMiddleware, auditMiddleware({ action: 'USER_UPDATE'
  *         $ref: '#/components/responses/Forbidden'
  *       404:
  *         description: 用户不存在(USER_002)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       409:
+ *         description: 用户是项目唯一 owner,无法删除(MEMBER_003)
  *         content:
  *           application/json:
  *             schema:

@@ -2,7 +2,8 @@
 // 保证 import 不触发 bootstrap/seed/cleaner,先例与 probeRoutes.test.ts 同源纪律)。
 // 对账口径:路由表 59 个操作(multiline grep 盘点,含 4 个跨行定义端点)——精确相等,不是 ≥。
 import '../test/helpers/env.js'; // 环境前置:必须第一个 import(拉起 server.ts→config/env.ts 的 requireEnv 快照)
-import express, { type Express } from 'express';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 
@@ -144,6 +145,9 @@ describe('Swagger /api-docs(票 #51,非生产环境挂载)', () => {
     expect(schema).toBeDefined();
     const topKeys = Object.keys(schema?.properties ?? {}).sort();
     expect(topKeys).toEqual(['error', 'success']);
+    // review 修复(批 12 项 11):锁死 v1 四字段漂移防线两要素,防删定义行不红
+    expect(schema?.additionalProperties).toBe(false);
+    expect(schema?.required).toEqual(expect.arrayContaining(['success', 'error']));
     const errorKeys = Object.keys(
       (schema?.properties?.error as { properties?: Record<string, unknown> } | undefined)?.properties ?? {},
     ).sort();
@@ -180,20 +184,27 @@ describe('Swagger /api-docs(票 #51,非生产环境挂载)', () => {
 });
 
 describe('生产环境不暴露 /api-docs(生产真机 404 由 lead compose 栈验收,此处锁分支逻辑)', () => {
-  it("isSwaggerEnabled:仅 production=false,development/test/staging 均 true", () => {
+  it("isSwaggerEnabled:仅 production=false(大小写不敏感),development/test/staging 均 true", () => {
     expect(isSwaggerEnabled('production')).toBe(false);
+    expect(isSwaggerEnabled('Production')).toBe(false); // 项 9:toLowerCase 防 fail-open
     expect(isSwaggerEnabled('development')).toBe(true);
     expect(isSwaggerEnabled('test')).toBe(true);
     expect(isSwaggerEnabled('staging')).toBe(true);
   });
 
-  it('guard=false 时复刻 server.ts 挂载结构 → /api-docs 404(express 默认无路由)', async () => {
-    const prodApp: Express = express();
-    // 与 server.ts 相同的 guard 结构:条件为假则整段挂载不存在
-    if (isSwaggerEnabled('production')) {
-      prodApp.get('/api-docs/swagger.json', (_req, res) => res.json({}));
-    }
-    const res = await request(prodApp).get('/api-docs/swagger.json');
-    expect(res.status).toBe(404);
+  it('server.ts 挂载段被 isSwaggerEnabled guard 包裹(源码文本断言,防删 guard 仍绿)', () => {
+    // review 修复(批 12,双轴同发现):原用例用测试自写 if 副本,属 tautology——删 server.ts
+    // 的 guard 依旧绿。改源码文本断言;server.ts 为 CRLF,只用单行 phrase includes,不做多行锚点。
+    const serverSrc = readFileSync(fileURLToPath(new URL('../server.ts', import.meta.url)), 'utf8');
+    const guardLine = 'if (isSwaggerEnabled(env.NODE_ENV)) {';
+    const jsonRoute = "app.get('/api-docs/swagger.json'";
+    const uiMount = "app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(";
+    expect(serverSrc.includes(guardLine)).toBe(true);
+    expect(serverSrc.includes(jsonRoute)).toBe(true);
+    expect(serverSrc.includes(uiMount)).toBe(true);
+    // 顺序锁死:guard 必须先于两处挂载出现(删 guard 则第一断言红;移出 guard 外则顺序断言红)
+    const guardIdx = serverSrc.indexOf(guardLine);
+    expect(guardIdx).toBeLessThan(serverSrc.indexOf(jsonRoute));
+    expect(guardIdx).toBeLessThan(serverSrc.indexOf(uiMount));
   });
 });

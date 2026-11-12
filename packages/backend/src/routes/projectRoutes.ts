@@ -252,21 +252,15 @@ projectRoutes.delete('/:id', authMiddleware, auditMiddleware({ action: 'PROJECT_
  *                 description: 项目 ID 列表
  *     responses:
  *       200:
- *         description: 批量归档结果(成功/跳过明细)
+ *         description: 批量归档结果;无权/不存在的项目不报错,计入 skipped 明细(逐项目审计在 service 事务内落行)
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/SuccessResponse'
  *       401:
  *         $ref: '#/components/responses/Unauthorized'
- *       403:
- *         $ref: '#/components/responses/Forbidden'
- *       404:
- *         description: 项目不存在(PROJ_002)
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *       422:
+ *         $ref: '#/components/responses/ValidationError'
  */
 projectRoutes.post('/batch-archive', authMiddleware, projectController.batchArchiveProjects);
 /**

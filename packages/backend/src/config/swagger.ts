@@ -4,13 +4,15 @@
 import { fileURLToPath } from 'node:url';
 import swaggerJsdoc from 'swagger-jsdoc';
 import type { SwaggerUiOptions } from 'swagger-ui-express';
+import { ERROR_CODES } from '../utils/appError.js';
 
 /**
  * 生产环境不暴露 /api-docs(票面 AC:生产 404 由 lead compose 栈真机验收;
  * 本函数抽小便于单测分支覆盖——server.ts 挂载 guard 消费。
+ * review 修复(批 12):toLowerCase 防大小写变体(如 'Production')fail-open。
  */
 export function isSwaggerEnabled(nodeEnv: string): boolean {
-  return nodeEnv !== 'production';
+  return nodeEnv.toLowerCase() !== 'production';
 }
 
 // apis glob:routes/*.ts + server.ts(v2 无 model 层,快照 §7)。基于 import.meta.url 构造绝对路径,
@@ -19,22 +21,10 @@ export function isSwaggerEnabled(nodeEnv: string): boolean {
 const routesDir = fileURLToPath(new URL('../routes/', import.meta.url)).replace(/\\/g, '/');
 const serverEntry = fileURLToPath(new URL('../server.ts', import.meta.url)).replace(/\\/g, '/');
 
-// 错误码枚举(单一来源 utils/appError.ts ERROR_CODES + server.ts 限流器 RATE_LIMIT,2026-11-12 盘点)。
-// 文档不撒谎:枚举随 ERROR_CODES 演进人工同步,新码必须补列(集成测试锁 VAL_001/SYS_003/SYS_001 在列)。
-const ERROR_CODE_ENUM = [
-  'AUTH_001', 'AUTH_002', 'AUTH_003', 'AUTH_004', 'AUTH_005', 'AUTH_006',
-  'USER_001', 'USER_002',
-  'CONN_002', 'CONN_003', 'CONN_004', 'CONN_005', 'CONN_006',
-  'PROJ_001', 'PROJ_002',
-  'MEMBER_001', 'MEMBER_002', 'MEMBER_003',
-  'AUDIT_001', 'AUDIT_002',
-  'RESET_001', 'RESET_003',
-  'MFA_001', 'MFA_002', 'MFA_003',
-  'VAL_001', 'SYS_001', 'SYS_002', 'SYS_003',
-  'NOTIF_001', 'NOTIF_002',
-  'BACKUP_001', 'BACKUP_002', 'BACKUP_003',
-  'RATE_LIMIT',
-] as const;
+// 错误码枚举动态生成(review 修复批 12):单一来源 utils/appError.ts ERROR_CODES,
+// 新码进 ERROR_CODES 即自动入文档,无人工同步面;RATE_LIMIT 是限流器 429 的 code
+// (server.ts 硬编码,不在 ERROR_CODES 表内),单独补列。
+const ERROR_CODE_ENUM: string[] = [...Object.keys(ERROR_CODES), 'RATE_LIMIT'];
 
 const swaggerDefinition = {
   openapi: '3.0.0',
@@ -130,17 +120,15 @@ login/register/refresh/forgot-password/mfa 各有专属配额,超限 429(code=RA
       },
     },
     responses: {
-      // 四族复用(v1 先例)+ 本批新增限流/超限——注解里 $ref 引用,控制 YAML 篇幅
+      // 三族复用(Unauthorized/Forbidden/ValidationError)+ 本批新增限流/超限——注解里 $ref 引用,
+      // 控制 YAML 篇幅。NotFound 族已删(review 修复批 12):零 $ref 引用,各端点 404 均为
+      // 内联错误码描述(PROJ_002/CONN_002 等具体码,比泛化 NotFound 更准确)。
       Unauthorized: {
         description: '未认证(AUTH_001 用户名或密码错误 / AUTH_002 令牌过期 / MFA_002 挑战令牌无效)',
         content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } },
       },
       Forbidden: {
         description: '无权限(AUTH_003 / MEMBER_002 项目角色不足 / NOTIF_002)',
-        content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } },
-      },
-      NotFound: {
-        description: '资源不存在(SYS_002 路由不存在 / PROJ_002 / CONN_002 / USER_002 / NOTIF_001 / BACKUP_002)',
         content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } },
       },
       ValidationError: {
