@@ -157,7 +157,19 @@ import { auditRoutes } from './routes/auditRoutes.js';
 import { monitoringRoutes } from './routes/monitoringRoutes.js';
 import { notificationRoutes } from './routes/notificationRoutes.js';
 import { backupRoutes } from './routes/backupRoutes.js';
+import * as swaggerUi from 'swagger-ui-express';
+import { isSwaggerEnabled, swaggerSpec, swaggerUiOptions } from './config/swagger.js';
 import { adminRoutes } from './routes/adminRoutes.js';
+
+// 票 #51 Swagger:/api-docs 仅非生产环境暴露(lead 裁决口径;生产真机 404 由 lead compose 验收)。
+// JSON 端点须先于 swaggerUi.serve 注册(serve 对 /api-docs/* 全拦,后注册永不命中)。
+// 只在路由区追加,不动既有 middleware 栈(批 11 集成用例锁死顺序)。
+if (isSwaggerEnabled(env.NODE_ENV)) {
+  app.get('/api-docs/swagger.json', (_req: Request, res: Response) => {
+    res.json(swaggerSpec);
+  });
+  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, swaggerUiOptions));
+}
 
 // K8s 探针（票 #33）：挂 app 根（K8s 惯例路径 /healthz /readyz，无 /api/v1 前缀）。
 // 探针路径已入 RATE_LIMIT_SKIP_PATHS 白名单：ipMonitor 根挂载处计数豁免 + generalLimiter skip 同源；

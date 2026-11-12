@@ -12,11 +12,130 @@ import * as userController from '../controllers/userController.js';
 
 export const monitoringRoutes: RouterType = Router();
 
+/**
+ * @swagger
+ * /api/v1/admin/dashboard:
+ *   get:
+ *     summary: 运维监控仪表盘(admin)
+ *     tags: [Monitoring]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 仪表盘聚合数据(用户/项目/连接统计)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessResponse'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ */
 monitoringRoutes.get('/dashboard', authMiddleware, roleMiddleware('admin'), monitoringController.getDashboardHandler);
+/**
+ * @swagger
+ * /api/v1/admin/stats/users:
+ *   get:
+ *     summary: 用户活跃统计(admin)
+ *     tags: [Monitoring]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 用户活跃统计(在线人数/最近登录分布)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessResponse'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ */
 monitoringRoutes.get('/stats/users', authMiddleware, roleMiddleware('admin'), monitoringController.getUserStatsHandler);
+/**
+ * @swagger
+ * /api/v1/admin/stats/projects:
+ *   get:
+ *     summary: 项目与连接统计(admin)
+ *     tags: [Monitoring]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 项目/连接分布统计
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessResponse'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ */
 monitoringRoutes.get('/stats/projects', authMiddleware, roleMiddleware('admin'), monitoringController.getProjectStatsHandler);
 // 票 #32 P1-5：性能统计端点（照上述三端点同款门禁；写端点无，审计不挂——读端点先例）
+/**
+ * @swagger
+ * /api/v1/admin/stats/performance:
+ *   get:
+ *     summary: 接口性能统计(admin,环形缓冲)
+ *     tags: [Monitoring]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 按路由模板聚合的请求计数/延迟分位数
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessResponse'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ */
 monitoringRoutes.get('/stats/performance', authMiddleware, roleMiddleware('admin'), monitoringController.getPerformanceHandler);
+/**
+ * @swagger
+ * /api/v1/admin/users/{id}/reset-link:
+ *   post:
+ *     summary: admin 代生成密码重置链接(票 #28)
+ *     tags: [Monitoring]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *         description: 目标用户 ID
+ *     responses:
+ *       200:
+ *         description: 一次性重置链接(供面板复制转交)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/SuccessResponse'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       type: object
+ *                       properties:
+ *                         resetLink: { type: string, example: /reset-password?token=... }
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         description: 用户不存在(USER_002)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
 monitoringRoutes.post(
   '/users/:id/reset-link',
   authMiddleware,

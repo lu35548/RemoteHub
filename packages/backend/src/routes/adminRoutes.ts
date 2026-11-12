@@ -15,5 +15,61 @@ import * as adminDataController from '../controllers/adminDataController.js';
 
 export const adminRoutes: RouterType = Router();
 
+/**
+ * @swagger
+ * /api/v1/admin/export:
+ *   post:
+ *     summary: 全量数据导出 JSON(admin,同 ENCRYPTION_KEY 迁移用)
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 全量导出(projects/connections/members/users 不含密码哈希;含 encryptionKeyFingerprint;密文字段原样搬运)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessResponse'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ */
 adminRoutes.post('/export', authMiddleware, roleMiddleware('admin'), adminDataController.exportData);
+/**
+ * @swagger
+ * /api/v1/admin/import:
+ *   post:
+ *     summary: 全量数据导入(事务 upsert,admin)
+ *     description: 需先校验导出文件 encryptionKeyFingerprint 与当前 ENCRYPTION_KEY 一致;专属 50mb parser,超限 413。
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             description: /export 响应体的全量数据(含 encryptionKeyFingerprint)
+ *     responses:
+ *       200:
+ *         description: 导入完成(返回 upsert 统计)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessResponse'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       413:
+ *         $ref: '#/components/responses/PayloadTooLarge'
+ *       422:
+ *         description: 指纹不匹配/载荷非法(VAL_001)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
 adminRoutes.post('/import', authMiddleware, roleMiddleware('admin'), adminDataController.importData);
