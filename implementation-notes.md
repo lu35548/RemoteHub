@@ -29,6 +29,8 @@
 - [ ] **编辑态 username:'none' 协议遗留值不可清**（批 8）：存量 HTTPS/TODESK 行历史 username 回填后输入框隐藏、静默重提交不可清（数据无损）——是否需要编辑态查表清值交裁决。
 - [ ] **#47 归档项目连接域写禁制未加**（批 10）：归档仅改 status，归档项目的连接写入端点无拦截（API 直写仍成功）——spec「只读展示」按前端视图概念处理，#48 归档前端落地时若需端点级强制再补，交裁决。
 - [x] **#49 移焦真机复验**（批 10）——✅ 2026-11-12 批 11 真机销账：3 轮关→开循环焦点全部落抽屉「关闭导航菜单」按钮（4-reviewer 并行高负载下桌面基线稳定，批 10 transitionend 修复实证）。
+- [ ] **响应码快照测试候选**（批 12）：对账测试只锁 operations 数，注解响应块内部错位（splice 插点错 7 处实录）靠逐端点 responses 键审计才见底——是否固化「响应码快照」测试交裁决（面太宽本票未加）。
+- [ ] **backend 全量 vitest 并发 flaky**（批 12）：751 用例全量首验撞 2 时序断言红（clone 审计行 0 条/WS shutdown readyState CLOSING），单跑绿+全量二验绿实锤 flaky 非回归；候选修法=锁 threads 池（前端 #26 方案 A 先例）或 vitest.retry，交裁决。
 - [ ] **#48 批量归档 UI 立项形态**（批 11）：票面「实施按最小」裁量不接 UI（batch-archive 端点已在 #47 真机验收）；形态候选=管理后台项目页 or 项目列表多选，待裁决。
 - [ ] **#48 转让候选 >20 人只显第一页**（批 11）：useMembers 缺省 pageSize，membersModal 同边界且有提示文案，本弹窗未做——最小实现挂账。
 - [ ] **#50 F1 chunked 残余敞口**（批 11）：Content-Length 预检只挡有 CL 的请求，chunked 无 CL 仍读满才 413——部署层确认 nginx client_max_body_size ≤50mb 留痕即闭环。
@@ -41,6 +43,42 @@
 - [ ] **底表仍限 100**（批 10）：ConnectionModal 项目下拉/Via 依赖查找/全局 chips 走 page=1 底表，>100 时缺项是现状限制——是否扩大，交裁决。
 - [ ] **单项目幂等 vs 批量幂等口径不对称**（批 10）：单项目重复 archive=幂等成功+再落一行审计；批量重复=skipped+零审计——rev-47-std nit,后续票若统一以批量口径为准需同步单项目语义。
 - [ ] **越界页码显示边角**（批 10）：末页末条删除瞬间 footer 可显示「第 2/1 页」（消费方钳制已修,Pagination 组件自身不自正）——rev-49-std nit,记录备查。
+
+---
+
+## [2026-11-12] P1 批 12：#51 Swagger 文档 ✅
+
+**收官数据**：质量门 lead 亲验 **backend 751 / shared 59 / frontend 303**（基线 740/59/303 → +11/+0/+0）六门全 EXIT=0；2 commits（`e1cd6be` feat → `efc3b42` fix）+ 本 docs commit 推 origin；#51 关票带证据评论。真机：AC 三条全过（三层对账 59/production 双 404/三门零）。**#51 关后 P1 26 子票完成 25 张，仅剩 #53（浏览器级总验收）+ 父票 #27 + backlog #54。**
+
+**团队构成**：1× implementer(sonnet) 全量 TDD 红→绿 + 2× reviewer(sonnet) 双轴(批 5-11 配方)+ lead 收口。**#54 裁决后置批 13**:spec 178 行「Swagger(端点票后)」权威口径——#54 新增 markAllRead 端点会重演依赖边违反,且 notificationRoutes.ts 双票同碰。
+
+### Review 战果（两轴 4 报告 → 12 项全修 fix `efc3b42`）
+- spec 轴：**2 major**（register 注解三重失真：虚构 role:'member' 枚举/required 误标/漏必填 nickname——照文档必 422；users PATCH example `enabled` 字段不存在）+ 5 minor（batch-archive 不可达 404/403、DELETE 漏 409、reset-link 漏 429、422 族六段漏列、guard 用例 tautology）+ 1 nit（mfa security 折中说明）。
+- std 轴：0 major 可合，2 minor（ERROR_CODE_ENUM 人工同步腐化、guard 用例零约束力——与 spec 轴互证）+ 4 nit。
+- 修复全部为注解/测试/config 文本，零运行时行为变更（仅 toLowerCase 语义强化）；lead 亲验三门 + tsx 直拉 spec 逐点核对 12 项全体现。
+
+### Tradeoffs
+- **对账测试只锁 operations 数**：响应块内部错位（impl 本轮 splice 插点数错 7 处）对账测试抓到 59→52→56 漂移但定位靠「逐端点 responses 键审计」才见底——响应码快照测试候选挂 OQ（面太宽，impl 交 lead 裁量，本票未加）。
+- **guard 用例锁结构用源码文本断言**（readFileSync+CRLF 安全 phrase）：丑但把「删 guard/移出 guard」变成可回归红项；resetModules 动态 import server 方案因顶层 listen 副作用重被否。
+- **AC2 不借 compose 栈**：compose .env=development 非生产形态，本地 NODE_ENV=production 实测（UI/JSON 双 404+health 200 对照）才是有效生产口径。
+
+### Design decisions(lead 裁决)
+- [2026-11-12] 决策：Swagger UI/JSON 端点路径按票面 AC 口径 **/api-docs**（含 spec「15. Swagger」节同口径「/api-docs 仅非生产暴露」）；design §13 旧口径 `GET /api/v1/docs` 不采用。备选：/api/v1/docs（为何没选：票面 AC 与 spec 两权威源一致，design 为旧稿）。
+- [2026-11-12] 决策：**单 implementer 不拆并行**——注解工作同构性强、单一真相源红线（快照 §4 双配置反例），拆并行有注解风格分裂风险。
+- [2026-11-12] 决策：AC2「生产 404 实测」走**本地 NODE_ENV=production 覆盖起进程**（UI/JSON 双 404 + health 200 对照），不借 compose 栈——compose 的 .env 是 development（Dockerfile 也不设 NODE_ENV），compose 生产形态缺失 NODE_ENV 属既有部署话题非本票范围。
+
+### impl 三个实坑（后续票消费）
+1. **swagger-ui-express 是 CJS 整体导出**：named import 在 esbuild interop 下 `swaggerUi.serve` 为 undefined（server.ts 实炸）——namespace import（`import * as swaggerUi`）修复，类型走 `import type`。
+2. **CRLF 锚点失配**：server.ts 与 12 个 route 文件均 CRLF，多行 Edit 锚点恒失配（memory `crlf-anchor-mismatch` 再应验）——走 CRLF 感知 node 补丁脚本（锚点唯一性计数校验，失败不写回）；中文标点锚点也失配过一次，换纯 ASCII 解决。
+3. **swagger-ui 本体选项（persistAuthorization 等）须经 `swaggerOptions` 透传**——@types 的 SwaggerUiOptions 只覆盖 HTML 壳层字段。
+
+### lead 真机验收（AC 三条全过，feat commit `e1cd6be`）
+- **AC1**：浏览器实测 `/api-docs/`——spec 层 59 ops/48 paths/12 tags 全对上路由表；DOM 渲染层 12 tag 全展开后 opblock 精确 59（注意 Swagger UI 懒渲染：收起 tag 不渲染 opblock，精确计数须逐 tag 点开，且已展开 tag 再点击会 toggle 收起）；console 仅 1 条 Swagger UI 库自身 filter 输入框 a11y issue（上游基线，归 a11y 基线票挂账）。
+- **AC2**：本地 NODE_ENV=production 实测 /api-docs/ 与 /api-docs/swagger.json 双 404，health 200 对照（404 系未挂载而非服务异常）。
+- **AC3**：lead 亲验 eslint/tsc EXIT=0、vitest 751/751。
+
+### Open questions(本批新挂)
+- **backend 全量 vitest 并发 flaky**（批 12 lead 亲验撞红）：751 用例全量首验撞 2 时序断言红（clone 审计行 0 条/WS shutdown readyState 2=CLOSING），单跑 2 文件 23 用例绿 + 全量二验 751 绿——同代码三跑绿/红/绿实锤非本票回归；候选修法=锁 threads 池（前端 #26 方案 A 先例）或 vitest.retry，交裁决。
 
 ---
 
