@@ -79,6 +79,15 @@ export function sanitizeValue(value: unknown, isExcluded = false): unknown {
  */
 export function sanitizationMiddleware(req: Request, _res: Response, next: NextFunction): void {
   try {
+    // 票 #50 review F3:/api/v1/admin/import 路径豁免。备份文件是系统自产受信数据、走 admin
+    // 门禁,导出→导入必须恒等:全局净化会把含「--」(SQL_COMMENT_RE,如存量 name
+    // 'db1--primary')或反引号(CMDI_RE,markdown 代码段)的存量数据 422 整文件拒绝,并剥离
+    // onXxx= 词形(EVENT_ATTR_RE,如 tags 'oncall=x')改写数据——roundtrip 恒等被破坏。
+    // 本中间件为 app 全局挂载(无路径前缀),req.path 即完整路径,无挂载点剥前缀陷阱。
+    if (req.path === '/api/v1/admin/import') {
+      next();
+      return;
+    }
     if (req.body !== null && typeof req.body === 'object') {
       req.body = sanitizeValue(req.body) as typeof req.body;
     }

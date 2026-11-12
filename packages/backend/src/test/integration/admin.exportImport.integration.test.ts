@@ -1,7 +1,11 @@
 // 票 #50 数据导入导出 integration:导出形状(指纹口径/无 passwordHash/含 status/审计不含)/
-// 幂等重导(update 分支不动既有密码)/ 全链路等价(导出→清库→导入:密文字面+可解密/依赖链/
-// members/users 除 passwordHash 与 lastActiveAt)/ 指纹不匹配 422 / 形状与悬空引用 422 无落库/
-// >1mb 大 body(parser 预挂锁死)/ 程序化审计行(SYSTEM_BACKUP/RESTORE 成败皆记,detail 不含密文)
+// 幂等重导(update 分支不动既有密码;updatedAt/lastActiveAt/totpSecret 恒等恢复——review F6/spec-2)/
+// 全链路等价(导出→清库→导入:密文字面+可解密/依赖链/members/users 除 passwordHash 皆恒等——
+// review spec-2① 口径收窄:导出物本无 passwordHash,其余字段全部逐字段等价)/
+// 指纹不匹配 422 / 形状与悬空引用 422 无落库(含 requiredVpnId 悬空——review F10)/
+// >1mb 大 body(parser 预挂锁死)/ 程序化审计行(SYSTEM_BACKUP/RESTORE 成败皆记,detail 不含密文)/
+// review 修复批:CL>50mb 预检 413(F1)/ sanitization 豁免 roundtrip 恒等(F3)/
+// 环依赖两阶段回填(F2)/ 枚举运行时校验 422(F7)/ 审计 detail 脱敏(F5)/ 2FA 用户 roundtrip(spec-2③)
 // 「清库」口径:保留操作者 admin(seed admin 是 authMiddleware 的活凭证,删了 import 本身 401;
 // 真机验收同款——操作者不能删自己),文件内 admin 走 update 分支。
 process.env.RATE_LIMIT_LOGIN_MAX = '1000';
@@ -187,6 +191,16 @@ describe('POST /api/v1/admin/import(幂等重导:update 分支不动既有密码
     // update 分支密码保持(安全语义锁死)
     const hashAfter = (await b.prisma.user.findUniqueOrThrow({ where: { id: userId } })).passwordHash;
     expect(hashAfter).toBe(hashBefore);
+
+    // review F6:updatedAt 恒等——重导显式恢复导出时刻的 updatedAt(@updatedAt 不被导入刷新;
+    // users/projects/connections 三处,锚点=导出文件值,r1/r2 重导也不漂移)
+    const expUser1 = (exported.users as Array<{ id: string; updatedAt: string }>).find((u) => u.id === userId)!;
+    const expProjA = (exported.projects as Array<{ id: string; updatedAt: string }>).find((p) => p.id === projAId)!;
+    const expConnA = (exported.connections as Array<{ name: string; updatedAt: string }>).find((c) => c.name === 'ExA')!;
+    await apiImport(adminToken, exported);
+    expect((await b.prisma.user.findUniqueOrThrow({ where: { id: userId } })).updatedAt.toISOString()).toBe(expUser1.updatedAt);
+    expect((await b.prisma.project.findUniqueOrThrow({ where: { id: projAId } })).updatedAt.toISOString()).toBe(expProjA.updatedAt);
+    expect((await b.prisma.connection.findFirstOrThrow({ where: { name: 'ExA' } })).updatedAt.toISOString()).toBe(expConnA.updatedAt);
   });
 });
 
@@ -239,7 +253,7 @@ describe('全链路等价:导出→清库→导入(AC)', () => {
     expect(dbMembers[0]!.userId).toBe(userId);
     expect(dbMembers[0]!.role).toBe('owner');
 
-    // ── users 等价(passwordHash/lastActiveAt 例外,口径见文件头注释)──
+    // ── users 等价(除 passwordHash 外逐字段恒等——review spec-2①:豁免清单只剩 passwordHash)──
     const expUsers = exported.users as Array<Record<string, unknown>>;
     const dbUsers = await b.prisma.user.findMany();
     expect(dbUsers.length).toBe(expUsers.length);
@@ -250,6 +264,11 @@ describe('全链路等价:导出→清库→导入(AC)', () => {
       expect(du.role).toBe(eu.role);
       expect(du.isActive).toBe(eu.isActive);
       expect(du.twoFactorEnabled).toBe(eu.twoFactorEnabled);
+      // review spec-2②:时间戳与 2FA 密文也恒等搬运(lastActiveAt 此前无断言盲区)
+      expect(du.createdAt.toISOString()).toBe(eu.createdAt);
+      expect(du.updatedAt.toISOString()).toBe(eu.updatedAt);
+      expect(du.lastActiveAt?.toISOString() ?? null).toBe(eu.lastActiveAt);
+      expect(du.totpSecret).toBe(eu.totpSecret);
     }
     // 非 admin 用户密码为占位(随机,与导出前 hash 不同——导出文件本无 hash 可还原)
     const dbUser1 = dbUsers.find((u) => u.id === userId)!;
@@ -268,6 +287,33 @@ describe('全链路等价:导出→清库→导入(AC)', () => {
     const login = await request(b.app).post('/api/v1/auth/login')
       .send({ username: uname, password: 'Member123!' });
     expect(login.status).toBe(401);
+  });
+
+  it('2FA 用户 roundtrip(review spec-2③):twoFactorEnabled+totpSecret 密文字面恒等', async () => {
+    // Prisma 直造 2FA 绑定(totpSecret=AES-256-GCM 密文)——绑定流程本身由 mfa.integration 覆盖,
+    // 此处只验证 #50 的搬运语义:密文字文原样、开关状态不丢
+    const encryption = await import('../../utils/encryption.js');
+    const secretPlain = 'JBSWY3DPEHPK3PXP';
+    await b.prisma.user.update({
+      where: { id: userId },
+      data: { twoFactorEnabled: true, totpSecret: encryption.encrypt(secretPlain) },
+    });
+
+    const exported = (await apiExport(adminToken)).body.data as Record<string, unknown>;
+    const expUser = (exported.users as Array<Record<string, unknown>>).find((u) => u.id === userId)!;
+    expect(expUser.twoFactorEnabled).toBe(true);
+    const expSecret = expUser.totpSecret as string;
+    expect(typeof expSecret).toBe('string');
+    expect(expSecret.startsWith('v1:')).toBe(true);
+
+    await wipeBusinessData();
+    const res = await apiImport(adminToken, exported);
+    expect(res.status).toBe(200);
+
+    const dbUser = await b.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    expect(dbUser.twoFactorEnabled).toBe(true);
+    expect(dbUser.totpSecret).toBe(expSecret); // 密文字面一致(不重加密)
+    expect(encryption.decrypt(dbUser.totpSecret!)).toBe(secretPlain); // 同 KEY 下可解密还原
   });
 });
 
@@ -303,6 +349,15 @@ describe('导入校验失败路径(422 VAL_001,无落库)', () => {
     expect(res.status).toBe(422);
     expect(res.body.error.code).toBe('VAL_001');
     expect(await b.prisma.project.count()).toBe(before);
+
+    // review F10:requiredVpnId 悬空(指向文件外 id)同样 422——文件内依赖完整性对依赖键同口径
+    const danglingVpn = {
+      ...exported,
+      connections: [{ ...(exported.connections as Array<Record<string, unknown>>)[0]!, requiredVpnId: 'no-such-conn' }],
+    };
+    const resVpn = await apiImport(adminToken, danglingVpn);
+    expect(resVpn.status).toBe(422);
+    expect(resVpn.body.error.code).toBe('VAL_001');
   });
 });
 
@@ -350,5 +405,161 @@ describe('程序化审计(SYSTEM_BACKUP / SYSTEM_RESTORE,成败皆记)', () => {
     // 审计行体积护栏:detail 不携带导出 JSON 本体
     expect((row!.detail ?? '').length).toBeLessThan(1000);
     expect(row!.detail).not.toContain('v1:'); // 密文前缀不入审计
+  });
+});
+
+describe('大 body 预检(review F1:CL>50mb 在 auth/parser 之前 413)', () => {
+  it('CL=60mb → 413 SYS_003,不读 body 不落审计行', async () => {
+    const before = await auditCount('SYSTEM_RESTORE');
+    const res = await request(b.app)
+      .post('/api/v1/admin/import')
+      .set('Content-Length', String(60 * 1024 * 1024))
+      .send({});
+    expect(res.status).toBe(413);
+    expect(res.body.error.code).toBe('SYS_003');
+    // 预检先于一切 body 处理与 controller:审计不落行(程序化落行在 controller 层)
+    expect(await auditCount('SYSTEM_RESTORE')).toBe(before);
+  });
+
+  it('CL 未超限的 import 不受预检影响 → 未认证 401(预检只拦 CL>50mb,不误伤)', async () => {
+    const res = await request(b.app).post('/api/v1/admin/import').send({});
+    expect(res.status).toBe(401);
+  });
+});
+
+describe('sanitization 豁免(review F3:导出→导入恒等)', () => {
+  it('name 含 --、description 含反引号、tags 含 onXxx= 的存量数据 roundtrip 字面恒等', async () => {
+    const uniq = Date.now().toString().slice(-6);
+    const proj = await b.prisma.project.create({
+      data: {
+        name: `csv-${uniq}-db1--primary`,
+        description: 'markdown `code` 示例',
+        icon: 'folder',
+        status: 'active',
+        createdBy: adminId,
+        updatedBy: adminId,
+      },
+    });
+    await b.prisma.connection.create({
+      data: {
+        projectId: proj.id,
+        name: `conn-${uniq}-db1--primary`,
+        host: 'h.example.com',
+        protocol: 'SSH',
+        tags: 'oncall=x,prod',
+        notes: '直造备注',
+        createdBy: adminId,
+        updatedBy: adminId,
+      },
+    });
+
+    const exported = (await apiExport(adminToken)).body.data as Record<string, unknown>;
+    const expProj = (exported.projects as Array<Record<string, unknown>>).find((p) => p.id === proj.id)!;
+    expect(expProj.name).toBe(`csv-${uniq}-db1--primary`); // 导出侧恒等(导出不经净化)
+
+    await wipeBusinessData();
+    const res = await apiImport(adminToken, exported);
+    expect(res.status).toBe(200); // 无豁免时:净化 422(-- 命中 SQL_COMMENT_RE)→ 红阶段死此处
+
+    const dbProj = await b.prisma.project.findUniqueOrThrow({ where: { id: proj.id } });
+    const dbConn = await b.prisma.connection.findFirstOrThrow({ where: { projectId: proj.id } });
+    expect(dbProj.name).toBe(`csv-${uniq}-db1--primary`);
+    expect(dbProj.description).toBe('markdown `code` 示例');
+    expect(dbConn.name).toBe(`conn-${uniq}-db1--primary`);
+    expect(dbConn.tags).toBe('oncall=x,prod'); // 无豁免时被 EVENT_ATTR_RE 剥离为 ',prod'
+  });
+});
+
+describe('环依赖两阶段回填(review F2:AC 环图支持)', () => {
+  it('A↔B 互环 + C 自引用:导出→清库→导入后依赖原样', async () => {
+    // Prisma 直建(绕过 API 的 CONN_003 环校验;DB FK 仍要两阶段:趟 1 null 建行,趟 2 回填)
+    const proj = await b.prisma.project.create({
+      data: { name: `ring-proj-${Date.now()}`, status: 'active', createdBy: adminId, updatedBy: adminId },
+    });
+    const mkNull = (name: string) =>
+      b.prisma.connection.create({
+        data: { projectId: proj.id, name, host: 'ring.example.com', protocol: 'SSH', createdBy: adminId, updatedBy: adminId },
+      });
+    const ra = await mkNull('RingA');
+    const rb = await mkNull('RingB');
+    const rc = await mkNull('RingC');
+    await b.prisma.connection.update({ where: { id: ra.id }, data: { requiredVpnId: rb.id } });
+    await b.prisma.connection.update({ where: { id: rb.id }, data: { requiredVpnId: ra.id } });
+    await b.prisma.connection.update({ where: { id: rc.id }, data: { requiredVpnId: rc.id } });
+
+    const exported = (await apiExport(adminToken)).body.data as Record<string, unknown>;
+    await wipeBusinessData();
+    const res = await apiImport(adminToken, exported);
+    expect(res.status).toBe(200);
+
+    const dbRa = await b.prisma.connection.findUniqueOrThrow({ where: { id: ra.id } });
+    const dbRb = await b.prisma.connection.findUniqueOrThrow({ where: { id: rb.id } });
+    const dbRc = await b.prisma.connection.findUniqueOrThrow({ where: { id: rc.id } });
+    expect(dbRa.requiredVpnId).toBe(rb.id); // A→B
+    expect(dbRb.requiredVpnId).toBe(ra.id); // B→A(互环)
+    expect(dbRc.requiredVpnId).toBe(rc.id); // C→C(自引用)
+  });
+});
+
+describe('审计 detail 脱敏(review F5:writeSystemAudit 过 redactDetail)', () => {
+  it('SENSITIVE_FIELDS 值落库为 [REDACTED],非敏感字段透传', async () => {
+    // 动态 import 同代实例(serverBootstrap resetModules 后,静态 import 是占位代)
+    const svc = await import('../../services/adminDataService.js');
+    const before = await auditCount('SYSTEM_RESTORE');
+    await svc.writeSystemAudit({
+      userId: adminId,
+      action: 'SYSTEM_RESTORE',
+      result: 'success',
+      detail: { after: { counts: { x: 1 }, password: 'plaintext-secret', nested: { encryptedPass: 'v1:abc' } } },
+      ip: '10.0.0.1',
+      userAgent: 'vitest-f5',
+    });
+    expect(await auditCount('SYSTEM_RESTORE')).toBe(before + 1);
+    const row = await b.prisma.auditLog.findFirst({
+      where: { action: 'SYSTEM_RESTORE', detail: { contains: '[REDACTED]' } },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(row).not.toBeNull();
+    const detail = JSON.parse(row!.detail ?? '{}') as {
+      after?: { counts?: Record<string, number>; password?: string; nested?: { encryptedPass?: string } };
+    };
+    expect(detail.after?.password).toBe('[REDACTED]');
+    expect(detail.after?.nested?.encryptedPass).toBe('[REDACTED]');
+    expect(detail.after?.counts?.x).toBe(1);
+  });
+});
+
+describe('枚举运行时校验(review F7:非法值 422 VAL_001)', () => {
+  /** 一次性前缀 mini 载荷(引用完整):红阶段无校验时会真写库,前缀隔离不污染其他用例 */
+  function miniPayload(): Record<string, unknown> {
+    const t = '2026-01-01T00:00:00.000Z';
+    return {
+      version: 1,
+      encryptionKeyFingerprint: expectedFingerprint(),
+      users: [{ id: 'enumbad-u1', username: 'enumbadu1', nickname: '', role: 'user', isActive: true, twoFactorEnabled: false, totpSecret: null, lastActiveAt: null, createdAt: t, updatedAt: t }],
+      projects: [{ id: 'enumbad-p1', name: 'enumbad-p1', description: null, icon: 'folder', status: 'active', createdBy: 'enumbad-u1', updatedBy: 'enumbad-u1', createdAt: t, updatedAt: t }],
+      connections: [{ id: 'enumbad-c1', projectId: 'enumbad-p1', name: 'enumbad-c1', host: 'h', port: null, username: null, encryptedPass: null, protocol: 'SSH', vpnType: null, vpnLoginUrl: null, requiredVpnId: null, notes: null, tags: null, lastAccessed: null, createdBy: 'enumbad-u1', updatedBy: 'enumbad-u1', createdAt: t, updatedAt: t }],
+      members: [{ id: 'enumbad-m1', projectId: 'enumbad-p1', userId: 'enumbad-u1', role: 'viewer', addedAt: t }],
+    };
+  }
+
+  it('role/protocol/vpnType/member.role 非法值 → 422,零落库', async () => {
+    const cases: Array<[string, (d: Record<string, unknown>) => void]> = [
+      ['user.role', (d) => { ((d.users as Array<Record<string, unknown>>)[0] as Record<string, unknown>).role = 'superadmin'; }],
+      ['protocol', (d) => { ((d.connections as Array<Record<string, unknown>>)[0] as Record<string, unknown>).protocol = 'TELNET'; }],
+      ['vpnType', (d) => { ((d.connections as Array<Record<string, unknown>>)[0] as Record<string, unknown>).vpnType = 'PPTP'; }],
+      ['member.role', (d) => { ((d.members as Array<Record<string, unknown>>)[0] as Record<string, unknown>).role = 'admin'; }],
+    ];
+    for (const [name, mutate] of cases) {
+      const payload = miniPayload();
+      mutate(payload);
+      const res = await apiImport(adminToken, payload);
+      expect(res.status, `枚举非法值应 422:${name}`).toBe(422);
+      expect(res.body.error.code).toBe('VAL_001');
+    }
+    // 零落库(校验先于事务)
+    expect(await b.prisma.user.count({ where: { id: { startsWith: 'enumbad-' } } })).toBe(0);
+    expect(await b.prisma.project.count({ where: { id: { startsWith: 'enumbad-' } } })).toBe(0);
+    expect(await b.prisma.connection.count({ where: { id: { startsWith: 'enumbad-' } } })).toBe(0);
   });
 });

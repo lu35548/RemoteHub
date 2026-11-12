@@ -4,12 +4,13 @@
 // 导入 = 事务 upsert(id 保持,密文字文原样搬运,不重加密)。
 import crypto from 'node:crypto';
 import type { UserRole } from '@remotehub/shared';
+import { isProtocol, isVpnType, isUserRole, isMemberRole } from '@remotehub/shared';
 import type { ExportData, ExportUser, ExportProject, ExportConnection, ExportMember, ImportResult } from '@remotehub/shared';
 import { prisma } from '../utils/prisma.js';
 import { createAppError, handlePrismaUniqueViolation } from '../utils/appError.js';
 import { getKeyFingerprint } from '../utils/encryption.js';
 import { hashPassword } from '../utils/password.js';
-import { maskIp } from '../middleware/audit.js';
+import { maskIp, redactDetail } from '../middleware/audit.js';
 import { logger } from '../utils/logger.js';
 
 // ─── 导出 ───
@@ -72,7 +73,9 @@ export async function exportData(): Promise<ExportData> {
 
 // ─── 导入 ───
 
-/** 导入载荷运行时形状(元素级校验只锁 id 与引用键;其余字段靠 Prisma 类型收口,不做深度 schema 校验) */
+/** 导入载荷运行时形状(元素级校验锁 id、引用键与枚举谓词——review F7;其余字段不做深度 schema
+ * 校验:project.status 无 shared 谓词仅 backend 内部类型、字符串长度等仍靠 Prisma 类型与
+ * SQLite 列约束收口) */
 interface ImportPayload {
   version: number;
   encryptionKeyFingerprint: string;
@@ -103,6 +106,28 @@ function assertImportable(payload: unknown): asserts payload is ImportPayload {
   // 导入等于写入垃圾,票面钦定 422
   if (payload.encryptionKeyFingerprint !== getKeyFingerprint()) {
     throw createAppError('VAL_001', [{ field: 'encryptionKeyFingerprint', message: '加密密钥指纹不匹配:导出文件来自不同的 ENCRYPTION_KEY,密文无法解密,导入拒绝' }]);
+  }
+  // 枚举谓词校验(review F7):非法枚举值此前会静默落库(SQLite string 列无枚举约束),
+  // 现统一 VAL_001 拒绝。shared 无谓词的枚举(project.status,仅 backend 内部 ProjectStatus
+  // 类型)不校验——残余敞口注明,靠导出侧恒为合法值兜底。
+  for (const u of payload.users as Array<Record<string, unknown>>) {
+    if (typeof u?.role !== 'string' || !isUserRole(u.role)) {
+      throw createAppError('VAL_001', [{ field: 'users', message: `用户 ${String(u?.id ?? '?')} 的 role 值非法: ${String(u?.role ?? '?')}` }]);
+    }
+  }
+  for (const c of payload.connections as Array<Record<string, unknown>>) {
+    if (typeof c?.protocol !== 'string' || !isProtocol(c.protocol)) {
+      throw createAppError('VAL_001', [{ field: 'connections', message: `连接 ${String(c?.id ?? '?')} 的 protocol 值非法: ${String(c?.protocol ?? '?')}` }]);
+    }
+    if (c?.vpnType !== null && c?.vpnType !== undefined && (typeof c.vpnType !== 'string' || !isVpnType(c.vpnType))) {
+      throw createAppError('VAL_001', [{ field: 'connections', message: `连接 ${String(c?.id ?? '?')} 的 vpnType 值非法: ${String(c.vpnType)}` }]);
+    }
+  }
+  for (const m of payload.members as Array<Record<string, unknown>>) {
+    // member.role 可缺省(导入侧回落 'viewer'),显式给出时必须合法
+    if (m?.role !== null && m?.role !== undefined && (typeof m.role !== 'string' || !isMemberRole(m.role))) {
+      throw createAppError('VAL_001', [{ field: 'members', message: `成员 ${String(m?.id ?? '?')} 的 role 值非法: ${String(m.role)}` }]);
+    }
   }
   // 文件内引用完整性:悬空引用到 Prisma 层才炸会留下不可控异常,预校验快速失败
   const projectIds = new Set(
@@ -164,6 +189,8 @@ export async function importData(payload: unknown): Promise<ImportResult> {
             totpSecret: (u.totpSecret ?? null) as string | null,
             lastActiveAt: u.lastActiveAt ? new Date(String(u.lastActiveAt)) : null,
             createdAt: new Date(String(u.createdAt)),
+            // review F6:显式覆盖 @updatedAt,导入恢复导出时刻的时间戳(幂等重导不漂移)
+            updatedAt: new Date(String(u.updatedAt)),
           },
         });
         usersUpdated++;
@@ -181,6 +208,8 @@ export async function importData(payload: unknown): Promise<ImportResult> {
           totpSecret: (u.totpSecret ?? null) as string | null,
           lastActiveAt: u.lastActiveAt ? new Date(String(u.lastActiveAt)) : null,
           createdAt: new Date(String(u.createdAt)),
+          // review F6:同 update 分支
+          updatedAt: new Date(String(u.updatedAt)),
         },
       });
       usersCreated++;
@@ -197,12 +226,14 @@ export async function importData(payload: unknown): Promise<ImportResult> {
           icon: String(p.icon ?? 'folder'), status: String(p.status ?? 'active'),
           createdBy: String(p.createdBy), updatedBy: String(p.updatedBy),
           createdAt: new Date(String(p.createdAt)),
+          updatedAt: new Date(String(p.updatedAt)), // review F6
         },
         update: {
           name: String(p.name), description: (p.description ?? null) as string | null,
           icon: String(p.icon ?? 'folder'), status: String(p.status ?? 'active'),
           createdBy: String(p.createdBy), updatedBy: String(p.updatedBy),
           createdAt: new Date(String(p.createdAt)),
+          updatedAt: new Date(String(p.updatedAt)), // review F6
         },
       });
     }
@@ -223,6 +254,7 @@ export async function importData(payload: unknown): Promise<ImportResult> {
         lastAccessed: c.lastAccessed ? new Date(String(c.lastAccessed)) : null,
         createdBy: String(c.createdBy), updatedBy: String(c.updatedBy),
         createdAt: new Date(String(c.createdAt)),
+        updatedAt: new Date(String(c.updatedAt)), // review F6:同 users/projects
       };
       await tx.connection.upsert({
         where: { id: String(c.id) },
@@ -234,7 +266,11 @@ export async function importData(payload: unknown): Promise<ImportResult> {
       if (c.requiredVpnId) {
         await tx.connection.update({
           where: { id: String(c.id) },
-          data: { requiredVpnId: String(c.requiredVpnId) },
+          data: {
+            requiredVpnId: String(c.requiredVpnId),
+            // review F6:趟 2 回填也须显式覆盖——否则 @updatedAt 在此二次刷新,前功尽弃
+            updatedAt: new Date(String(c.updatedAt)),
+          },
         });
       }
     }
@@ -276,7 +312,9 @@ export async function importData(payload: unknown): Promise<ImportResult> {
 /** 导出/导入响应体不适合走 auditMiddleware envelope 通道:export 的响应 data 是全量导出 JSON
  * (数 MB 密文),middleware 会将其整体塞进审计 detail.after——审计行膨胀且密文入库。
  * 照 batchArchiveProjects 先例程序化落行:形状对齐 auditMiddleware.writeAuditLog
- * (ip 掩码 / detail JSON / userAgent 截断),await 落行后再响应(失败仅日志,不传播)。 */
+ * (ip 掩码 / detail JSON / userAgent 截断 / **detail 脱敏**——redactDetail 按共享
+ * SENSITIVE_FIELDS 清单(password/passwordHash/encryptedPass/token 系/secret 系等)把命中值
+ * 替换为 [REDACTED],递归对象与数组),await 落行后再响应(失败仅日志,不传播)。 */
 export async function writeSystemAudit(params: {
   userId: string;
   action: 'SYSTEM_BACKUP' | 'SYSTEM_RESTORE';
@@ -293,7 +331,8 @@ export async function writeSystemAudit(params: {
         resource: 'system',
         resourceId: null, // system 无实体(backupRoutes middleware 先例同值)
         result: params.result,
-        detail: JSON.stringify(params.detail),
+        // review F5:与 auditMiddleware 同款脱敏——SENSITIVE_FIELDS 命中值 [REDACTED] 后落行
+        detail: JSON.stringify(redactDetail(params.detail)),
         ip: maskIp(params.ip) ?? null,
         userAgent: params.userAgent?.slice(0, 500) ?? null,
       },

@@ -3,8 +3,11 @@
 // 审计不挂 auditMiddleware,由 controller 程序化落行(SYSTEM_BACKUP / SYSTEM_RESTORE,成败皆记)——
 // export 响应体为全量导出 JSON,envelope 通道会把密文本体塞进审计 detail(见 adminDataService 注释)。
 // 已知代价:401/403 权限拒绝不落审计行(读端点同口径;backupRoutes 的 403 留痕由 middleware 通道提供,
-// 本端点因响应体形状放弃该通道,裁量已记录)。/import 的大 body 由 server.ts 在全局 parser 前
-// 预挂的 50mb 专属 parser 承接(body-parser 对已解析 body 短路,路由级后挂大 limit 永不生效)。
+// 本端点因响应体形状放弃该通道,裁量已记录)。import 403 不留痕是已知代价(与 export 统一程序化
+// 通道;backupRoutes POST 经 middleware 有留痕,同域行为不一致已知情——review F4 补记)。
+// /import 的大 body 由 server.ts 在全局 parser 前预挂的 50mb 专属 parser 承接(body-parser 2.2.2
+// 以 onFinished.isFinished(req) 判 body 流已消费而短路跳过,路由级后挂大 limit 永不生效;
+// 「req._body」是 body-parser 1.x 机制,2.x 已移除——review F8 机制名修正,行为结论不变)。
 import { Router, type Router as RouterType } from 'express';
 import { authMiddleware } from '../middleware/auth.js';
 import { roleMiddleware } from '../middleware/role.js';

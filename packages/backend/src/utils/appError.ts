@@ -49,6 +49,9 @@ export const ERROR_CODES: Record<string, number> = {
   VAL_001: 422,
   SYS_001: 500,
   SYS_002: 404,
+  // 票 #50 review F1:/import 大 body 预检——CL 头超 50mb 在读 body 之前直接 413
+  // (未认证请求也不许白推 ≤50mb 进内存;chunked 无 CL 的残余敞口记 OQ)
+  SYS_003: 413,
   // 通知（票 #35）：NOTIF_001 资源缺失 404；NOTIF_002 是越权门禁（非本人通知不可读）403
   NOTIF_001: 404,
   NOTIF_002: 403,
@@ -90,6 +93,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   VAL_001: '输入验证失败',
   SYS_001: '内部服务器错误',
   SYS_002: '路由不存在',
+  SYS_003: '请求体超过大小限制',
   // 通知（票 #35）
   NOTIF_001: '通知不存在',
   NOTIF_002: '无权操作他人通知',

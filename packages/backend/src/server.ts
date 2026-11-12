@@ -25,9 +25,31 @@ const server = createServer(app);
 
 // ─── Global middleware stack (in order) ───
 
-// 0. 票 #50:/api/v1/admin/import 专属 50mb parser(design §9 先例口径)。必须预挂在全局
-//    1mb parser **之前**——body-parser 对已解析 body(req._body)短路跳过,路由级后挂的
-//    大 limit 永不生效;预挂后本端点由 50mb parser 消费,全局 1mb parser 检测 req._body
+// -1. 票 #50 review F1:/api/v1/admin/import 专属 Content-Length 预检——必须在 50mb parser
+//     **之前**(全局栈第一个)。预挂 parser 只解决「路由级大 limit 不生效」,但未认证请求
+//     仍可推 ≤50mb 进内存(chunked 无 CL 时流式读满才 413——残余敞口记 OQ 由 lead 处理)。
+//     CL 头存在且超限即 413,不读 body;CL 缺失(chunked)时放行,由 parser limit 兜底。
+//     413 响应后须关连接:服务器已声明读 N 字节却提前终止,keep-alive 复用会协议失步。
+const IMPORT_BODY_LIMIT_BYTES = 50 * 1024 * 1024;
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (req.path === '/api/v1/admin/import') {
+    const cl = req.headers['content-length'];
+    if (typeof cl === 'string' && Number(cl) > IMPORT_BODY_LIMIT_BYTES) {
+      res.setHeader('Connection', 'close');
+      res.status(413).json({
+        success: false,
+        error: { code: 'SYS_003', message: '请求体超过大小限制' },
+      });
+      return;
+    }
+  }
+  next();
+});
+
+// 0. 票 #50:/api/v1/admin/import 专属 50mb parser。必须预挂在全局 1mb parser **之前**——
+//    body-parser 2.x 对 body 流已消费的请求短路跳过(lib/read.js 的 onFinished.isFinished(req)
+//    判流已终结即跳过;「req._body」短路是 body-parser 1.x 机制,2.x 已移除),路由级后挂的
+//    大 limit 永不生效;预挂后本端点由 50mb parser 消费,全局 1mb parser 检测流已消费
 //    直接放行,后续全局栈(限流/净化/CORS)对本端点照常生效。
 app.use('/api/v1/admin/import', express.json({ limit: '50mb' }));
 
