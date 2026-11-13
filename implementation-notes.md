@@ -15,34 +15,63 @@
 - [x] **frontend ConnectionModal/ProjectModal/App userEvent 测试全量默认并发下 5s 超时**（2026-09-04 首暴露 2 条；2026-09-23 #24 验收实证恶化：默认并发 7 败/99，失败集漂移；单文件恒绿、2 线程全量 99/99 绿——jsdom 14 文件并行挤爆本机资源所致，非用例缺陷）——✅ 已修关（#26 方案 A：vite.config.ts 锁 threads 池 2 线程，commit 6f8a5b5，默认命令 99/99 绿 54.5s）。
 - [x] **首个 SQLite 方言 migration vs project.md「MySQL 统一」约定**——✅ 批 9 #52 落地（ADR-0002 + project.md 四处订正 + Caddy→nginx + health 口径，commit `0ef2560`）。
 - [x] **净化豁免清单未含 Project `description`**——✅ 批 9 #52 落地（ADR-0002 误杀边界明示，spec D6 兑现）。
-- [ ] **AUTH_LOGIN 审计行操作人恒为「系统」**（票 #22 Spec 轴 review 发现）：login 未认证 userId=null 是 P0-5 spec 口径，但登录人信息（IP/UA）其实已记录，是否让 login 审计带 userId 待裁决。
+- [x] **AUTH_LOGIN 审计行操作人恒为「系统」**（票 #22 Spec 轴 review 发现）：login 未认证 userId=null 是 P0-5 spec 口径，但登录人信息（IP/UA）其实已记录，是否让 login 审计带 userId 待裁决。 —— ✅ 维持现状(spec P0-5 口径,零消费面)(批 13a 裁决)
 - [x] **#40 真机四操作验收**（2026-11-04 implementer 挂）——✅ 同日 lead 真机双用户全过（添加/改角色/移除/自离 + viewer 三层遮蔽 + onLeft 缓存失效双实证），证据贴 #40 关票评论。
-- [ ] **mfa 二段流审计口径**（批 2 #30 review + 未决①）：mfa/verify 成功/失败零审计（2FA 爆破不可见）；mfaPending 第一段被记 AUTH_LOGIN success 但无 session 建立语义失真。修复需新增审计 action 枚举（跨 shared AUDIT_ACTIONS + 前端 #23 标签映射）+ 恢复码使用事件可见性（OWASP 建议），属契约变更交用户裁决。
+- [x] **mfa 二段流审计口径**（批 2 #30 review + 未决①）：mfa/verify 成功/失败零审计（2FA 爆破不可见）；mfaPending 第一段被记 AUTH_LOGIN success 但无 session 建立语义失真。修复需新增审计 action 枚举（跨 shared AUDIT_ACTIONS + 前端 #23 标签映射）+ 恢复码使用事件可见性（OWASP 建议），属契约变更交用户裁决。 —— ✅ 立项 P2 backlog(2FA 爆破可见性安全需求)(批 13a 裁决)
 - [x] **WS 协议 shared 常量化收口**（批 4 遗留）——✅ 批 5 开工前 lead 收口（commit `740ff88`）：契约迁 shared `wsProtocol.ts`，前端 re-export 门面，backend sendTo 系列 WsServerMessage 类型锚定（当场抓 3 处测试小写枚举脑补）。
 - [x] **备份元数据「时长/状态」口径**（批 5 R2 minor-1）——✅ 用户拍板「文件即真相」（2026-11-04）：大小/时间走列表，时长走触发响应+通知 payload，状态走通知+审计，不落 manifest；已回写 spec W2-6（元数据口径裁决 blockquote），#39 备份前端按「列表第一行 + 通知历史」消费。
 - [ ] **#42 tag「多选 chips」vs #41 后端单值 tag 参数**（批 7 拆票缺口）：本票落单选切换；若需真多选 OR，需 #41 契约扩展（tag 多值包夹 OR，backend 小改）。
 - [ ] **#42 全局视图无协议分布**：stats 是 per-project 端点；若产品要全局分布需补全局聚合端点（是否立项待裁决）。
-- [ ] **#45 OQ1 切协议有 port 协议间残留**：SSH→RDP 等不传 port 时残留旧值（port:none 侧已修自动清）；维持宽松（残留是历史数据非新写入）待确认。
-- [ ] **#45 分派裁量确认**：VNC→400 CONN_006（未来支持只需 registry 加 launchAction）/ HTTP→URL（spec 未列自然延伸）/ TEAMVIEWER/ANYDESK→设备码命令串（对齐前端先例）。
-- [ ] **#43 克隆不重跑全量字段校验**（批 8）：只校验新名，存量字段免新规则拦截——与 #45「存量零破坏」口径一致；若产品要求克隆强制全量校验再改。
-- [ ] **Zap「配置直连」引导链路去留**（批 8）：launch 端点时代该链路承诺（唤起 mstsc）与实际行为（下载 .rdp）矛盾，本批只修文案；整链砍除属功能裁决（砍则 triggerRdpProtocol/isRdpReady/showRdpSetup/downloadRdpFile 引用链一并）。
+- [x] **#45 OQ1 切协议有 port 协议间残留**：SSH→RDP 等不传 port 时残留旧值（port:none 侧已修自动清）；维持宽松（残留是历史数据非新写入）待确认。 —— ✅ 维持现状(写入侧已堵,残留为历史数据)(批 13a 裁决)
+- [x] **#45 分派裁量确认**：VNC→400 CONN_006（未来支持只需 registry 加 launchAction）/ HTTP→URL（spec 未列自然延伸）/ TEAMVIEWER/ANYDESK→设备码命令串（对齐前端先例）。 —— ✅ 维持现状(行为已随 #45 真机验收追认)(批 13a 裁决)
+- [x] **#43 克隆不重跑全量字段校验**（批 8）：只校验新名，存量字段免新规则拦截——与 #45「存量零破坏」口径一致；若产品要求克隆强制全量校验再改。 —— ✅ 维持现状(与 #45 存量零破坏口径一致)(批 13a 裁决)
+- [x] **Zap「配置直连」引导链路去留**（批 8）：launch 端点时代该链路承诺（唤起 mstsc）与实际行为（下载 .rdp）矛盾，本批只修文案；整链砍除属功能裁决（砍则 triggerRdpProtocol/isRdpReady/showRdpSetup/downloadRdpFile 引用链一并）。 —— ✅ 立项 P2 backlog(死链路砍除票)(批 13a 裁决)
 - [ ] **编辑态 username:'none' 协议遗留值不可清**（批 8）：存量 HTTPS/TODESK 行历史 username 回填后输入框隐藏、静默重提交不可清（数据无损）——是否需要编辑态查表清值交裁决。
 - [ ] **#47 归档项目连接域写禁制未加**（批 10）：归档仅改 status，归档项目的连接写入端点无拦截（API 直写仍成功）——spec「只读展示」按前端视图概念处理，#48 归档前端落地时若需端点级强制再补，交裁决。
 - [x] **#49 移焦真机复验**（批 10）——✅ 2026-11-12 批 11 真机销账：3 轮关→开循环焦点全部落抽屉「关闭导航菜单」按钮（4-reviewer 并行高负载下桌面基线稳定，批 10 transitionend 修复实证）。
-- [ ] **响应码快照测试候选**（批 12）：对账测试只锁 operations 数，注解响应块内部错位（splice 插点错 7 处实录）靠逐端点 responses 键审计才见底——是否固化「响应码快照」测试交裁决（面太宽本票未加）。
-- [ ] **backend 全量 vitest 并发 flaky**（批 12）：751 用例全量首验撞 2 时序断言红（clone 审计行 0 条/WS shutdown readyState CLOSING），单跑绿+全量二验绿实锤 flaky 非回归；候选修法=锁 threads 池（前端 #26 方案 A 先例）或 vitest.retry，交裁决。
+- [x] **响应码快照测试候选**（批 12）：对账测试只锁 operations 数，注解响应块内部错位（splice 插点错 7 处实录）靠逐端点 responses 键审计才见底——是否固化「响应码快照」测试交裁决（面太宽本票未加）。 —— ✅ 批 13a 落地(commit e8bc951/7c01588)
+- [x] **backend 全量 vitest 并发 flaky**（批 12）：751 用例全量首验撞 2 时序断言红（clone 审计行 0 条/WS shutdown readyState CLOSING），单跑绿+全量二验绿实锤 flaky 非回归；候选修法=锁 threads 池（前端 #26 方案 A 先例）或 vitest.retry，交裁决。 —— ✅ 批 13a 落地(commit e8bc951/7c01588)
 - [ ] **#48 批量归档 UI 立项形态**（批 11）：票面「实施按最小」裁量不接 UI（batch-archive 端点已在 #47 真机验收）；形态候选=管理后台项目页 or 项目列表多选，待裁决。
-- [ ] **#48 转让候选 >20 人只显第一页**（批 11）：useMembers 缺省 pageSize，membersModal 同边界且有提示文案，本弹窗未做——最小实现挂账。
-- [ ] **#50 F1 chunked 残余敞口**（批 11）：Content-Length 预检只挡有 CL 的请求，chunked 无 CL 仍读满才 413——部署层确认 nginx client_max_body_size ≤50mb 留痕即闭环。
-- [ ] **#50 畸形 JSON 落 500 而非 4xx**（批 11）：全局 error handler 非 AppError 一律 500（body-parser 400 被吞）——预存在全局行为，独立小票候选。
-- [ ] **#50 import 403 不留痕**（批 11）：与 export 统一程序化审计通道的知情代价，backupRoutes POST 有留痕同域不一致——是否双轨补 403 留痕交裁决。
-- [ ] **a11y 基线票候选**（批 11 rev-48-std 提出）：菜单按钮 aria-haspopup/aria-expanded、Modal role="dialog"+焦点管理、Sidebar 菜单项 div 非 button、登录页 form field 缺 id/name（console issue 实测）——均既有基线非批 11 回归，独立票处理。
-- [ ] **ROLE_BADGE_STYLES 双组件重复**（批 11）：ProjectMembersModal 与 ProjectTransferModal 同款内联（有意避免导出耦合）——合流收敛挂账。
+- [x] **#48 转让候选 >20 人只显第一页**（批 11）：useMembers 缺省 pageSize，membersModal 同边界且有提示文案，本弹窗未做——最小实现挂账。 —— ✅ 维持现状(分组遗漏补裁,与 membersModal 同边界有提示文案先例)(批 13a 裁决)
+- [x] **#50 F1 chunked 残余敞口**（批 11）：Content-Length 预检只挡有 CL 的请求，chunked 无 CL 仍读满才 413——部署层确认 nginx client_max_body_size ≤50mb 留痕即闭环。 —— ✅ 批 13a 落地(commit e8bc951/7c01588)
+- [x] **#50 畸形 JSON 落 500 而非 4xx**（批 11）：全局 error handler 非 AppError 一律 500（body-parser 400 被吞）——预存在全局行为，独立小票候选。 —— ✅ 批 13a 落地(commit e8bc951/7c01588)
+- [x] **#50 import 403 不留痕**（批 11）：与 export 统一程序化审计通道的知情代价，backupRoutes POST 有留痕同域不一致——是否双轨补 403 留痕交裁决。 —— ✅ 批 13a 落地(commit e8bc951/7c01588)
+- [x] **a11y 基线票候选**（批 11 rev-48-std 提出）：菜单按钮 aria-haspopup/aria-expanded、Modal role="dialog"+焦点管理、Sidebar 菜单项 div 非 button、登录页 form field 缺 id/name（console issue 实测）——均既有基线非批 11 回归，独立票处理。 —— ✅ 批 13a 落地(commit e8bc951/7c01588)
+- [x] **ROLE_BADGE_STYLES 双组件重复**（批 11）：ProjectMembersModal 与 ProjectTransferModal 同款内联（有意避免导出耦合）——合流收敛挂账。 —— ✅ 批 13a 落地(commit e8bc951/7c01588)
 - [ ] **M3 focus trap 未做**（批 10）：抽屉开态 Tab 可进背景内容（仅做了 invisible/移焦/Esc/aria-controls）——rev-49-std，交裁决。
 - [ ] **Sidebar 搜索限当前页**（批 10）：>100 项目翻页后搜索只搜当前 100 条（静默缩窄，接入分页前搜索覆盖全量）——是否搜索态禁翻页/走后端 q/加提示，交裁决。
 - [ ] **底表仍限 100**（批 10）：ConnectionModal 项目下拉/Via 依赖查找/全局 chips 走 page=1 底表，>100 时缺项是现状限制——是否扩大，交裁决。
-- [ ] **单项目幂等 vs 批量幂等口径不对称**（批 10）：单项目重复 archive=幂等成功+再落一行审计；批量重复=skipped+零审计——rev-47-std nit,后续票若统一以批量口径为准需同步单项目语义。
-- [ ] **越界页码显示边角**（批 10）：末页末条删除瞬间 footer 可显示「第 2/1 页」（消费方钳制已修,Pagination 组件自身不自正）——rev-49-std nit,记录备查。
+- [x] **单项目幂等 vs 批量幂等口径不对称**（批 10）：单项目重复 archive=幂等成功+再落一行审计；批量重复=skipped+零审计——rev-47-std nit,后续票若统一以批量口径为准需同步单项目语义。 —— ✅ 维持现状(纯口径差异,动幂等语义时统一)(批 13a 裁决)
+- [x] **越界页码显示边角**（批 10）：末页末条删除瞬间 footer 可显示「第 2/1 页」（消费方钳制已修,Pagination 组件自身不自正）——rev-49-std nit,记录备查。 —— ✅ 批 13a 落地(commit e8bc951/7c01588)
+
+---
+
+## [2026-11-13] P1 批 13a：OQ 大裁决落地(8 小修)∥ #54 通知中心补强 ✅
+
+**收官数据**:lead 亲验六门 **backend 767/767 ×2 轮(161s/246s)/ shared 59 / frontend 321**(基线 751/59/303 → +16/+0/+18);2 commits 推 origin(`e8bc951` 主票 → `7c01588` review 补强);#54 关票带证据评论;顶部 OQ 清单 8 勾 8 划(16/16 脚本计数校验+加粗损伤修复回读验证)。真机:#54 三 AC 全过(角标 25→0/加载更多 +5 翻完隐藏/a11y 实装抽验)。
+
+**用户裁决(2026-11-12)**:A 类 6 条小修全修 + C 评估升入 2 条(越界页码钳制/chunked nginx 留痕)= **8 条小修合包**;**B 类 8 条功能「总验收前全做」**(→ 批 13b);C 维持现状 6 条划掉;C 立项 P2 ×2(mfa 二段流审计/Zap 死链路砍除,已转移 phase2-backlog)。**排程**:13a(本批)→ 13b(B 类)→ 14(#53 总验收,扫最终形态)→ 15(合流)。
+
+**团队构成**:2× implementer(sonnet)并行(文件所有权 backend+nginx vs frontend+notification 隔离,swagger.test.ts 双块各改各区域)+ 双轴 reviewer ×2 + lead 收口。**批 13a 事故与处置**:impl-13a-be 后台全量挂住(idle 空等,进程查证 11:05 后无活跃 vitest/僵尸残留组)→ lead 接管终版两轮亲跑,be 只补程序性报告——「agent idle 报告缺失/后台挂住」处置配方:**进程级查证 + git diff 地面真相盘点 + lead 接管验收**,零上下文损失。
+
+### Design decisions(lead 裁决)
+- [2026-11-13] 决策:read-all 门禁口径 **401+双用户隔离用例替代票面 403**——端点无 :id 参数+where 强制 userId 过滤,天然无越权面(对照 PATCH /:id/read 的 NOTIF_002 形态);票面 403 意图由隔离用例承载,报告注明。
+- [2026-11-13] 决策:未读保留上限采纳**票面自建建议值 200**(票面作者即用户);落 notificationCleaner 常量非 env。
+- [2026-11-13] 决策:too.large→413 SYS_003 **顺带修**(be 上报裁量,lead 批准)——同一超限行为两种错误码是契约不一致;nginx 硬顶只是部署兜底,代码语义一致性独立成立。
+- [2026-11-13] 决策:终版全量两轮 **lead 接管亲跑**(be 后台挂住)——验收证据链不依赖挂住的 agent 后台任务。
+- [2026-11-13] 决策:review 修复 3 行文本 **lead 亲修不派回**——往返成本超过改动本身;派回配方适用于成批修复。
+
+### Deviations
+- fe「角标 pageSize 50→20」行为微调:对齐票面「每页 20」口径,lead 真机抽验角标行为正常。
+- be supertest 假红教训:`.send(stream)` 静默不发 body(422 空载荷 112ms 假象),改 http.request 手工 chunked+51mb 真实传输(618ms)拿真红——已固化测试注释。
+
+### Tradeoffs(review 战果:两轴 0 major,可合×2)
+- spec 轴:OQ 8 条逐条闭环 + #54 AC 逐条 + 双线交叉零冲突 + be 报告矛盾点 diff 实证(authMiddleware→importRoleGate 单判定,报告笔误记档)。minor ×2:PayloadTooLarge 文档滞后(lead 亲修)/notes 收尾职责(lead 已补)。
+- std 轴:importRoleGate 与 roleMiddleware **逐行等价**验证、cap 并发安全(clean/cap 操作集合不相交)、useInfiniteQuery 不可变更新、双线风格无割裂。minor ×1:dialog accessible name 归 13b focus trap 同域。
+- nit 挂账随 13b:closeMenuAnd 属性收敛/haspopup="menu"/Pagination 下界钳制。
+
+### Open questions
+- 批 13a 无新挂 OQ;「转让候选分页」系 lead 分组遗漏,按 C 口径补裁划掉(与 membersModal 同边界有提示文案先例)。
 
 ---
 
