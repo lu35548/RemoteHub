@@ -138,6 +138,21 @@ const Sidebar: React.FC<SidebarProps> = ({
     setProjectMenuOpenId(projectMenuOpenId === projectId ? null : projectId);
   };
 
+  // a11y（批 13a）：项目菜单项 div 语义化工厂——role="button" + tabIndex + Enter/Space 键与点击同逻辑。
+  // 不改真 <button>：菜单项 DOM 上嵌套在行按钮内，真按钮会产生非法嵌套（React 嵌套 button 告警）；
+  // 样式不动，仅补语义与键盘可达。
+  const closeMenuAnd = (action: () => void) => ({
+    onClick: (e: React.MouseEvent) => { e.stopPropagation(); setProjectMenuOpenId(null); action(); },
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        e.stopPropagation();
+        setProjectMenuOpenId(null);
+        action();
+      }
+    },
+  });
+
   useEffect(() => {
     const closeMenu = () => setProjectMenuOpenId(null);
     if (projectMenuOpenId) window.addEventListener('click', closeMenu);
@@ -308,6 +323,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                          <div
                            role="button"
                            tabIndex={0}
+                           aria-haspopup="true"
+                           aria-expanded={projectMenuOpenId === project.id}
                            aria-label={`项目操作 ${project.name}`}
                            onClick={(e) => toggleProjectMenu(e, project.id)}
                            onKeyDown={(e) => {
@@ -327,7 +344,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                               {/* #40 成员管理入口：admin 全局直通或项目成员（对齐后端 member 权限链，非成员遮蔽） */}
                               {(currentUser.role === 'admin' || !!project.currentUserRole) && (
                                 <div
-                                  onClick={(e) => { e.stopPropagation(); setProjectMenuOpenId(null); onManageMembers(project); }}
+                                  role="button"
+                                  tabIndex={0}
+                                  {...closeMenuAnd(() => onManageMembers(project))}
                                   className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white flex items-center gap-2 cursor-pointer transition-colors"
                                 >
                                   <Users size={12} /> 成员管理
@@ -338,19 +357,25 @@ const Sidebar: React.FC<SidebarProps> = ({
                               {(currentUser.role === 'admin' || project.currentUserRole === 'owner') && (
                                 <>
                                   <div
-                                    onClick={(e) => { e.stopPropagation(); setProjectMenuOpenId(null); onArchiveProject?.(project); }}
+                                    role="button"
+                                    tabIndex={0}
+                                    {...closeMenuAnd(() => onArchiveProject?.(project))}
                                     className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white flex items-center gap-2 cursor-pointer transition-colors"
                                   >
                                     <Archive size={12} /> 归档项目
                                   </div>
                                   <div
-                                    onClick={(e) => { e.stopPropagation(); setProjectMenuOpenId(null); onCopyProject?.(project); }}
+                                    role="button"
+                                    tabIndex={0}
+                                    {...closeMenuAnd(() => onCopyProject?.(project))}
                                     className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white flex items-center gap-2 cursor-pointer transition-colors"
                                   >
                                     <FolderDown size={12} /> 复制项目
                                   </div>
                                   <div
-                                    onClick={(e) => { e.stopPropagation(); setProjectMenuOpenId(null); onTransferProject?.(project); }}
+                                    role="button"
+                                    tabIndex={0}
+                                    {...closeMenuAnd(() => onTransferProject?.(project))}
                                     className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white flex items-center gap-2 cursor-pointer transition-colors"
                                   >
                                     <ArrowLeftRight size={12} /> 转让所有权
@@ -358,13 +383,17 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 </>
                               )}
                               <div
-                                onClick={(e) => { e.stopPropagation(); setProjectMenuOpenId(null); onEditProject(project); }}
+                                role="button"
+                                tabIndex={0}
+                                {...closeMenuAnd(() => onEditProject(project))}
                                 className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white flex items-center gap-2 cursor-pointer transition-colors"
                               >
                                 <Edit2 size={12} /> 编辑
                               </div>
-                              <div 
-                                onClick={(e) => { e.stopPropagation(); setProjectMenuOpenId(null); onDeleteProject(project.id); }}
+                              <div
+                                role="button"
+                                tabIndex={0}
+                                {...closeMenuAnd(() => onDeleteProject(project.id))}
                                 className="w-full text-left px-3 py-2 text-xs text-rose-400 hover:bg-rose-600 hover:text-white flex items-center gap-2 border-t border-white/5 cursor-pointer transition-colors"
                               >
                                 <Trash2 size={12} /> 删除

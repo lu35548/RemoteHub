@@ -40,11 +40,22 @@ describe('Pagination（#49）', () => {
   });
 
   it('total=0 → 单页态，双按钮禁用', () => {
-    renderPagination({ page: 1, total: 0, pageSize: 20 });
+    renderPagination({ page: 2, total: 0, pageSize: 20 });
     expect(screen.getByText('共 0 条')).toBeInTheDocument();
     expect(screen.getByText('第 1 / 1 页')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '上一页' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
+  });
+
+  it('越界钳制（批 13a）：page > totalPages → 显示钳回末页（防「第 2 / 1 页」），回调带钳制后页码', async () => {
+    const { onPageChange } = renderPagination({ page: 2, total: 10, pageSize: 10 });
+    expect(screen.getByText('第 1 / 1 页')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '上一页' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
+
+    const events = userEvent.setup();
+    await events.click(screen.getByRole('button', { name: '上一页' }));
+    expect(onPageChange).not.toHaveBeenCalled(); // 钳制后已在首页，上一页禁用
   });
 
   it('className 透传（Sidebar 窄条挂载场景）', () => {

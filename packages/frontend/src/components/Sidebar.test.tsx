@@ -118,6 +118,43 @@ describe('成员管理入口（#40）', () => {
     expect(screen.getByText('成员管理')).toBeInTheDocument();
     expect(screen.getByText('编辑')).toBeInTheDocument();
   });
+
+  it('a11y（批 13a）：菜单触发器 aria-haspopup + aria-expanded 随开合切换', () => {
+    render(
+      <MemoryRouter>
+        <Sidebar {...props} />
+      </MemoryRouter>,
+    );
+    const trigger = screen.getByRole('button', { name: '项目操作 某某科技 - 私有云' });
+    expect(trigger).toHaveAttribute('aria-haspopup', 'true');
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('a11y（批 13a）：菜单项 div 语义化（role=button + tabIndex），Enter/Space 键与点击同逻辑', () => {
+    const onEditProject = vi.fn();
+    const onDeleteProject = vi.fn();
+    render(
+      <MemoryRouter>
+        <Sidebar {...props} onEditProject={onEditProject} onDeleteProject={onDeleteProject} />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '项目操作 某某科技 - 私有云' }));
+
+    // 菜单项原为裸 div（无 role/tabIndex/键盘）——语义化后 role=button 可查
+    const editItem = screen.getByRole('button', { name: '编辑' });
+    expect(editItem).toHaveAttribute('tabindex', '0');
+    fireEvent.keyDown(editItem, { key: 'Enter' });
+    expect(onEditProject).toHaveBeenCalledWith(projects[0]);
+
+    // Enter 已触发并关菜单——重开后再测删除项 Space 键
+    fireEvent.click(screen.getByRole('button', { name: '项目操作 某某科技 - 私有云' }));
+    const deleteItem = screen.getByRole('button', { name: '删除' });
+    expect(deleteItem).toHaveAttribute('tabindex', '0');
+    fireEvent.keyDown(deleteItem, { key: ' ' }); // Space 键同逻辑
+    expect(onDeleteProject).toHaveBeenCalledWith('p1');
+  });
 });
 
 describe('#49 Sidebar 分页与移动抽屉', () => {

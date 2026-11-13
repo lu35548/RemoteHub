@@ -1,17 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient } from '@tanstack/react-query';
+import type { InfiniteData } from '@tanstack/react-query';
 import type { PaginatedResponse } from '@remotehub/shared';
 import { dispatchWsMessage, payloadMessage } from './notificationDispatch';
 import { NOTIFICATION_QUERY_KEY, type NotificationItem } from '../api/queries';
 import type { ToastFn } from './notificationDispatch';
 
 // 真 QueryClient（非 mock）：setQueryData 的 updater 语义只有真实现才可信
+// #54 起 useNotifications 为 useInfiniteQuery：缓存形状 = InfiniteData<PaginatedResponse>（pages/pageParams）
 function seedCache(items: NotificationItem[], total = items.length): QueryClient {
   const qc = new QueryClient();
   const page: PaginatedResponse<NotificationItem> = {
-    success: true, data: items, pagination: { page: 1, pageSize: 50, total },
+    success: true, data: items, pagination: { page: 1, pageSize: 20, total },
   };
-  qc.setQueryData(NOTIFICATION_QUERY_KEY, page);
+  qc.setQueryData(NOTIFICATION_QUERY_KEY, { pages: [page], pageParams: [1] });
   return qc;
 }
 
@@ -20,7 +22,7 @@ const item = (overrides: Partial<NotificationItem>): NotificationItem => ({
   createdAt: '2026-09-29T00:00:00.000Z', ...overrides,
 });
 
-describe('dispatchWsMessage（WS→Query 联动，票 #37）', () => {
+describe('dispatchWsMessage（WS→Query 联动，票 #37；#54 起 InfiniteData 形状）', () => {
   let toast: ReturnType<typeof vi.fn>;
   let toastFn: ToastFn;
 
@@ -29,27 +31,47 @@ describe('dispatchWsMessage（WS→Query 联动，票 #37）', () => {
     toastFn = toast as unknown as ToastFn;
   });
 
-  it('通知类消息：setQueryData 原子插到列表头 + 角标 total+1 + invalidate 重同步', () => {
+  it('通知类消息：原子插到首页头部 + 首页 total+1（角标）+ invalidate 重同步', () => {
     const qc = seedCache([item({})]);
     const invalidateSpy = vi.spyOn(qc, 'invalidateQueries');
 
     dispatchWsMessage(qc, toastFn, { type: 'SYSTEM_ALERT', payload: { message: '检测到可疑 IP 登录' } });
 
-    const updated = qc.getQueryData<PaginatedResponse<NotificationItem>>(NOTIFICATION_QUERY_KEY)!;
-    expect(updated.data).toHaveLength(2);
-    expect(updated.data[0]!.type).toBe('SYSTEM_ALERT');
-    expect(updated.data[0]!.payload).toEqual({ message: '检测到可疑 IP 登录' });
-    expect(updated.data[0]!.isRead).toBe(false);
-    expect(updated.data[1]!.id).toBe('n1'); // 既有项不动（不可变更新）
-    expect(updated.pagination.total).toBe(2);
+    const updated = qc.getQueryData<InfiniteData<PaginatedResponse<NotificationItem>>>(NOTIFICATION_QUERY_KEY)!;
+    expect(updated.pages).toHaveLength(1);
+    expect(updated.pages[0]!.data).toHaveLength(2);
+    expect(updated.pages[0]!.data[0]!.type).toBe('SYSTEM_ALERT');
+    expect(updated.pages[0]!.data[0]!.payload).toEqual({ message: '检测到可疑 IP 登录' });
+    expect(updated.pages[0]!.data[0]!.isRead).toBe(false);
+    expect(updated.pages[0]!.data[1]!.id).toBe('n1'); // 既有项不动（不可变更新）
+    expect(updated.pages[0]!.pagination.total).toBe(2);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: NOTIFICATION_QUERY_KEY });
   });
 
   it('WS 插入项用临时 id（WS 消息无 id），invalidate refetch 后由服务端真值替换', () => {
     const qc = seedCache([]);
     dispatchWsMessage(qc, toastFn, { type: 'MEMBER_REMOVED', payload: {} });
-    const updated = qc.getQueryData<PaginatedResponse<NotificationItem>>(NOTIFICATION_QUERY_KEY)!;
-    expect(updated.data[0]!.id).toMatch(/^ws-/);
+    const updated = qc.getQueryData<InfiniteData<PaginatedResponse<NotificationItem>>>(NOTIFICATION_QUERY_KEY)!;
+    expect(updated.pages[0]!.data[0]!.id).toMatch(/^ws-/);
+  });
+
+  it('多页缓存：WS 插入只动首页，其余页原样保留', () => {
+    const qc = new QueryClient();
+    const mk = (page: number): PaginatedResponse<NotificationItem> => ({
+      success: true,
+      data: [item({ id: `p${page}-n1` })],
+      pagination: { page, pageSize: 20, total: 21 },
+    });
+    qc.setQueryData(NOTIFICATION_QUERY_KEY, { pages: [mk(1), mk(2)], pageParams: [1, 2] });
+
+    dispatchWsMessage(qc, toastFn, { type: 'MEMBER_ADDED', payload: {} });
+
+    const updated = qc.getQueryData<InfiniteData<PaginatedResponse<NotificationItem>>>(NOTIFICATION_QUERY_KEY)!;
+    expect(updated.pages).toHaveLength(2);
+    expect(updated.pages[0]!.data[0]!.id).toMatch(/^ws-/); // 新消息插首页头
+    expect(updated.pages[0]!.pagination.total).toBe(22);   // 角标在首页 +1
+    expect(updated.pages[1]!.data[0]!.id).toBe('p2-n1');   // 第 2 页原样
+    expect(updated.pages[1]!.pagination.total).toBe(21);   // 第 2 页 total 待 invalidate 对齐
   });
 
   it('缓存未建立：setQueryData 跳过（返回 undefined 不写入），invalidate 照常触发', () => {
@@ -87,7 +109,7 @@ describe('dispatchWsMessage（WS→Query 联动，票 #37）', () => {
     dispatchWsMessage(qc, toastFn, { type: 'reconnect_required', payload: {} });
     dispatchWsMessage(qc, toastFn, { type: 'SOMETHING_ELSE', payload: {} } as never);
 
-    expect(qc.getQueryData<PaginatedResponse<NotificationItem>>(NOTIFICATION_QUERY_KEY)!.data).toHaveLength(1);
+    expect(qc.getQueryData<InfiniteData<PaginatedResponse<NotificationItem>>>(NOTIFICATION_QUERY_KEY)!.pages[0]!.data).toHaveLength(1);
     expect(invalidateSpy).not.toHaveBeenCalled();
     expect(toast).not.toHaveBeenCalled();
   });
@@ -95,8 +117,8 @@ describe('dispatchWsMessage（WS→Query 联动，票 #37）', () => {
   it('通知消息缺 payload 字段：兜底空对象，不抛错', () => {
     const qc = seedCache([]);
     expect(() => dispatchWsMessage(qc, toastFn, { type: 'FORCE_LOGOUT' } as never)).not.toThrow();
-    const updated = qc.getQueryData<PaginatedResponse<NotificationItem>>(NOTIFICATION_QUERY_KEY)!;
-    expect(updated.data[0]!.payload).toEqual({});
+    const updated = qc.getQueryData<InfiniteData<PaginatedResponse<NotificationItem>>>(NOTIFICATION_QUERY_KEY)!;
+    expect(updated.pages[0]!.data[0]!.payload).toEqual({});
   });
 });
 

@@ -40,6 +40,20 @@ export async function markNotificationRead(id: string, userId: string) {
 }
 
 /**
+ * #54 一键全读：POST /notifications/read-all——where 强制 userId + isRead:false 过滤，
+ * 无 :id 参数，天然只能批量操作本人通知（无他人可操作面，403 场景不存在；
+ * 门禁由 authMiddleware 未登录 401 + 集成测试双用户数据隔离用例锁定）。
+ * 返回受影响条数（updateMany count）。
+ */
+export async function markAllNotificationsRead(userId: string): Promise<number> {
+  const result = await prisma.notificationQueue.updateMany({
+    where: { userId, isRead: false },
+    data: { isRead: true },
+  });
+  return result.count;
+}
+
+/**
  * #36 事件源接线挂点：六类事件源（可疑 IP/强制登出/备份结果/连接与成员变更）不直接摸表，
  * 统一经此函数 → ① 写 NotificationQueue（离线可达，用户上线后 GET /notifications 拉取）
  * → ② WS 尽力推送（在线即时，#34 管道 sendToUser；未 init 时静默跳过）。

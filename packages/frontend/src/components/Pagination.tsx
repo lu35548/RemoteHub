@@ -18,8 +18,11 @@ export function Pagination(props: PaginationProps): React.JSX.Element {
   const { page, total, pageSize, onPageChange, className } = props;
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const canPrev = page > 1;
-  const canNext = page < totalPages;
+  // 越界钳制（批 13a）：末页末条删除瞬间消费方 setState 异步空窗可传入 page > totalPages，
+  // 组件 render 期自正钳回末页，防「第 2 / 1 页」显示（消费方 state 不回写，由其自身翻页逻辑收敛）
+  const currentPage = Math.min(page, totalPages);
+  const canPrev = currentPage > 1;
+  const canNext = currentPage < totalPages;
 
   return (
     <div className={`flex items-center justify-between text-xs text-slate-500 ${className ?? ''}`}>
@@ -27,16 +30,16 @@ export function Pagination(props: PaginationProps): React.JSX.Element {
       <div className="flex items-center gap-3">
         <button
           type="button"
-          onClick={() => onPageChange(page - 1)}
+          onClick={() => onPageChange(currentPage - 1)}
           disabled={!canPrev}
           className="px-3 py-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors disabled:opacity-40 disabled:pointer-events-none"
         >
           上一页
         </button>
-        <span>第 {page} / {totalPages} 页</span>
+        <span>第 {currentPage} / {totalPages} 页</span>
         <button
           type="button"
-          onClick={() => onPageChange(page + 1)}
+          onClick={() => onPageChange(currentPage + 1)}
           disabled={!canNext}
           className="px-3 py-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors disabled:opacity-40 disabled:pointer-events-none"
         >

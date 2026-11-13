@@ -4,16 +4,9 @@ import type { MemberListItem, MemberRole, ProjectListItem, UserPublic, UserSearc
 import { Modal, useUI } from './UIComponents';
 import { Users, Plus, Trash2, LogOut } from 'lucide-react';
 import { useMembers, useAddMember, useUpdateMemberRole, useRemoveMember, useSearchUsers } from '../api/queries';
-import { MEMBER_ROLE_LABELS } from '../constants';
+import { MEMBER_ROLE_LABELS, ROLE_BADGE_STYLES } from '../constants';
 import { errMsg } from '../utils';
 import { getAvatarColor } from '../utils/avatar';
-
-// 角色徽章配色（owner 金 / editor 蓝 / viewer 灰）
-const ROLE_BADGE_STYLES: Record<MemberRole, string> = {
-  owner: 'bg-amber-500/10 text-amber-400 border-amber-500/30',
-  editor: 'bg-blue-500/10 text-blue-400 border-blue-500/30',
-  viewer: 'bg-slate-500/10 text-slate-400 border-slate-500/30',
-};
 
 interface ProjectMembersModalProps {
   isOpen: boolean;

@@ -61,10 +61,11 @@ const LoginPage: React.FC = () => {
 
           <form onSubmit={handleLogin} className="space-y-5">
             <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider ml-1">账号</label>
+              <label htmlFor="login-username" className="text-[11px] font-bold text-slate-400 uppercase tracking-wider ml-1">账号</label>
               <div className="relative group">
                 <User className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-blue-400 transition-colors" size={18} />
                 <input
+                  id="login-username"
                   type="text"
                   name="username"
                   autoComplete="username"
@@ -78,10 +79,11 @@ const LoginPage: React.FC = () => {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider ml-1">密码</label>
+              <label htmlFor="login-password" className="text-[11px] font-bold text-slate-400 uppercase tracking-wider ml-1">密码</label>
               <div className="relative group">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-blue-400 transition-colors" size={18} />
                 <input
+                  id="login-password"
                   type="password"
                   name="password"
                   autoComplete="current-password"

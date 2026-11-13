@@ -147,8 +147,74 @@ describe('已读清理（真库函数级）', () => {
 
     expect(count).toBeGreaterThanOrEqual(1); // 前序用例遗留的已读过期行也一并被删（增量口径）
     expect(await b.prisma.notificationQueue.findUnique({ where: { id: deleted.id } })).toBeNull();
-    // 本用例造的未过期/未读两条必须在（相对断言，不与前序遗留行混算）
     expect(await b.prisma.notificationQueue.count({ where: { userId, isRead: false } })).toBeGreaterThanOrEqual(1);
     expect(await b.prisma.notificationQueue.count({ where: { userId, isRead: true, createdAt: { gte: new Date(Date.now() - 2 * 86_400_000) } } })).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('POST /api/v1/notifications/read-all（#54 一键全读）', () => {
+  it('未认证 → 401', async () => {
+    const res = await request(b.app).post('/api/v1/notifications/read-all');
+    expect(res.status).toBe(401);
+  });
+
+  it('本人全部已读 → 200 updated>0，GET 列表 total 归零（本人才可操作本人通知的天然形态）', async () => {
+    // 前序 describe 已给 userId 攒下若干未读，这里再造 2 条后一键全读
+    await makeNotification(userId);
+    await makeNotification(userId);
+
+    const res = await request(b.app).post('/api/v1/notifications/read-all').set('Authorization', `Bearer ${userToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.updated).toBeGreaterThan(0);
+
+    // 角标归零：该用户未读 total = 0
+    const list = await request(b.app).get('/api/v1/notifications').set('Authorization', `Bearer ${userToken}`);
+    expect(list.body.pagination.total).toBe(0);
+  });
+
+  it('双用户数据隔离：user 的 read-all 不动 admin 的未读（门禁口径：端点无 :id 参数 + where 强制 userId 过滤，天然无他人可操作面，401+隔离替代票面 403 用例）', async () => {
+    await makeNotification(adminUserId);
+    const adminBefore = await b.prisma.notificationQueue.count({ where: { userId: adminUserId, isRead: false } });
+
+    await request(b.app).post('/api/v1/notifications/read-all').set('Authorization', `Bearer ${userToken}`);
+
+    const adminAfter = await b.prisma.notificationQueue.count({ where: { userId: adminUserId, isRead: false } });
+    expect(adminAfter).toBe(adminBefore);
+  });
+});
+
+describe('未读保留上限 200（#54 capUnreadNotifications 真库函数级）', () => {
+  it('未读超 200 → 只留最新 200 条未读，更早转已读；未过限用户（admin）不受影响', async () => {
+    // 造 205 条未读，createdAt 每条错开 1s（createdAt = now-(300+i)s，i 越大越老）
+    for (let i = 0; i < 205; i++) {
+      await b.prisma.notificationQueue.create({ data: {
+        userId,
+        type: 'SYSTEM_ALERT',
+        payload: JSON.stringify({ message: `堆积通知 ${i}` }),
+        isRead: false,
+        createdAt: new Date(Date.now() - (300 + i) * 1000),
+      } });
+    }
+    // admin 未读少量（不过限），cap 不得触碰
+    await makeNotification(adminUserId);
+    const adminBefore = await b.prisma.notificationQueue.count({ where: { userId: adminUserId, isRead: false } });
+
+    const { capUnreadNotifications } = await import('../../utils/notificationCleaner.js');
+    const converted = await capUnreadNotifications();
+
+    expect(converted).toBe(5);
+    expect(await b.prisma.notificationQueue.count({ where: { userId, isRead: false } })).toBe(200);
+    // createdAt = now - (300+i)s：i 越大越老——最老一条是 i=204，已转已读；最新一条是 i=0，仍未读
+    const oldest = await b.prisma.notificationQueue.findFirst({
+      where: { userId, type: 'SYSTEM_ALERT', payload: { contains: '堆积通知 204' } },
+    });
+    expect(oldest?.isRead).toBe(true);
+    const newest = await b.prisma.notificationQueue.findFirst({
+      where: { userId, type: 'SYSTEM_ALERT', payload: { contains: '堆积通知 0' } },
+    });
+    expect(newest?.isRead).toBe(false);
+    // admin 未过限不受影响
+    expect(await b.prisma.notificationQueue.count({ where: { userId: adminUserId, isRead: false } })).toBe(adminBefore);
   });
 });

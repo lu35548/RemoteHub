@@ -1,6 +1,6 @@
 // 票 #51:Swagger 文档测试(unit——swagger 端点自身不碰库,server.ts 的 NODE_ENV=test guard
 // 保证 import 不触发 bootstrap/seed/cleaner,先例与 probeRoutes.test.ts 同源纪律)。
-// 对账口径:路由表 59 个操作(multiline grep 盘点,含 4 个跨行定义端点)——精确相等,不是 ≥。
+// 对账口径:路由表 60 个操作(multiline grep 盘点,含 4 个跨行定义端点;批 13a #54 +1 read-all)——精确相等,不是 ≥。
 import '../test/helpers/env.js'; // 环境前置:必须第一个 import(拉起 server.ts→config/env.ts 的 requireEnv 快照)
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -38,9 +38,9 @@ const EXPECTED_OPERATIONS_BY_TAG: Record<string, number> = {
   Monitoring: 5, // dashboard + stats×3 + users/{id}/reset-link(跨行定义)
   Backups: 3, // POST /(手动触发,跨行定义)+ GET 列表 + download
   Admin: 2, // /export + /import(422 VAL_001 / 413 SYS_003)
-  Notifications: 2,
+  Notifications: 3, // #54 read-all
 };
-const EXPECTED_TOTAL_OPERATIONS = Object.values(EXPECTED_OPERATIONS_BY_TAG).reduce((a, b) => a + b, 0); // = 59
+const EXPECTED_TOTAL_OPERATIONS = Object.values(EXPECTED_OPERATIONS_BY_TAG).reduce((a, b) => a + b, 0); // = 60
 
 async function fetchSpec(): Promise<OpenApiSpec> {
   const res = await request(app).get('/api-docs/swagger.json');
@@ -180,6 +180,48 @@ describe('Swagger /api-docs(票 #51,非生产环境挂载)', () => {
       };
     }).components?.schemas?.ErrorResponse?.properties?.error?.properties?.code?.enum;
     expect(codeEnum).toEqual(expect.arrayContaining(['VAL_001', 'SYS_003', 'SYS_001']));
+  });
+});
+
+describe('响应码快照(批 12 OQ 固化:注解响应块内部错位防线)', () => {
+  // 值域=现行错误处理矩阵的合法响应码全集;新端点注解自动被覆盖,不随端点增减同步
+  // (operations 总数对账归上方既有用例管,本块不硬编码总数——批 13a impl-B 并行 59→60 不影响本块)
+  const LEGAL_RESPONSE_CODES = [200, 201, 400, 401, 403, 404, 409, 413, 422, 429, 500, 503] as const;
+
+  it('全部 operations 的 responses 键 ⊂ 合法值域,且至少含一个 2xx/4xx(新端点自动覆盖)', async () => {
+    const spec = await fetchSpec();
+    const legal = LEGAL_RESPONSE_CODES as readonly number[];
+    for (const [path, pathItem] of Object.entries(spec.paths ?? {})) {
+      for (const method of METHODS) {
+        const op = pathItem[method];
+        if (!op) continue;
+        const codes = Object.keys(op.responses ?? {}).map(Number);
+        expect(
+          codes.length,
+          `${method.toUpperCase()} ${path} responses 为空(注解漏 responses 块)`,
+        ).toBeGreaterThan(0);
+        for (const code of codes) {
+          expect(
+            legal.includes(code),
+            `${method.toUpperCase()} ${path} 响应码 ${code} 越出合法值域(注解笔误)`,
+          ).toBe(true);
+        }
+        expect(
+          codes.some((c) => (c >= 200 && c < 300) || (c >= 400 && c < 500)),
+          `${method.toUpperCase()} ${path} 应至少含一个 2xx/4xx,实际 ${JSON.stringify(codes)}`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('关键端点精确快照(批 12 实录:注解 splice 插点错 7 处静默,现以期望表固化)', async () => {
+    const spec = await fetchSpec();
+    const responsesOf = (path: string, method: Method): string[] =>
+      Object.keys(spec.paths?.[path]?.[method]?.responses ?? {}).sort();
+    // 期望表以注解源码为据(2026-11-13 盘点);注解响应块增删响应码必须显式改此表——错误口径不再「静默对」
+    expect(responsesOf('/api/v1/admin/import', 'post')).toEqual(['200', '401', '403', '413', '422']);
+    expect(responsesOf('/api/v1/auth/register', 'post')).toEqual(['201', '401', '403', '409', '422', '429']);
+    expect(responsesOf('/api/v1/users/{id}', 'patch')).toEqual(['200', '401', '403', '404', '422']);
   });
 });
 

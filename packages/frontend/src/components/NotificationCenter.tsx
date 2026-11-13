@@ -1,9 +1,10 @@
 // #37 通知中心：顶栏铃铛 + 未读角标 + 下拉未读列表（消费 #35 通知 API；
 // 实时增量由 AppContent 的 useWs → dispatchWsMessage 写入同一缓存键）。
+// #54 补强：列表「加载更多」分页递增 append（useNotifications 改 infinite）+「全部已读」一键清零入口。
 import React, { useEffect, useRef, useState } from 'react';
-import { Bell, Check, Inbox } from 'lucide-react';
+import { Bell, Check, CheckCheck, Inbox } from 'lucide-react';
 import type { NotificationType } from '@remotehub/shared';
-import { useNotifications, useMarkNotificationRead } from '../api/queries';
+import { useNotifications, useMarkNotificationRead, useMarkAllNotificationsRead } from '../api/queries';
 import { NOTIFICATION_TYPE_LABELS } from '../constants';
 import { payloadMessage } from '../lib/notificationDispatch';
 import { formatTime } from '../utils';
@@ -14,12 +15,14 @@ const ALERT_TYPES = new Set<NotificationType>(['SYSTEM_ALERT', 'BACKUP_FAILED', 
 
 const NotificationCenter: React.FC = () => {
   const [open, setOpen] = useState(false);
-  const { data } = useNotifications();
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = useNotifications();
   const markRead = useMarkNotificationRead();
+  const markAllRead = useMarkAllNotificationsRead();
   const panelRef = useRef<HTMLDivElement>(null);
 
-  const unread = data?.pagination.total ?? 0;
-  const items = data?.data ?? [];
+  // 角标走首页 pagination.total（服务端未读总数）；列表 = 各页 append 后的展平
+  const unread = data?.pages[0]?.pagination.total ?? 0;
+  const items = data?.pages.flatMap((p) => p.data) ?? [];
 
   // 点击面板外关闭（mousedown 在 document 捕获，含 dropdown 兄弟元素）
   useEffect(() => {
@@ -40,6 +43,7 @@ const NotificationCenter: React.FC = () => {
       <button
         aria-label="通知"
         title="未读通知"
+        aria-expanded={open}
         onClick={() => setOpen(v => !v)}
         className="relative p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/60 transition-colors"
       >
@@ -58,7 +62,19 @@ const NotificationCenter: React.FC = () => {
         <div className="absolute right-0 top-full mt-2 w-96 rounded-xl border border-slate-800 bg-slate-900/95 backdrop-blur-xl shadow-2xl z-50 animate-in fade-in slide-in-from-top-2 duration-200">
           <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
             <h3 className="text-sm font-bold text-white">未读通知</h3>
-            <span className="text-xs text-slate-400">{unread > 99 ? '99+' : unread} 条</span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-400">{unread > 99 ? '99+' : unread} 条</span>
+              {/* #54 一键全读：无未读时禁用（无操作面），pending 中禁用防重复提交 */}
+              <button
+                aria-label="全部已读"
+                title="全部标记已读"
+                disabled={unread === 0 || markAllRead.isPending}
+                onClick={() => markAllRead.mutate()}
+                className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+              >
+                <CheckCheck size={13} /> 全部已读
+              </button>
+            </div>
           </div>
 
           <div className="max-h-96 overflow-y-auto custom-scrollbar">
@@ -96,6 +112,19 @@ const NotificationCenter: React.FC = () => {
               })
             )}
           </div>
+
+          {/* #54 加载更多：翻完（!hasNextPage）整条隐藏；取页中禁用防重复 */}
+          {hasNextPage && (
+            <div className="border-t border-slate-800">
+              <button
+                onClick={() => fetchNextPage()}
+                disabled={isFetchingNextPage}
+                className="w-full py-2.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800/60 disabled:opacity-40 transition-colors"
+              >
+                {isFetchingNextPage ? '加载中…' : '加载更多'}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

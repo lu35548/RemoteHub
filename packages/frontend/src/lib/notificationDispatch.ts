@@ -1,7 +1,7 @@
 // #37 WS→Query 联动（TkDodo《Using WebSockets with React Query》官方模式）：
 // setQueryData 做立即原子更新（角标/列表即时 +1）+ invalidateQueries 做服务端重同步
 // （WS 消息无 id，插入项用临时 id，refetch 后被服务端真值替换）。
-import type { QueryClient } from '@tanstack/react-query';
+import type { InfiniteData, QueryClient } from '@tanstack/react-query';
 import { isNotificationType, type WsServerMessage } from './wsProtocol';
 import { NOTIFICATION_QUERY_KEY, type NotificationItem } from '../api/queries';
 import { NOTIFICATION_TYPE_LABELS } from '../constants';
@@ -26,8 +26,12 @@ export function dispatchWsMessage(queryClient: QueryClient, toast: ToastFn, msg:
   if (!isNotificationType(type)) return; // 控制类/未知 type：通知中心不消费
   const payload = msg.payload ?? {};
 
-  queryClient.setQueryData<PaginatedResponse<NotificationItem>>(NOTIFICATION_QUERY_KEY, (old) => {
+  // #54 列表改 infinite（加载更多 append）：WS 原子插入落到首页头部 + 首页 total +1
+  // （角标读首页 pagination.total，其余页由随后的 invalidate refetch 对齐服务端真值）
+  queryClient.setQueryData<InfiniteData<PaginatedResponse<NotificationItem>>>(NOTIFICATION_QUERY_KEY, (old) => {
     if (!old) return old; // 缓存未建立：交给 invalidate / 首次挂载拉取
+    const [first, ...rest] = old.pages;
+    if (!first) return old;
     const incoming: NotificationItem = {
       // WS 消息无 id：临时 id 仅撑住即时渲染，invalidate refetch 后替换为服务端真值
       id: `ws-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -38,8 +42,14 @@ export function dispatchWsMessage(queryClient: QueryClient, toast: ToastFn, msg:
     };
     return {
       ...old,
-      data: [incoming, ...old.data],
-      pagination: { ...old.pagination, total: old.pagination.total + 1 },
+      pages: [
+        {
+          ...first,
+          data: [incoming, ...first.data],
+          pagination: { ...first.pagination, total: first.pagination.total + 1 },
+        },
+        ...rest,
+      ],
     };
   });
 

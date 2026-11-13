@@ -11,6 +11,11 @@ vi.mock('@tanstack/react-query', () => ({
     captured = opts as Record<string, unknown>;
     return { data: undefined, isPending: true };
   }),
+  // #54 useNotifications 改 useInfiniteQuery（加载更多 append）——factory 随 import 扩展
+  useInfiniteQuery: vi.fn((opts: unknown) => {
+    captured = opts as Record<string, unknown>;
+    return { data: undefined, isPending: true };
+  }),
   useMutation: vi.fn((opts: unknown) => {
     mutationCaptured = opts as Record<string, unknown>;
     return { mutateAsync: vi.fn(), isPending: false };
@@ -33,7 +38,7 @@ vi.mock('./client.js', () => ({
   ensureRefreshed: vi.fn().mockResolvedValue(null),
 }));
 
-import { exportAuditLogsCsv, launchConnection, useAuditLogs, useDashboard, useForgotPassword, useProjectStats, useResetPassword, useAdminResetLink, useUserStats, useNotifications, useMarkNotificationRead, NOTIFICATION_QUERY_KEY, useAdminBackups, useTriggerBackup, downloadBackup, BACKUP_QUERY_KEY, useConnections, useConnectionStats, useDeleteConnection, useCloneConnection, useUsers, useProjects } from './queries';
+import { exportAuditLogsCsv, launchConnection, useAuditLogs, useDashboard, useForgotPassword, useProjectStats, useResetPassword, useAdminResetLink, useUserStats, useNotifications, useMarkNotificationRead, useMarkAllNotificationsRead, NOTIFICATION_QUERY_KEY, useAdminBackups, useTriggerBackup, downloadBackup, BACKUP_QUERY_KEY, useConnections, useConnectionStats, useDeleteConnection, useCloneConnection, useUsers, useProjects } from './queries';
 import { keepPreviousData } from '@tanstack/react-query';
 import { api, ensureRefreshed } from './client.js';
 import type { AuditLogQuery } from '@remotehub/shared';
@@ -375,9 +380,11 @@ describe('通知 hooks（票 #37）', () => {
     mutationCaptured = undefined;
   });
 
-  it('useNotifications：getRaw /notifications 分页端点，queryFn 把 payload JSON 字符串归一化为对象', async () => {
+  it('useNotifications：useInfiniteQuery（#54 加载更多 append），getRaw 不剥壳分页端点', async () => {
     useNotifications();
     expect(captured).toMatchObject({ queryKey: NOTIFICATION_QUERY_KEY });
+    expect(captured).toHaveProperty('initialPageParam', 1);
+    expect(typeof captured!.getNextPageParam).toBe('function');
 
     // queryFn 归一化：REST payload 是 Prisma String 列直出的 JSON 字符串。
     // 先 mock 再唯一一次调用并 await——裸调用时 mock 返回 undefined，raw.data.map 抛出的
@@ -389,14 +396,22 @@ describe('通知 hooks（票 #37）', () => {
         { id: 'n1', type: 'MEMBER_ADDED', payload: '{"message":"张三加入了项目"}', isRead: false, createdAt: '2026-09-29T00:00:00.000Z' },
         { id: 'n2', type: 'SYSTEM_ALERT', payload: 'not-json', isRead: false, createdAt: '2026-09-29T00:00:01.000Z' }, // 脏数据兜底
       ],
-      pagination: { page: 1, pageSize: 50, total: 2 },
+      pagination: { page: 1, pageSize: 20, total: 2 },
     };
     getRawMock.mockResolvedValueOnce(rawBody);
-    const normalized = await (captured!.queryFn as () => Promise<typeof rawBody>)();
-    expect(getRawMock).toHaveBeenCalledWith('/notifications?page=1&pageSize=50');
+    const normalized = await (captured!.queryFn as (a: unknown) => Promise<typeof rawBody>)({ pageParam: 1 });
+    expect(getRawMock).toHaveBeenCalledWith('/notifications?page=1&pageSize=20');
     expect(normalized.data[0]!.payload).toEqual({ message: '张三加入了项目' }); // 字符串 → 对象
     expect(normalized.data[1]!.payload).toEqual({}); // 脏 payload 不炸列表
     expect(normalized.pagination.total).toBe(2);
+  });
+
+  it('useNotifications.getNextPageParam：翻完（page*pageSize ≥ total）返回 undefined 隐藏加载更多', () => {
+    useNotifications();
+    const getNextPageParam = captured!.getNextPageParam as (last: { pagination: { page: number; pageSize: number; total: number } }) => number | undefined;
+    expect(getNextPageParam({ pagination: { page: 1, pageSize: 20, total: 60 } })).toBe(2); // 还有下一页
+    expect(getNextPageParam({ pagination: { page: 3, pageSize: 20, total: 60 } })).toBeUndefined(); // 翻完
+    expect(getNextPageParam({ pagination: { page: 1, pageSize: 20, total: 0 } })).toBeUndefined(); // 空列表
   });
 
   it('useMarkNotificationRead：PATCH /notifications/:id/read 且无 body；成功后 invalidate 通知缓存', () => {
@@ -405,6 +420,16 @@ describe('通知 hooks（票 #37）', () => {
     useMarkNotificationRead();
     (mutationCaptured!.mutationFn as (d: unknown) => unknown)('n9');
     expect(api.patch).toHaveBeenCalledWith('/notifications/n9/read'); // 单参数 = 无 body
+    (mutationCaptured!.onSuccess as () => void)();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: NOTIFICATION_QUERY_KEY });
+  });
+
+  it('useMarkAllNotificationsRead：POST /notifications/read-all 且无 body；成功后 invalidate（角标归零）', () => {
+    const invalidate = vi.fn();
+    (useQueryClient as ReturnType<typeof vi.fn>).mockReturnValueOnce({ invalidateQueries: invalidate } as never);
+    useMarkAllNotificationsRead();
+    (mutationCaptured!.mutationFn as () => unknown)(); // read-all 无参 mutation
+    expect(api.post).toHaveBeenCalledWith('/notifications/read-all'); // 单参数 = 无 body
     (mutationCaptured!.onSuccess as () => void)();
     expect(invalidate).toHaveBeenCalledWith({ queryKey: NOTIFICATION_QUERY_KEY });
   });

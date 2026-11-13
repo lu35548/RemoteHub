@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
+import { useQuery, useMutation, useInfiniteQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { API_BASE, api, ensureRefreshed, getAccessToken, setAccessToken, mfaRequest } from './client.js';
 import { downloadBlob } from '../utils';
@@ -606,13 +606,27 @@ function parseNotificationRow(row: NotificationRow): NotificationItem {
   return { id: row.id, type: row.type, payload, isRead: row.isRead, createdAt: row.createdAt };
 }
 
-/** 未读通知列表（分页端点：响应含 pagination，走不剥壳的 getRaw；total 驱动铃铛角标） */
+/** #54 下拉「加载更多」分页大小（= 后端 DEFAULT_PAGE_SIZE；角标走 pagination.total 与页大小无关） */
+const NOTIFICATIONS_PAGE_SIZE = 20;
+
+/**
+ * 未读通知列表（分页端点：响应含 pagination，走不剥壳的 getRaw——分页双轨惯例，选错两层 mock 测不出）。
+ * #54 改 infinite（加载更多 append）；缓存键沿用 NOTIFICATION_QUERY_KEY——WS 派发层（notificationDispatch）
+ * 的 setQueryData/invalidateQueries 按 key 前缀命中，InfiniteData 形状由派发层同步适配。
+ * 角标取首页 pagination.total（每页响应携带同一未读总数）。
+ */
 export function useNotifications() {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: NOTIFICATION_QUERY_KEY,
-    queryFn: async (): Promise<PaginatedResponse<NotificationItem>> => {
-      const raw = await api.getRaw<PaginatedResponse<NotificationRow>>('/notifications?page=1&pageSize=50');
+    queryFn: async ({ pageParam }): Promise<PaginatedResponse<NotificationItem>> => {
+      const page = typeof pageParam === 'number' && pageParam >= 1 ? pageParam : 1;
+      const raw = await api.getRaw<PaginatedResponse<NotificationRow>>(`/notifications?page=${page}&pageSize=${NOTIFICATIONS_PAGE_SIZE}`);
       return { ...raw, data: raw.data.map(parseNotificationRow) };
+    },
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) => {
+      const { page, pageSize, total } = lastPage.pagination;
+      return page * pageSize < total ? page + 1 : undefined;
     },
   });
 }
@@ -622,6 +636,15 @@ export function useMarkNotificationRead() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.patch(`/notifications/${id}/read`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: NOTIFICATION_QUERY_KEY }),
+  });
+}
+
+/** #54 全部已读（POST 无 body）；成功后 invalidate → 角标归零 + 列表清空（服务端为准） */
+export function useMarkAllNotificationsRead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post('/notifications/read-all'),
     onSuccess: () => qc.invalidateQueries({ queryKey: NOTIFICATION_QUERY_KEY }),
   });
 }

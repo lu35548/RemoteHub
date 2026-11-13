@@ -18,7 +18,7 @@ vi.mock('../ws/wsServer.js', () => ({
 import { prisma as _prisma } from '../utils/prisma.js';
 import { logger } from '../utils/logger.js';
 import { sendToUser } from '../ws/wsServer.js';
-import { listUnreadNotifications, markNotificationRead, emitNotification, emitToAdmins, emitToProjectMembers } from './notificationService.js';
+import { listUnreadNotifications, markNotificationRead, markAllNotificationsRead, emitNotification, emitToAdmins, emitToProjectMembers } from './notificationService.js';
 
 const prisma = _prisma as any;
 
@@ -81,6 +81,28 @@ describe('markNotificationRead', () => {
     prisma.notificationQueue.findUnique.mockResolvedValue(null);
 
     await expect(markNotificationRead('missing', 'u1')).rejects.toMatchObject({ code: 'NOTIF_001', statusCode: 404 });
+  });
+});
+
+describe('markAllNotificationsRead（#54 一键全读）', () => {
+  it('updateMany where userId+isRead:false（无 :id 参数，天然只能批量操作本人通知）→ 返回 count', async () => {
+    prisma.notificationQueue.updateMany.mockResolvedValue({ count: 5 });
+
+    const updated = await markAllNotificationsRead('u1');
+
+    expect(prisma.notificationQueue.updateMany).toHaveBeenCalledWith({
+      where: { userId: 'u1', isRead: false },
+      data: { isRead: true },
+    });
+    expect(updated).toBe(5);
+  });
+
+  it('无未读时 count=0（幂等，不报错）', async () => {
+    prisma.notificationQueue.updateMany.mockResolvedValue({ count: 0 });
+
+    const updated = await markAllNotificationsRead('u1');
+
+    expect(updated).toBe(0);
   });
 });
 

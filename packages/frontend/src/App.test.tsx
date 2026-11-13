@@ -90,6 +90,8 @@ vi.mock('./api/queries', () => ({
   // 票 #37：通知中心消费（铃铛真实渲染，数据层受控）
   useNotifications: vi.fn(() => ({ data: undefined, isPending: false })),
   useMarkNotificationRead: vi.fn(() => ({ mutate: vi.fn(), isPending: false, variables: undefined })),
+  // 批 13a #54：NotificationCenter 新增一键全读消费(factory 随 import 扩展)
+  useMarkAllNotificationsRead: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
   // 票 #40：ProjectMembersModal 挂载即调用（isOpen false 时组件 hooks 仍执行；pid 空串停查）
   useMembers: vi.fn(() => ({ data: undefined })),
   useAddMember: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),

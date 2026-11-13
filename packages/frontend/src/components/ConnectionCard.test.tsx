@@ -139,6 +139,23 @@ describe('ConnectionCard（T5）', () => {
   });
 });
 
+describe('ConnectionCard 菜单触发器 a11y（批 13a）', () => {
+  it('更多操作按钮 aria-haspopup + aria-expanded 随菜单开合切换', () => {
+    const { unmount } = renderCard();
+    const trigger = screen.getByRole('button', { name: '更多操作' });
+    expect(trigger).toHaveAttribute('aria-haspopup', 'true');
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    unmount();
+
+    // readOnly（#48）不渲染菜单 → 触发器整体不渲染
+    const ro = renderCard({ readOnly: true });
+    expect(ro.container.ownerDocument.body.querySelector('[aria-label="更多操作"]')).toBeNull();
+    ro.unmount();
+  });
+});
+
 describe('ConnectionCard lastAccessed 脚注（#42）', () => {
   beforeEach(() => {
     decryptMock.mockReset();

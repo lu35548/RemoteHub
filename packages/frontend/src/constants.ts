@@ -137,6 +137,14 @@ export const MEMBER_ROLE_LABELS: Record<MemberRole, string> = {
   viewer: '查看者',
 };
 
+// 角色徽章配色（owner 金 / editor 蓝 / viewer 灰；批 13a 从 ProjectMembersModal 与
+// ProjectTransferModal 双组件内联常量收敛至此，两组件 import 消费，样式值零变更）
+export const ROLE_BADGE_STYLES: Record<MemberRole, string> = {
+  owner: 'bg-amber-500/10 text-amber-400 border-amber-500/30',
+  editor: 'bg-blue-500/10 text-blue-400 border-blue-500/30',
+  viewer: 'bg-slate-500/10 text-slate-400 border-slate-500/30',
+};
+
 // 通知类型 → 中文标签（票 #37 通知中心；值域 = shared NOTIFICATION_TYPES 八类，照 AUDIT_ACTION_LABELS 先例）
 export const NOTIFICATION_TYPE_LABELS: Record<NotificationType, string> = {
   FORCE_LOGOUT: '强制登出',

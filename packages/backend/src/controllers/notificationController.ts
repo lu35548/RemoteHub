@@ -22,3 +22,11 @@ export async function markRead(req: Request, res: Response, next: NextFunction) 
     res.json({ success: true, data });
   } catch (err) { next(err); }
 }
+
+/** POST /api/v1/notifications/read-all（#54 一键全读；data.updated = 受影响条数） */
+export async function markAllRead(req: Request, res: Response, next: NextFunction) {
+  try {
+    const updated = await notificationService.markAllNotificationsRead(req.user.id);
+    res.json({ success: true, data: { updated } });
+  } catch (err) { next(err); }
+}

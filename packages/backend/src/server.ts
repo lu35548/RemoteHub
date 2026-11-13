@@ -208,6 +208,27 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
     return;
   }
 
+  // 批 11 OQ(#50 畸形 JSON 落 500 而非 4xx):body-parser JSON 解析失败(entity.parse.failed)
+  // 是客户端 4xx 责任,旧口径「非 AppError 一律 500」把它吞成 500。统一错误壳 400 归口 SYS_004。
+  if ((err as { type?: string }).type === 'entity.parse.failed') {
+    res.status(400).json({
+      success: false,
+      error: { code: 'SYS_004', message: '请求体格式错误' },
+    });
+    return;
+  }
+
+  // 批 13a 裁量(lead 批准顺带):entity.too.large——/import 50mb parser 的 chunked(无 CL)兜底,
+  // 与 CL 预检 413 SYS_003 同语义异码是契约不一致,归口 413 SYS_003(nginx client_max_body_size
+  // 只是部署层兜底,不改变代码语义)。
+  if ((err as { type?: string }).type === 'entity.too.large') {
+    res.status(413).json({
+      success: false,
+      error: { code: 'SYS_003', message: '请求体超过大小限制' },
+    });
+    return;
+  }
+
   logger.error('Unhandled error', { error: err.message, stack: err.stack });
   res.status(500).json({
     success: false,

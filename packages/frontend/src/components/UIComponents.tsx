@@ -22,6 +22,10 @@ interface ModalProps {
 export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, children, className = '' }) => {
   const [isRendered, setIsRendered] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
+  // a11y（批 13a）：对话框语义 + 打开即初始焦点 + 关闭焦点返回触发器
+  // （Tab 循环 focus trap 仍是 B 类批 13b 范围，本批不做）
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -34,14 +38,31 @@ export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, children, classNa
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) {
+      // 关闭（或卸载）：焦点返回打开前的元素（触发器）；Modal 无 visibility 过渡，双 rAF 不需要
+      previousFocusRef.current?.focus();
+      previousFocusRef.current = null;
+      return;
+    }
+    // 打开：记住触发器，焦点移入对话框本体（tabIndex=-1 使其可聚焦）
+    previousFocusRef.current = (document.activeElement as HTMLElement | null) ?? null;
+    const raf = requestAnimationFrame(() => dialogRef.current?.focus());
+    return () => cancelAnimationFrame(raf);
+  }, [isOpen]);
+
   if (!isRendered) return null;
 
   return createPortal(
-    <div 
+    <div
       className={`fixed inset-0 z-[100] flex items-center justify-center transition-all duration-300 ease-out-expo ${isVisible ? 'bg-slate-950/70 backdrop-blur-sm' : 'bg-slate-950/0 backdrop-blur-none'}`}
       onClick={onClose}
     >
-      <div 
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        tabIndex={-1}
         className={`relative bg-slate-900/80 border border-white/10 w-full shadow-2xl transform transition-all duration-300 ease-out-back backdrop-blur-xl ${className} ${isVisible ? 'scale-100 opacity-100 translate-y-0' : 'scale-95 opacity-0 translate-y-8'}`}
         onClick={(e) => e.stopPropagation()}
         style={{ boxShadow: '0 0 50px -12px rgba(0, 0, 0, 0.7)' }}
@@ -166,7 +187,7 @@ const ToastItem: React.FC<{ toast: ToastMessage; onDismiss: (id: string) => void
 const ConfirmModal: React.FC<{ options: ConfirmOptions; onClose: () => void }> = ({ options, onClose }) => {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-300 ease-out-expo">
-      <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-sm p-6 animate-in zoom-in-95 duration-300 ease-out-back ring-1 ring-white/5">
+      <div role="dialog" aria-modal="true" className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-sm p-6 animate-in zoom-in-95 duration-300 ease-out-back ring-1 ring-white/5">
         <div className="flex items-start gap-4 mb-4">
           <div className={`p-3 rounded-xl ${options.variant === 'danger' ? 'bg-rose-500/10 text-rose-500' : 'bg-blue-500/10 text-blue-500'}`}>
              {options.variant === 'danger' ? <AlertTriangle size={24} /> : <Info size={24} />}

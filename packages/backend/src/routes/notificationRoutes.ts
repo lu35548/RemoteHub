@@ -69,3 +69,22 @@ notificationRoutes.get('/', authMiddleware, notificationController.listNotificat
  *               $ref: '#/components/schemas/ErrorResponse'
  */
 notificationRoutes.patch('/:id/read', authMiddleware, notificationController.markRead);
+/**
+ * @swagger
+ * /api/v1/notifications/read-all:
+ *   post:
+ *     summary: 全部标记已读(仅本人未读,批量)
+ *     tags: [Notifications]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 批量已读完成(data.updated = 受影响条数)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessResponse'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ */
+notificationRoutes.post('/read-all', authMiddleware, notificationController.markAllRead);

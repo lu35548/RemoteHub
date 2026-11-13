@@ -2,38 +2,50 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import NotificationCenter from './NotificationCenter';
-import { useNotifications, useMarkNotificationRead, type NotificationItem } from '../api/queries';
+import { useNotifications, useMarkNotificationRead, useMarkAllNotificationsRead, type NotificationItem } from '../api/queries';
 import type { PaginatedResponse } from '@remotehub/shared';
 
 // 数据层 mock：hooks 受控（照 AuditLogsPage 先例）；payloadMessage/标签表/formatTime 用真实现
+// #54 起 useNotifications 为 infinite：mock 返回 InfiniteData 形状（pages/pageParams + fetchNextPage 族）
 vi.mock('../api/queries', () => ({
   useNotifications: vi.fn(),
   useMarkNotificationRead: vi.fn(),
+  useMarkAllNotificationsRead: vi.fn(),
 }));
 
 const mockedUseNotifications = useNotifications as ReturnType<typeof vi.fn>;
 const mockedUseMarkRead = useMarkNotificationRead as ReturnType<typeof vi.fn>;
+const mockedUseMarkAll = useMarkAllNotificationsRead as ReturnType<typeof vi.fn>;
 const mutate = vi.fn();
+const mutateAll = vi.fn();
+const fetchNextPage = vi.fn();
 
 const item = (overrides: Partial<NotificationItem>): NotificationItem => ({
   id: 'n1', type: 'MEMBER_ADDED', payload: { message: '张三加入了项目「远程桌面」' },
   isRead: false, createdAt: '2026-09-29T01:02:00.000Z', ...overrides,
 });
 
-const page = (items: NotificationItem[], total = items.length): PaginatedResponse<NotificationItem> => ({
-  success: true, data: items, pagination: { page: 1, pageSize: 50, total },
+const page = (items: NotificationItem[], total = items.length, pageNo = 1): PaginatedResponse<NotificationItem> => ({
+  success: true, data: items, pagination: { page: pageNo, pageSize: 20, total },
 });
 
-/** hooks 受控注入：角标走 pagination.total（服务端未读总数），列表另给 data */
+/** hooks 受控注入：角标走首页 pagination.total（服务端未读总数），列表 = pages 展平 */
 function mockData(items: NotificationItem[], total = items.length, extra: Record<string, unknown> = {}) {
-  mockedUseNotifications.mockReturnValue({ data: page(items, total), isPending: false, ...extra } as never);
+  mockedUseNotifications.mockReturnValue({
+    data: { pages: [page(items, total)], pageParams: [1] },
+    isPending: false,
+    fetchNextPage,
+    hasNextPage: false,
+    isFetchingNextPage: false,
+    ...extra,
+  } as never);
 }
 
-describe('NotificationCenter（票 #37 铃铛 + 角标 + 下拉）', () => {
+describe('NotificationCenter（票 #37 铃铛 + 角标 + 下拉；#54 全部已读 + 加载更多）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mutate.mockClear();
     mockedUseMarkRead.mockReturnValue({ mutate, isPending: false, variables: undefined } as never);
+    mockedUseMarkAll.mockReturnValue({ mutate: mutateAll, isPending: false } as never);
   });
 
   it('铃铛按钮渲染；未读 3 → 角标显示 3', () => {
@@ -44,7 +56,7 @@ describe('NotificationCenter（票 #37 铃铛 + 角标 + 下拉）', () => {
     expect(screen.getByTestId('unread-badge')).toHaveTextContent('3');
   });
 
-  it('角标走 pagination.total（非列表长度——分页只取前 50 条）', () => {
+  it('角标走首页 pagination.total（非列表长度——分页 append 不放大角标）', () => {
     mockData([item({})], 120);
     render(<NotificationCenter />);
     expect(screen.getByTestId('unread-badge')).toHaveTextContent('99+');
@@ -54,6 +66,17 @@ describe('NotificationCenter（票 #37 铃铛 + 角标 + 下拉）', () => {
     mockData([]);
     render(<NotificationCenter />);
     expect(screen.queryByTestId('unread-badge')).not.toBeInTheDocument();
+  });
+
+  it('铃铛 aria-expanded 随下拉开合切换（a11y 披露语义）', async () => {
+    mockData([item({})]);
+    const events = userEvent.setup();
+    render(<NotificationCenter />);
+
+    const bell = screen.getByRole('button', { name: '通知' });
+    expect(bell).toHaveAttribute('aria-expanded', 'false');
+    await events.click(bell);
+    expect(bell).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('点击铃铛开下拉：类型中文标签 / payload message / 时间；再点关闭', async () => {
@@ -99,6 +122,68 @@ describe('NotificationCenter（票 #37 铃铛 + 角标 + 下拉）', () => {
 
     await events.click(buttons[1]!);
     expect(mutate).toHaveBeenCalledWith('n2');
+  });
+
+  it('全部已读（#54）：入口按钮 → mutate()；未读 0 禁用；pending 禁用', async () => {
+    mockData([item({})], 3);
+    const events = userEvent.setup();
+    render(<NotificationCenter />);
+
+    await events.click(screen.getByRole('button', { name: '通知' }));
+    const markAll = screen.getByRole('button', { name: '全部已读' });
+    expect(markAll).toBeEnabled();
+
+    await events.click(markAll);
+    expect(mutateAll).toHaveBeenCalledWith(); // 无参调用（POST 无 body）
+  });
+
+  it('全部已读（#54）：未读 0 → 按钮禁用（无操作面）', async () => {
+    mockData([], 0);
+    const events = userEvent.setup();
+    render(<NotificationCenter />);
+
+    await events.click(screen.getByRole('button', { name: '通知' }));
+    expect(screen.getByRole('button', { name: '全部已读' })).toBeDisabled();
+  });
+
+  it('全部已读（#54）：pending 中禁用（防重复提交）', async () => {
+    mockData([item({})], 2);
+    mockedUseMarkAll.mockReturnValue({ mutate: mutateAll, isPending: true } as never);
+    const events = userEvent.setup();
+    render(<NotificationCenter />);
+
+    await events.click(screen.getByRole('button', { name: '通知' }));
+    expect(screen.getByRole('button', { name: '全部已读' })).toBeDisabled();
+  });
+
+  it('加载更多（#54）：hasNextPage=true → 按钮显示，点击 fetchNextPage', async () => {
+    mockData([item({})], 41, { hasNextPage: true });
+    const events = userEvent.setup();
+    render(<NotificationCenter />);
+
+    await events.click(screen.getByRole('button', { name: '通知' }));
+    const more = screen.getByRole('button', { name: '加载更多' });
+    await events.click(more);
+    expect(fetchNextPage).toHaveBeenCalledTimes(1);
+  });
+
+  it('加载更多（#54）：hasNextPage=false（翻完）→ 按钮整条不渲染', async () => {
+    mockData([item({})], 1);
+    const events = userEvent.setup();
+    render(<NotificationCenter />);
+
+    await events.click(screen.getByRole('button', { name: '通知' }));
+    expect(screen.queryByRole('button', { name: '加载更多' })).not.toBeInTheDocument();
+  });
+
+  it('加载更多（#54）：取页中 isFetchingNextPage → 按钮禁用且文案为加载中', async () => {
+    mockData([item({})], 41, { hasNextPage: true, isFetchingNextPage: true });
+    const events = userEvent.setup();
+    render(<NotificationCenter />);
+
+    await events.click(screen.getByRole('button', { name: '通知' }));
+    const more = screen.getByRole('button', { name: '加载中…' });
+    expect(more).toBeDisabled();
   });
 
   it('点击面板外关闭下拉', () => {

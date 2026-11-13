@@ -46,6 +46,18 @@ describe('LoginPage（T3）', () => {
     expect(screen.getByRole('button', { name: /安全登录/ })).toBeInTheDocument();
   });
 
+  it('a11y（批 13a）：form field id/name 齐全且 label 关联（htmlFor → id，getByLabelText 可达）', () => {
+    mockedUseLogin.mockReturnValue({ mutateAsync: vi.fn(), isPending: false });
+    renderLogin();
+
+    const username = screen.getByLabelText('账号');
+    expect(username).toHaveAttribute('id', 'login-username');
+    expect(username).toHaveAttribute('name', 'username');
+    const password = screen.getByLabelText('密码');
+    expect(password).toHaveAttribute('id', 'login-password');
+    expect(password).toHaveAttribute('name', 'password');
+  });
+
   it('登录成功 → 欢迎回来 toast + 跳转 /', async () => {
     const user = { id: 'u1', username: 'admin', nickname: '管理员' };
     const mutateAsync = vi.fn().mockResolvedValue({ accessToken: 'tok', user });
