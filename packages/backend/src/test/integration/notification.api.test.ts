@@ -203,6 +203,7 @@ describe('未读保留上限 200（#54 capUnreadNotifications 真库函数级）
     const { capUnreadNotifications } = await import('../../utils/notificationCleaner.js');
     const converted = await capUnreadNotifications();
 
+    // 顺序依赖:converted=5 依赖前序 read-all 用例已把 userId 未读清零(本断言只统计本 describe 造的超限行);read-all 用例改动/重排时本断言会以困惑方式挂,届时同步调整
     expect(converted).toBe(5);
     expect(await b.prisma.notificationQueue.count({ where: { userId, isRead: false } })).toBe(200);
     // createdAt = now - (300+i)s：i 越大越老——最老一条是 i=204，已转已读；最新一条是 i=0，仍未读

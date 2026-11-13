@@ -40,7 +40,7 @@ export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, children, classNa
 
   useEffect(() => {
     if (!isOpen) {
-      // 关闭（或卸载）：焦点返回打开前的元素（触发器）；Modal 无 visibility 过渡，双 rAF 不需要
+      // 关闭（isOpen=false，组件保持挂载）：焦点返回打开前的元素（触发器）；组件整体卸载时 effect 不重跑、焦点不恢复；Modal 无 visibility 过渡，双 rAF 不需要
       previousFocusRef.current?.focus();
       previousFocusRef.current = null;
       return;

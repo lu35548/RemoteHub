@@ -140,7 +140,7 @@ login/register/refresh/forgot-password/mfa 各有专属配额,超限 429(code=RA
         content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } },
       },
       PayloadTooLarge: {
-        description: '请求体超限(SYS_003,413;/api/v1/admin/import 预检 Content-Length > 50mb 即拒)',
+        description: '请求体超限(SYS_003,413)。三条触发路径:①/admin/import 预检 Content-Length > 50mb 即拒;②chunked 无 Content-Length 读满 50mb parser 时拒;③部署层 nginx client_max_body_size 50m 硬顶——无 CL 头不可绕过',
         content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } },
       },
     },
