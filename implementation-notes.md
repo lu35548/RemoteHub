@@ -20,29 +20,86 @@
 - [x] **mfa 二段流审计口径**（批 2 #30 review + 未决①）：mfa/verify 成功/失败零审计（2FA 爆破不可见）；mfaPending 第一段被记 AUTH_LOGIN success 但无 session 建立语义失真。修复需新增审计 action 枚举（跨 shared AUDIT_ACTIONS + 前端 #23 标签映射）+ 恢复码使用事件可见性（OWASP 建议），属契约变更交用户裁决。 —— ✅ 立项 P2 backlog(2FA 爆破可见性安全需求)(批 13a 裁决)
 - [x] **WS 协议 shared 常量化收口**（批 4 遗留）——✅ 批 5 开工前 lead 收口（commit `740ff88`）：契约迁 shared `wsProtocol.ts`，前端 re-export 门面，backend sendTo 系列 WsServerMessage 类型锚定（当场抓 3 处测试小写枚举脑补）。
 - [x] **备份元数据「时长/状态」口径**（批 5 R2 minor-1）——✅ 用户拍板「文件即真相」（2026-11-04）：大小/时间走列表，时长走触发响应+通知 payload，状态走通知+审计，不落 manifest；已回写 spec W2-6（元数据口径裁决 blockquote），#39 备份前端按「列表第一行 + 通知历史」消费。
-- [ ] **#42 tag「多选 chips」vs #41 后端单值 tag 参数**（批 7 拆票缺口）：本票落单选切换；若需真多选 OR，需 #41 契约扩展（tag 多值包夹 OR，backend 小改）。
-- [ ] **#42 全局视图无协议分布**：stats 是 per-project 端点；若产品要全局分布需补全局聚合端点（是否立项待裁决）。
+- [x] **#42 tag「多选 chips」vs #41 后端单值 tag 参数**（批 7 拆票缺口）：本票落单选切换；若需真多选 OR，需 #41 契约扩展（tag 多值包夹 OR，backend 小改）。
+- [x] **#42 全局视图无协议分布**：stats 是 per-project 端点；若产品要全局分布需补全局聚合端点（是否立项待裁决）。
 - [x] **#45 OQ1 切协议有 port 协议间残留**：SSH→RDP 等不传 port 时残留旧值（port:none 侧已修自动清）；维持宽松（残留是历史数据非新写入）待确认。 —— ✅ 维持现状(写入侧已堵,残留为历史数据)(批 13a 裁决)
 - [x] **#45 分派裁量确认**：VNC→400 CONN_006（未来支持只需 registry 加 launchAction）/ HTTP→URL（spec 未列自然延伸）/ TEAMVIEWER/ANYDESK→设备码命令串（对齐前端先例）。 —— ✅ 维持现状(行为已随 #45 真机验收追认)(批 13a 裁决)
 - [x] **#43 克隆不重跑全量字段校验**（批 8）：只校验新名，存量字段免新规则拦截——与 #45「存量零破坏」口径一致；若产品要求克隆强制全量校验再改。 —— ✅ 维持现状(与 #45 存量零破坏口径一致)(批 13a 裁决)
 - [x] **Zap「配置直连」引导链路去留**（批 8）：launch 端点时代该链路承诺（唤起 mstsc）与实际行为（下载 .rdp）矛盾，本批只修文案；整链砍除属功能裁决（砍则 triggerRdpProtocol/isRdpReady/showRdpSetup/downloadRdpFile 引用链一并）。 —— ✅ 立项 P2 backlog(死链路砍除票)(批 13a 裁决)
-- [ ] **编辑态 username:'none' 协议遗留值不可清**（批 8）：存量 HTTPS/TODESK 行历史 username 回填后输入框隐藏、静默重提交不可清（数据无损）——是否需要编辑态查表清值交裁决。
-- [ ] **#47 归档项目连接域写禁制未加**（批 10）：归档仅改 status，归档项目的连接写入端点无拦截（API 直写仍成功）——spec「只读展示」按前端视图概念处理，#48 归档前端落地时若需端点级强制再补，交裁决。
+- [x] **编辑态 username:'none' 协议遗留值不可清**（批 8）：存量 HTTPS/TODESK 行历史 username 回填后输入框隐藏、静默重提交不可清（数据无损）——是否需要编辑态查表清值交裁决。
+- [x] **#47 归档项目连接域写禁制未加**（批 10）：归档仅改 status，归档项目的连接写入端点无拦截（API 直写仍成功）——spec「只读展示」按前端视图概念处理，#48 归档前端落地时若需端点级强制再补，交裁决。
 - [x] **#49 移焦真机复验**（批 10）——✅ 2026-11-12 批 11 真机销账：3 轮关→开循环焦点全部落抽屉「关闭导航菜单」按钮（4-reviewer 并行高负载下桌面基线稳定，批 10 transitionend 修复实证）。
 - [x] **响应码快照测试候选**（批 12）：对账测试只锁 operations 数，注解响应块内部错位（splice 插点错 7 处实录）靠逐端点 responses 键审计才见底——是否固化「响应码快照」测试交裁决（面太宽本票未加）。 —— ✅ 批 13a 落地(commit e8bc951/7c01588)
 - [x] **backend 全量 vitest 并发 flaky**（批 12）：751 用例全量首验撞 2 时序断言红（clone 审计行 0 条/WS shutdown readyState CLOSING），单跑绿+全量二验绿实锤 flaky 非回归；候选修法=锁 threads 池（前端 #26 方案 A 先例）或 vitest.retry，交裁决。 —— ✅ 批 13a 落地(commit e8bc951/7c01588)
-- [ ] **#48 批量归档 UI 立项形态**（批 11）：票面「实施按最小」裁量不接 UI（batch-archive 端点已在 #47 真机验收）；形态候选=管理后台项目页 or 项目列表多选，待裁决。
+- [x] **#48 批量归档 UI 立项形态**（批 11）：票面「实施按最小」裁量不接 UI（batch-archive 端点已在 #47 真机验收）；形态候选=管理后台项目页 or 项目列表多选，待裁决。
 - [x] **#48 转让候选 >20 人只显第一页**（批 11）：useMembers 缺省 pageSize，membersModal 同边界且有提示文案，本弹窗未做——最小实现挂账。 —— ✅ 维持现状(分组遗漏补裁,与 membersModal 同边界有提示文案先例)(批 13a 裁决)
 - [x] **#50 F1 chunked 残余敞口**（批 11）：Content-Length 预检只挡有 CL 的请求，chunked 无 CL 仍读满才 413——部署层确认 nginx client_max_body_size ≤50mb 留痕即闭环。 —— ✅ 批 13a 落地(commit e8bc951/7c01588)
 - [x] **#50 畸形 JSON 落 500 而非 4xx**（批 11）：全局 error handler 非 AppError 一律 500（body-parser 400 被吞）——预存在全局行为，独立小票候选。 —— ✅ 批 13a 落地(commit e8bc951/7c01588)
 - [x] **#50 import 403 不留痕**（批 11）：与 export 统一程序化审计通道的知情代价，backupRoutes POST 有留痕同域不一致——是否双轨补 403 留痕交裁决。 —— ✅ 批 13a 落地(commit e8bc951/7c01588)
 - [x] **a11y 基线票候选**（批 11 rev-48-std 提出）：菜单按钮 aria-haspopup/aria-expanded、Modal role="dialog"+焦点管理、Sidebar 菜单项 div 非 button、登录页 form field 缺 id/name（console issue 实测）——均既有基线非批 11 回归，独立票处理。 —— ✅ 批 13a 落地(commit e8bc951/7c01588)
 - [x] **ROLE_BADGE_STYLES 双组件重复**（批 11）：ProjectMembersModal 与 ProjectTransferModal 同款内联（有意避免导出耦合）——合流收敛挂账。 —— ✅ 批 13a 落地(commit e8bc951/7c01588)
-- [ ] **M3 focus trap 未做**（批 10）：抽屉开态 Tab 可进背景内容（仅做了 invisible/移焦/Esc/aria-controls）——rev-49-std，交裁决。
-- [ ] **Sidebar 搜索限当前页**（批 10）：>100 项目翻页后搜索只搜当前 100 条（静默缩窄，接入分页前搜索覆盖全量）——是否搜索态禁翻页/走后端 q/加提示，交裁决。
-- [ ] **底表仍限 100**（批 10）：ConnectionModal 项目下拉/Via 依赖查找/全局 chips 走 page=1 底表，>100 时缺项是现状限制——是否扩大，交裁决。
+- [x] **M3 focus trap 未做**（批 10）：抽屉开态 Tab 可进背景内容（仅做了 invisible/移焦/Esc/aria-controls）——rev-49-std，交裁决。
+- [x] **Sidebar 搜索限当前页**（批 10）：>100 项目翻页后搜索只搜当前 100 条（静默缩窄，接入分页前搜索覆盖全量）——是否搜索态禁翻页/走后端 q/加提示，交裁决。
+- [x] **底表仍限 100**（批 10）：ConnectionModal 项目下拉/Via 依赖查找/全局 chips 走 page=1 底表，>100 时缺项是现状限制——是否扩大，交裁决。
 - [x] **单项目幂等 vs 批量幂等口径不对称**（批 10）：单项目重复 archive=幂等成功+再落一行审计；批量重复=skipped+零审计——rev-47-std nit,后续票若统一以批量口径为准需同步单项目语义。 —— ✅ 维持现状(纯口径差异,动幂等语义时统一)(批 13a 裁决)
 - [x] **越界页码显示边角**（批 10）：末页末条删除瞬间 footer 可显示「第 2/1 页」（消费方钳制已修,Pagination 组件自身不自正）——rev-49-std nit,记录备查。 —— ✅ 批 13a 落地(commit e8bc951/7c01588)
+
+---
+
+## [2026-11-14] P1 批 13b：B 类 8 条功能全做 ✅
+
+**用户裁决（2026-11-14）**：B 类 8 条「总验收前全做」；批量归档 UI 形态拍板 **管理后台项目页**（新建 /admin/projects 独立页，非 Sidebar 多选）。
+
+**收官数据（2026-11-14 lead 终验）**：质量门终值 **backend 809 / shared 59 / frontend 354** 八门全 EXIT=0（基线 767/59/321 → +42/+0/+33）；backend 首验 2 timeout 型红（performance.api 403/schema 索引——与本批 diff 零交集）系双 reviewer 并行负载 flaky，无负载二验 292s 全绿坐实（单跑 10/10 绿同证）。commit 链 16 个（be×7 + wb×1 + cs×2 + lead×2 + 本 docs）。真机八项全过：C1 AdminProjectsPage 全链（批量归档 confirm→恢复免确认→121↔119↔121 零损循环）/A1 归档写禁制 API 直写（四写端点全 409 CONN_007+活跃对照 201）/全局协议分布徽章（活跃聚合 SSH 130 等）/chips 多选（URL ?tags= 真相源+三 chip 并存 pressed+并集 5 条 OR 自洽）/搜索后端化（b-proj-01→精确 10+total 一致）/底表 500（121 项目全量首屏）/focus trap 双向环绕（真机抓 display:none 静默拒绝 bug 已修 46dec2b）/haspopup="menu" 全站 a11y 树。**顶部 OQ 清单 8 条 B 类全部勾选（回读校验通过），OQ 清单归零——批 14 #53 浏览器级总验收扫无挂账最终形态解锁。**
+
+### Design decisions（lead 裁决·收官增补）
+- [2026-11-14] 决策：**A1 clone 拒绝审计程序化补行**（commit 1564e7a）——review 修复期四轮探针实锤「patch 通道对 POST /:id/clone 的 409 不落行」（裸 create/update/delete 409 落行、clone 201 落行、无 logger error；Express 5.2.1 错误流与 auditMiddleware res.json patch 的交互分裂，根因未明挂 OQ）——实测行为定修复面：clone 分支抛错前程序化落行（import 403 先例），其余三 op 维持 patch 通道防双写，程序化行与 patch 行逐字段同形状（waitForAudit 断言零改动即锁）。
+- [2026-11-14] 决策：**focus trap display:none 过滤三态判定**（commit 46dec2b）——真机 375px 实测抓到 wb 移交清单预言的盲区（jsdom 无 focusability）：移动态抽屉 DOM 首元素是 display:none 的桌面折叠按钮，Tab 环回 focus() 被 Chrome 静默拒绝。修复判定式 `offsetParent!==null || getComputedStyle().display!=='none'` 三态兼容（真浏览器/隐藏元素/jsdom 恒 null 全保留），纯 offsetParent 过滤会全滤掉 jsdom 集合致既有用例崩。备选：checkVisibility API（jsdom 无此 API 仍需兜底——弃）。
+- [2026-11-14] 决策：批量恢复**免 confirm**（真机实测 cs 线裁量追认）——归档=冻结语义需确认（危险方向），恢复=解冻无损直行（安全方向）；对称性裁量为合理产品决策记录在案。
+
+### Deviations
+- cs 完工报告漏报 ConnectionCard.test.tsx 改动（测试断言改了组件未改未 commit）——lead 亲修组件合璧收口（fecea41），报告 vs 落盘真相核对纪律再 +1。
+- CONN_005 撞名对照实验不可达——clone「(副本)」递增避让使撞名恒 201，语义性 409 不可构造（探针意外产出该事实，固化进 OQ 挂账）。
+
+### Tradeoffs（review 战果与挂账）
+- 双轴 review 合计 **0 blocker / 0 major / 4 minor / 7 nit**（spec 轴 14/14 AC 满足+A1 审计链亲核成立+A2 无恒真突击零残留；std 轴六维度全过，测试质量为本批亮点）；lead 亲修 7 项（4 minor+2 nit+1 spec-nit 断言补强），挂账 4 项（AdminProjectsPage 双分页常量同值异源/ProjectMenuItem 函数体内定义/aggregateStats 12 行重复可抽 helper/useGlobalConnectionStats 项目视图恒查——均零行为风险随下批顺手）。
+- C4 底表(500)/展示列表(100) page=1 不再同 key 去重（代价一次并发 GET，注释在位）；A6 抬 500 的「联动面回扫」教训：constants 注释/测试名/跨线注释引用三处漂移（std 轴 3 minor 同根因）——常量语义变更的回扫面必须含前端注释文案。
+
+### Open questions（本批新挂）
+- **auditMiddleware patch 通道对 clone 409 的落行分裂根因**（A1 修复期实锤）：POST /:id/clone 的 gate 拒绝路径 res.json patch 不触发（同构 update/delete 落行正常、clone 201 正常、无错误日志）——已程序化绕行不阻塞，Express 5.2.1 错误流交互根因待后续票定位（防未来其他 POST 子路径路由重蹈）。
+- **B3 username:'none' 真机未做**：单测 3 用例锁双边界（存量哨兵清值/真实输入 "none" 保留），真机路径与「编辑保存」通用链路同构无新增暴露面，#53 总验收时顺带扫。
+
+**团队构成**：3× implementer(sonnet) 三线并行 + lead 收口——**be**（backend+shared 独占：写禁制/tags OR 契约/batch-restore/全局 stats 端点/projects q 参数）∥ **wb**（Sidebar/ConnectionModal/queries useProjects 段：focus trap+dialog name/搜索后端化/username:'none' 清值/haspopup+closeMenuAnd nit 的 Sidebar 侧）∥ **cs**（AdminProjectsPage 新页/App/FilterBar/queries 其余段：批量归档恢复页/tag chips 多选/全局分布 UI/底表 500/nit 的 App 侧）。queries.ts 双线分区所有权（useProjects=wb / useConnections+新增 hook=cs）+ commit 时序纪律（wb 先 commit，cs 后动 queries）。
+
+### Design decisions(lead 裁决)
+- [2026-11-14] 决策：tags 契约**替换** `tag:string` → `tags:string`（URL 逗号分隔，N 值间 OR、每值仍四条件包夹）——内部 API 零第三方消费，双参数并存兼容属过度设计。备选：tag+tags 并存（为何没选：无存量消费方需兼容）。
+- [2026-11-14] 决策：写禁制 **CONN_007 409**（'项目已归档，连接不可变更'）+ import 403 留痕先例（程序化 writeSystemAudit 再抛错）——读端点与 launch 直连不拦（归档=只读展示+消费语义）；换项目双向（源/目标 archived）均拦。
+- [2026-11-14] 决策：全局分布挂 **GET /connections/stats**（authMiddleware，用户可见活跃项目聚合，形状对齐 shared ConnectionStats）——Express 参数路由陷阱：/stats 须注册于 /:id 之前（prompt 已标注）。
+- [2026-11-14] 决策：Sidebar 搜索**走后端 q**（候选三：搜索态禁翻页/后端 q/加提示——选 q：覆盖全量+翻页一致+connections q 先例；projects list 原无 q 参数由 be 线承做）；Sidebar 300ms debounce；底表不带 q（依赖查找全量口径不变）。
+- [2026-11-14] 决策：底表 100→**500**（内网量级余量；>500 场景挂账说明随注释）。
+- [2026-11-14] 决策：**batch-restore 端点由 be 线对称补齐**（照 batch-archive 全链镜像含幂等/审计）——避免 cs 线循环调单项目恢复端点。
+
+### be 线施工日志（impl-13b-be，5 票全绿）
+
+**质量门终值（五门全 EXIT=0）**：backend vitest **809/809**（基线 767→+42，含 A6）/ shared vitest **59/59** / backend lint / backend tsc / shared tsc。commits：`f2fcc2f` A1 → `45f2b87` A2 → `629e9a7` A3 → `c53de87` A4 → `9545b7a` A5 → `6e0d79d` 质量门收尾 → `e384fd7` A6 追加票（每票分组精确 add，未裹挟 fe 并行线）。A6：MAX_PAGE_SIZE 100→500 全局抬（六 service Math.min 走 shared 常量自动跟随，grep 核无硬编码残留；audit/notification clamp 断言订正 600→钳500 + projects 补 take 500 用例）。
+
+**Design decisions**：
+- [2026-11-14] 决策：A1 审计留痕**复用前置 auditMiddleware 自动落行而非程序化双写**——connection 四写路由 auditMiddleware 挂在 role 门之前，res.json patch 捕获 409 envelope 自动落 failure 行（reason=CONN_007）；import 路由需程序化是因其根本未挂 auditMiddleware。备选：照票面先例程序化 writeSystemAudit 再抛错（为何没选：与自动通道双写污染审计轨迹）。create 拒绝行 resourceId=null（连接实体尚不存在），projectId 经 AppError details 进响应体。
+- [2026-11-14] 决策：A1 gate 挂 projectRoleMiddleware **之后**（先权限后状态）——无权限者 403 不泄露项目归档态；admin 不豁免（「一律」语义）。
+- [2026-11-14] 决策：A1 依赖侧（requiredVpnId 指向归档项目 VPN）**防御性显式检查**——现状 validateVpnDependency 同项目约束使该侧被项目侧检查传递覆盖，显式检查不依赖该传递性，未来约束放松不静默失守。
+- [2026-11-14] 决策：A3 批量归档/恢复**表驱动内核 batchSetStatus 共用**（两公开函数各自构造响应键名 archived/restored）——镜像语义零逻辑分叉；幂等条件=状态已一致（targetStatus）skip 零审计。
+- [2026-11-14] 决策：A5 翻页用例**自洽断言不假设 copy 次数**——命中集含深拷贝 describe 产生的副本们（递增用例可产生 (副本) 2），断言检索 total 与翻页 total 不漂移而非硬编码 2。
+
+**Deviations**：
+- A2 红阶段未单独 proxy 复跑（断言写于实现前、实现与测试同批落地），绿验证 161/161 EXIT=0 全量可复核；其余四票均真红确认在案。
+- A4 红测试首版用 TELNET 造数 422——TELNET 不在协议注册表（十协议），期望值脑补改 TODESK（顺带覆盖设备码 hostSemantics）。
+
+**Tradeoffs**：
+- 本会话生成层损坏高发（7 次大面积伪语法/占位符/引号丢失），改用 **python heredoc 写入 + sed 抽查**后零复发；Edit 长段是重灾区。
+- A1 create 拒绝行 resourceId=null 语义：连接实体尚不存在，追溯链=userId+action+reason+ip（projectId 在响应 error.details）。
+
+**Open questions**：
+- 无新挂。A1 拦截语义若未来要 admin 豁免（如运维修数据）需契约变更再议。
 
 ---
 
@@ -1335,3 +1392,24 @@ D1–D10 全部拍板；剩余见顶部「待办」。
 - Plan A Task8 docker build/load 验证（本环境无 Docker 守护进程）—— D7 plan 验证项未实际执行。
 - D7 终验依赖 docker build。
 
+
+## [2026-11-14] P1 批 13b wb 线（Sidebar/ConnectionModal 域四票）✅
+
+commit `ccdb01f`（先于 cs 线落 queries.ts，useConnections 段零触碰）。测试 349/349 全绿（基线 321 + 16 条新增）。
+
+### Design decisions
+- [2026-11-14] 决策：B2 hook q 归一用**条件展开** `['projects',page,pageSize,...(q?[q]:[])]`。理由：不传 q 时 key 与旧形状逐元素一致（底表/展示列表缓存形状零漂移）。备选：尾元素恒置 undefined（为何没选：JSON.stringify 下 undefined→null，与旧 hash 不等，缓存全量换血）。
+- [2026-11-14] 决策：Sidebar 搜索态查询由 **Sidebar 内部自管理**（debouncedQ+searchPage state + enabled 门），不上抛 App 层。理由：App.tsx 禁碰（cs 线所有权），搜索态是 Sidebar 局部 UI 态（归档折叠区先例）。底表（App 固定 1,100）不带 q 天然满足。
+- [2026-11-14] 决策：debounce 清空回退走 **0ms 定时器**（trimmed 空时 timeout 0）而非 effect 内同步 setState。理由：避开 react-compiler cascading-render lint error；语义等价（异步 0ms 用户无感）。备选：eslint-disable（为何没选：能重构绕开就不 disable）。
+- [2026-11-14] 决策：B1 role=dialog **开态条件渲染**（`role={isMobileOpen?'dialog':undefined}`）。理由：桌面常驻侧栏是导航 landmark 非 dialog，关态保留 aria-label。13a 挂账描述「已做 role=dialog」与代码不符（实况：dialog 语义只在 UIComponents Modal/ConfirmDialog），本票补齐抽屉侧。
+
+### Deviations
+- B1 票面「13a 已做 role=dialog+初始焦点」与实际代码不符——dialog 语义本票新做（移焦/Esc/invisible 13a 确已做，测试未回退）。
+
+### Tradeoffs
+- focus trap 用**容器 onKeyDown** 而非 document 级监听：焦点在 body 的极短窗口（初始移焦前）拦不住第一次 Tab——初始移焦（双 rAF+transitionend 双路）已保证开态焦点入抽屉，容器级即闭环；document 级会拦截桌面态全页 Tab 需复杂豁免逻辑。
+
+### Open questions（移交 lead）
+- **focus trap 真机验收项**：jsdom 无 focusability 检查（invisible 按钮在真机 focus 语义/浏览器默认 Tab 序交互）——真机开抽屉 Tab 全程循环验证（批 10 移焦真机复验先例）。
+- **票面勘误**：B2 票面「底表固定 1,500」实为 **1,100**（App.tsx:61 `useProjects(1,100)`）；cs 线底表 100→500 决策落地时顺带订正。
+- **宿主 lint/tsc 残留**：queries.ts:289 useConnections 段 tag→tags 类型漂移 + queries.test.ts:479 同源——**cs 线所有权段**（shared tags 契约已由 be 线替换，前端消费侧适配归 cs），wb 未触碰。
