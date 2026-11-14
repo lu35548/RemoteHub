@@ -45,6 +45,15 @@ export async function getProjectConnectionStats(req: Request, res: Response, nex
   } catch (err) { next(err); }
 }
 
+/** 批 13b-A4 全局协议分布（GET /connections/stats，authMiddleware 无项目角色门；
+ * service 层按用户可见性聚合活跃项目，admin 全量）。 */
+export async function getGlobalConnectionStats(req: Request, res: Response, next: NextFunction) {
+  try {
+    const data = await connectionService.getGlobalConnectionStats(req.user.id, req.user.role);
+    res.json({ success: true, data });
+  } catch (err) { next(err); }
+}
+
 export async function createConnection(req: Request, res: Response, next: NextFunction) {
   try {
     const data = await connectionService.createConnection(req.user.id, req.body);

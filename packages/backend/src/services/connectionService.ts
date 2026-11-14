@@ -529,6 +529,35 @@ export async function decryptPassword(connectionId: string) {
   return { password: decrypt(connection.encryptedPass) };
 }
 
+/** 批 13b-A4 全局协议分布聚合（GET /connections/stats，挂 authMiddleware 无项目角色门）。
+ * 聚合范围 = 该用户可见的**活跃项目**（非 archived；admin=全部活跃项目 / 非 admin=已加入项目，
+ * 可见性口径对齐 listProjects）的全部分连接；归档项目连接不计入（归档=冻结，分布只看活水）。
+ * 返回形状对齐 shared ConnectionStats（编译期锁契约，getConnectionStats 同款）。 */
+export async function getGlobalConnectionStats(userId: string, userRole: string): Promise<ConnectionStats> {
+  const connections = await prisma.connection.findMany({
+    where: {
+      project: {
+        status: 'active',
+        ...(userRole === 'admin' ? {} : { members: { some: { userId } } }),
+      },
+    },
+    select: { protocol: true, tags: true },
+  });
+
+  const protocols: Record<string, number> = {};
+  const tags: Record<string, number> = {};
+  for (const c of connections) {
+    protocols[c.protocol] = (protocols[c.protocol] ?? 0) + 1;
+    if (!c.tags) continue;
+    for (const fragment of c.tags.split(',')) {
+      if (fragment === '') continue; // 空片段剔除（"a,,b"）
+      tags[fragment] = (tags[fragment] ?? 0) + 1;
+    }
+  }
+
+  return { protocols, tags };
+}
+
 // ─── #45 直连分派（launch）───
 
 /** launch 结果三形态：rdp_file 带文件体（controller 设 Content-Type/Disposition 后 Buffer 直发）；

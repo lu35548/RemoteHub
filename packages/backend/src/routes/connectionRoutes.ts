@@ -50,6 +50,28 @@ export const connectionRoutes: RouterType = Router();
  *         $ref: '#/components/responses/Unauthorized'
  */
 connectionRoutes.get('/', authMiddleware, connectionController.listConnections);
+// 批 13b-A4 全局协议分布：authMiddleware（无项目角色门），聚合范围=用户可见活跃项目（service 层判定）。
+// **注册顺序红线：/stats 必须在 /:id 之前**——Express 参数路由会吞掉静态段（否则 GET /connections/stats
+// 匹配 GET /:id 的 viewer 门 → 非成员 403 / admin 404）
+/**
+ * @swagger
+ * /api/v1/connections/stats:
+ *   get:
+ *     summary: 全局协议分布聚合(用户可见活跃项目的连接统计)
+ *     tags: [Connections]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 协议/标签聚合计数(形状对齐 shared ConnectionStats;admin=全部活跃项目,非 admin=已加入项目)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessResponse'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ */
+connectionRoutes.get('/stats', authMiddleware, connectionController.getGlobalConnectionStats);
 /**
  * @swagger
  * /api/v1/connections:
