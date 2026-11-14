@@ -28,6 +28,10 @@ export const ERROR_CODES: Record<string, number> = {
   CONN_005: 409,
   // 协议注册表（票 #45）：该协议无定义直连动作（如 VNC——v1 handleConnect 即无分支，等价保留）
   CONN_006: 400,
+  // 批 13b 票 A1（OQ 批 10 挂账）：归档项目连接域端点级写禁制——目标项目 status=archived 时
+  // 连接写入操作（create/update/delete/clone，含换项目双向与 requiredVpnId 依赖侧）一律 409；
+  // 读端点不拦（归档=只读展示+消费语义）
+  CONN_007: 409,
   PROJ_001: 409,
   PROJ_002: 404,
   MEMBER_001: 409,
@@ -79,6 +83,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   CONN_004: 'VPN 仍被其他连接依赖',
   CONN_005: '同项目内连接名称已存在',
   CONN_006: '该协议不支持直连',
+  CONN_007: '项目已归档，连接不可变更',
   PROJ_001: '项目名称冲突',
   PROJ_002: '项目不存在',
   MEMBER_001: '成员已存在于项目中',

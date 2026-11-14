@@ -3,10 +3,15 @@ import { Router, type Router as RouterType } from 'express';
 import { authMiddleware } from '../middleware/auth.js';
 import { projectRoleMiddleware } from '../middleware/projectRole.js';
 import { auditMiddleware } from '../middleware/audit.js';
+import { archivedProjectWriteGate } from '../middleware/archivedWriteGate.js';
 import * as connectionController from '../controllers/connectionController.js';
 import type { MemberRole } from '@remotehub/shared';
 
 export const connectionRoutes: RouterType = Router();
+
+// 批 13b 票 A1：归档项目连接域写禁制（四写端点挂 archivedProjectWriteGate，见 middleware/archivedWriteGate.ts；
+// 拦截语义=目标项目 archived → 一律 409 CONN_007，读端点不拦。swagger ERROR_CODE_ENUM 动态生成自
+// ERROR_CODES——CONN_007 已入表零枚举同步）
 
 /**
  * @swagger
@@ -93,13 +98,13 @@ connectionRoutes.get('/', authMiddleware, connectionController.listConnections);
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  *       409:
- *         description: 同项目连接名冲突(CONN_005)
+ *         description: 同项目连接名冲突(CONN_005)或项目已归档(CONN_007)
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  */
-connectionRoutes.post('/', authMiddleware, auditMiddleware({ action: 'CONNECTION_CREATE', resource: 'connection' }), projectRoleMiddleware('editor' as MemberRole), connectionController.createConnection);
+connectionRoutes.post('/', authMiddleware, auditMiddleware({ action: 'CONNECTION_CREATE', resource: 'connection' }), projectRoleMiddleware('editor' as MemberRole), archivedProjectWriteGate('create'), connectionController.createConnection);
 /**
  * @swagger
  * /api/v1/connections/{id}:
@@ -174,13 +179,13 @@ connectionRoutes.get('/:id', authMiddleware, projectRoleMiddleware('viewer' as M
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  *       409:
- *         description: 名称冲突(CONN_005)或 VPN 仍被依赖(CONN_004)
+ *         description: 名称冲突(CONN_005)、VPN 仍被依赖(CONN_004)或项目已归档(CONN_007，含换项目目标侧与 requiredVpnId 依赖侧)
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  */
-connectionRoutes.patch('/:id', authMiddleware, auditMiddleware({ action: 'CONNECTION_UPDATE', resource: 'connection' }), projectRoleMiddleware('editor' as MemberRole), connectionController.updateConnection);
+connectionRoutes.patch('/:id', authMiddleware, auditMiddleware({ action: 'CONNECTION_UPDATE', resource: 'connection' }), projectRoleMiddleware('editor' as MemberRole), archivedProjectWriteGate('update'), connectionController.updateConnection);
 /**
  * @swagger
  * /api/v1/connections/{id}:
@@ -212,13 +217,13 @@ connectionRoutes.patch('/:id', authMiddleware, auditMiddleware({ action: 'CONNEC
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  *       409:
- *         description: VPN 仍被其他连接依赖(CONN_004)
+ *         description: VPN 仍被其他连接依赖(CONN_004)或项目已归档(CONN_007)
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  */
-connectionRoutes.delete('/:id', authMiddleware, auditMiddleware({ action: 'CONNECTION_DELETE', resource: 'connection' }), projectRoleMiddleware('editor' as MemberRole), connectionController.deleteConnection);
+connectionRoutes.delete('/:id', authMiddleware, auditMiddleware({ action: 'CONNECTION_DELETE', resource: 'connection' }), projectRoleMiddleware('editor' as MemberRole), archivedProjectWriteGate('delete'), connectionController.deleteConnection);
 /**
  * @swagger
  * /api/v1/connections/{id}/decrypt-password:
@@ -340,10 +345,10 @@ connectionRoutes.get('/:id/launch', authMiddleware, auditMiddleware({ action: 'C
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  *       409:
- *         description: 同项目连接名冲突(CONN_005)
+ *         description: 同项目连接名冲突(CONN_005)或项目已归档(CONN_007)
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  */
-connectionRoutes.post('/:id/clone', authMiddleware, auditMiddleware({ action: 'CONNECTION_CREATE', resource: 'connection' }), projectRoleMiddleware('editor' as MemberRole), connectionController.cloneConnection);
+connectionRoutes.post('/:id/clone', authMiddleware, auditMiddleware({ action: 'CONNECTION_CREATE', resource: 'connection' }), projectRoleMiddleware('editor' as MemberRole), archivedProjectWriteGate('clone'), connectionController.cloneConnection);
