@@ -585,6 +585,21 @@ describe('批 13b B1 抽屉 focus trap + dialog 语义', () => {
     expect(screen.getByRole('button', { name: '折叠侧栏' })).toHaveFocus();
   });
 
+  it('末元素 Tab 环绕跳过 display:none 首元素（真机复验修复：Chrome 静默拒绝 display:none 的 focus）', async () => {
+    const { focusables } = renderOpenDrawer();
+    await waitFor(() => expect(screen.getByRole('button', { name: '关闭导航菜单' })).toHaveFocus());
+    // 移动态真机形态：DOM 首元素（折叠侧栏）display:none——真浏览器经 offsetParent 判定过滤，
+    // jsdom 无 layout（offsetParent 恒 null）经计算样式兜底判定（inline style 可读）
+    const first = focusables[0]!;
+    expect(screen.getByRole('button', { name: '折叠侧栏' })).toBe(first);
+    first.style.display = 'none';
+    const last = focusables[focusables.length - 1]!;
+    last.focus();
+    fireEvent.keyDown(last, { key: 'Tab' });
+    // 环绕落点 = 过滤后集合的首个可见元素（关闭导航菜单），而非被静默拒绝的 display:none 元素
+    expect(screen.getByRole('button', { name: '关闭导航菜单' })).toHaveFocus();
+  });
+
   it('开态首元素 Shift+Tab → preventDefault + 焦点环绕回末元素', async () => {
     const { focusables } = renderOpenDrawer();
     await waitFor(() => expect(screen.getByRole('button', { name: '关闭导航菜单' })).toHaveFocus());

@@ -135,7 +135,12 @@ const Sidebar: React.FC<SidebarProps> = ({
       drawerRef.current?.querySelectorAll<HTMLElement>(
         'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
       ) ?? [],
-    );
+      // 真机复验修复（批 13b）：移动态 display:none 的桌面折叠按钮排集合首位，Tab 环回首元素时
+      // focus() 被 Chrome 静默拒绝（jsdom 无 focusability 检查测不出）——须过滤不可见元素。
+      // 判定三态：真浏览器 offsetParent 非空即可见；display:none 时 offsetParent 为 null，
+      // 回落计算样式判定；jsdom 无 layout（offsetParent 恒 null 且不应用样式表）→ 全保留，
+      // 既有 jsdom 用例语义不变。
+    ).filter((el) => el.offsetParent !== null || getComputedStyle(el).display !== 'none');
     if (focusables.length === 0) return;
     const active = document.activeElement as HTMLElement | null;
     const idx = active ? focusables.indexOf(active) : -1;
