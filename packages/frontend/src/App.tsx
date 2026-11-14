@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ConnectionDetail, ConnectionListItem, ConnectionListQuery, CreateConnectionRequest, ProjectListItem, ProjectDetail, UserPublic } from '@remotehub/shared';
 import { api, setAccessToken } from './api/client';
-import { useMe, useLogout, useProjects, useArchivedProjects, useArchiveProject, useRestoreProject, useCopyProject, useConnections, useConnectionStats, useCreateProject, useUpdateProject, useDeleteProject, useCreateConnection, useUpdateConnection, useDeleteConnection, useCloneConnection, NOTIFICATION_QUERY_KEY } from './api/queries';
+import { useMe, useLogout, useProjects, useArchivedProjects, useArchiveProject, useRestoreProject, useCopyProject, useConnections, useConnectionStats, useGlobalConnectionStats, useCreateProject, useUpdateProject, useDeleteProject, useCreateConnection, useUpdateConnection, useDeleteConnection, useCloneConnection, NOTIFICATION_QUERY_KEY } from './api/queries';
 import type { ProjectListItemWithStatus } from './api/queries';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { useWs } from './hooks/useWs';
@@ -25,15 +25,15 @@ import { Pagination } from './components/Pagination';
 import { getAvatarColor } from './utils/avatar';
 
 // ── #42 工作台过滤 URL 联动 ──
-// URL（q/tag/sort）是过滤态唯一真相源：刷新/分享进入即还原（AC），交互 replace 写入
+// URL（q/tags/sort）是过滤态唯一真相源：刷新/分享进入即还原（AC），交互 replace 写入
 // 不产生历史条目（搜索/过滤非导航语义）；空值不拼、键序固定（对齐审计页 auditLogParams 模式）
 const WORKBENCH_SEARCH_DEBOUNCE_MS = 400;
 
-/** 过滤三参 → URL query（q→tag→sort 键序固定） */
-function buildWorkbenchParams(q: string, tag: string, sort: string): URLSearchParams {
+/** 过滤三参 → URL query（q→tags→sort 键序固定；tags 逗号串多值，空串不拼参——批 13b C2） */
+function buildWorkbenchParams(q: string, tagsParam: string, sort: string): URLSearchParams {
   const params = new URLSearchParams();
   if (q) params.set('q', q);
-  if (tag) params.set('tag', tag);
+  if (tagsParam) params.set('tags', tagsParam);
   if (sort) params.set('sort', sort);
   return params;
 }
@@ -55,10 +55,11 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
   const deleteConnectionMutation = useDeleteConnection();
   const cloneConnectionMutation = useCloneConnection();
 
-  // #49 项目列表拆双查询：底表（page=1 固定）供 ConnectionModal 项目下拉 + header 标题查找
+  // #49 项目列表拆双查询：底表（page=1 固定）供 ConnectionModal 项目下拉 + Via 依赖查找 + header 标题
   // （依赖数据需全量口径，维持原「一次拉全」语义）；展示查询（受控 page）供 Sidebar 翻页。
-  // page=1 时两查询同 queryKey ['projects',1,100] → react-query 自动去重为单请求
-  const { data: projectsBasePage } = useProjects(1, 100);
+  // 底表 pageSize 500（批 13b C4：MAX_PAGE_SIZE 同步 100→500，>500 项目缺项仍挂账）——
+  // 与展示查询（100/页）pageSize 不同 → page=1 不再同 key 去重，代价一次并发 GET（管理数据量级可接受）
+  const { data: projectsBasePage } = useProjects(1, 500);
   const [projectPage, setProjectPage] = useState(1);
   const { data: projectsDisplayPage } = useProjects(projectPage, 100);
   const projectsBase = useMemo(() => projectsBasePage?.data ?? [], [projectsBasePage]);
@@ -97,9 +98,13 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
   const activeArchived =
     activeProjectId && archivedView?.id === activeProjectId ? archivedView : null;
 
-  // #42 过滤态从 URL 还原（q/tag/sort）：URL 是唯一真相源，无本地镜像态
+  // #42 过滤态从 URL 还原（q/tags/sort）：URL 是唯一真相源，无本地镜像态。
+  // tags 多选集（批 13b C2）：URL 逗号串 ↔ string[]（空段剔除，空数组 = 无过滤不拼参）
   const [searchParams, setSearchParams] = useSearchParams();
-  const urlTag = searchParams.get('tag') ?? '';
+  const urlTags = searchParams.get('tags')?.split(',').filter(Boolean) ?? [];
+  // 逗号串派生单值：useMemo/useEffect 依赖数组须简单表达式（urlTags 每渲染新引用），
+  // 语义上 URL 未变则串不变 → 各处依赖稳定
+  const tagsParam = urlTags.join(',');
   const urlSort = searchParams.get('sort') === 'lastAccessed' ? 'lastAccessed' : '';
   const urlQ = searchParams.get('q') ?? '';
 
@@ -109,28 +114,29 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
   useEffect(() => {
     if (searchInput === urlQ) return;
     const timer = setTimeout(() => {
-      setSearchParams(buildWorkbenchParams(searchInput, urlTag, urlSort), { replace: true });
+      setSearchParams(buildWorkbenchParams(searchInput, tagsParam, urlSort), { replace: true });
     }, WORKBENCH_SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [searchInput, urlQ, urlTag, urlSort, setSearchParams]);
+  }, [searchInput, urlQ, tagsParam, urlSort, setSearchParams]);
 
-  /** tag chip 单选切换：点未选中 tag 生效，再点当前 tag 取消（后端 tag 是单值参数，#41 契约） */
+  /** tag chip 多选切换（批 13b C2）：点选并入 / 再点移出，多值并存；服务端 tags 逗号串多值 OR 过滤 */
   const toggleTag = (tag: string) => {
-    setSearchParams(buildWorkbenchParams(urlQ, urlTag === tag ? '' : tag, urlSort), { replace: true });
+    const next = urlTags.includes(tag) ? urlTags.filter((t) => t !== tag) : [...urlTags, tag];
+    setSearchParams(buildWorkbenchParams(urlQ, next.join(','), urlSort), { replace: true });
   };
   /** 排序切换（'default' 移除 sort 参数 = 服务端缺省 updatedAt desc） */
   const changeSort = (sort: ConnectionSortTarget) => {
-    setSearchParams(buildWorkbenchParams(urlQ, urlTag, sort === 'lastAccessed' ? 'lastAccessed' : ''), { replace: true });
+    setSearchParams(buildWorkbenchParams(urlQ, tagsParam, sort === 'lastAccessed' ? 'lastAccessed' : ''), { replace: true });
   };
 
-  // #42 展示列表：服务端过滤（q 模糊/tag 精确/sort=lastAccessed，项目视图叠加 projectId）。
+  // #42 展示列表：服务端过滤（q 模糊/tags 多值 OR/sort=lastAccessed，项目视图叠加 projectId）。
   // queryKey 是结构化 filters 对象，#49 分页票在此形状上追加 page/pageSize 即可
   const listQuery = useMemo<Omit<ConnectionListQuery, 'page' | 'pageSize'>>(() => ({
     projectId: activeProjectId ?? undefined,
-    tag: urlTag || undefined,
+    tags: tagsParam || undefined,
     q: urlQ || undefined,
     sort: urlSort || undefined,
-  }), [activeProjectId, urlTag, urlQ, urlSort]);
+  }), [activeProjectId, tagsParam, urlQ, urlSort]);
   // #49 连接列表受控分页：过滤条件变化即重置回第 1 页（页码属于特定过滤结果集）。
   // 「render 期比较 prev」模式（react.dev/learn/you-might-not-need-an-effect 首选）——
   // effect 内同步 setState 触发级联渲染，react-hooks v7 set-state-in-effect 规则禁止；
@@ -153,8 +159,10 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
   const { data: allConnectionsPage } = useConnections({});
   const allConnections = useMemo(() => allConnectionsPage?.data ?? [], [allConnectionsPage]);
 
-  // #42 项目统计（协议分布 + chips 候选）：仅项目视图消费（stats 是 per-project 端点，全局停查）
+  // #42 项目统计（协议分布 + chips 候选）：项目视图消费 per-project 端点；全局视图协议分布改走
+  // 全局聚合端点（批 13b C3，原 OQ「stats 是 per-project，全局停查」的落地）——chips 候选全局仍由底表聚合
   const statsQuery = useConnectionStats(activeProjectId);
+  const globalStatsQuery = useGlobalConnectionStats();
 
   // 在线状态：每 5s 一轮「心跳 → 在线列表」轮询（v1 updateOnlineUsers 等价，登出卸载即停）
   const onlineUsers = useOnlineStatus();
@@ -533,15 +541,15 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
           </div>
         </header>
 
-        {/* #42 过滤栏：tag chips（单选切换）+ 最近访问排序切换 + 项目视图协议分布 */}
+        {/* #42 过滤栏：tag chips（多选并存，批 13b C2）+ 最近访问排序切换 + 协议分布 */}
         <div className="px-4 md:px-8 border-b border-slate-800/50">
           <ConnectionFilterBar
             tagOptions={tagOptions}
-            activeTag={urlTag}
+            selectedTags={urlTags}
             onToggleTag={toggleTag}
             sortByLastAccessed={urlSort === 'lastAccessed'}
             onSortChange={changeSort}
-            protocolStats={activeProjectId ? statsQuery.data?.protocols : undefined}
+            protocolStats={activeProjectId ? statsQuery.data?.protocols : globalStatsQuery.data?.protocols}
           />
         </div>
 
@@ -573,7 +581,7 @@ const AppContent: React.FC<{ currentUser: UserPublic }> = ({ currentUser }) => {
                 {viewMode === 'vpn' ? <Network size={40} className="opacity-30" /> : <Layout size={40} className="opacity-30" />}
               </div>
               <p className="text-lg font-medium text-slate-400">
-                {urlQ || urlTag ? '未找到匹配的资源' : '暂无资源配置'}
+                {urlQ || urlTags.length > 0 ? '未找到匹配的资源' : '暂无资源配置'}
               </p>
               <p className="text-sm opacity-60 mt-2">点击右上角新建按钮开始添加</p>
             </div>

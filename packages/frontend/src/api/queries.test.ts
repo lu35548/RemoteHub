@@ -38,7 +38,7 @@ vi.mock('./client.js', () => ({
   ensureRefreshed: vi.fn().mockResolvedValue(null),
 }));
 
-import { exportAuditLogsCsv, launchConnection, useAuditLogs, useDashboard, useForgotPassword, useProjectStats, useResetPassword, useAdminResetLink, useUserStats, useNotifications, useMarkNotificationRead, useMarkAllNotificationsRead, NOTIFICATION_QUERY_KEY, useAdminBackups, useTriggerBackup, downloadBackup, BACKUP_QUERY_KEY, useConnections, useConnectionStats, useDeleteConnection, useCloneConnection, useUsers, useProjects } from './queries';
+import { exportAuditLogsCsv, launchConnection, useAuditLogs, useDashboard, useForgotPassword, useProjectStats, useResetPassword, useAdminResetLink, useUserStats, useNotifications, useMarkNotificationRead, useMarkAllNotificationsRead, NOTIFICATION_QUERY_KEY, useAdminBackups, useTriggerBackup, downloadBackup, BACKUP_QUERY_KEY, useConnections, useConnectionStats, useGlobalConnectionStats, useBatchArchive, useBatchRestore, useDeleteConnection, useCloneConnection, useUsers, useProjects } from './queries';
 import { keepPreviousData } from '@tanstack/react-query';
 import { api, ensureRefreshed } from './client.js';
 import type { AuditLogQuery } from '@remotehub/shared';
@@ -475,14 +475,15 @@ describe('连接金矿 hooks（#42）', () => {
     mutationCaptured = undefined;
   });
 
-  it('useConnections：filters 全量 → queryKey 携带结构化 filters（#49 分页参数预留），URL 按键序拼 projectId/tag/q/sort', () => {
-    useConnections({ projectId: 'p1', tag: 'prod', q: 'web', sort: 'lastAccessed' }, 2, 50);
+  it('useConnections：filters 全量 → queryKey 携带结构化 filters（#49 分页参数预留），URL 按键序拼 projectId/tags/q/sort', () => {
+    useConnections({ projectId: 'p1', tags: 'prod,test', q: 'web', sort: 'lastAccessed' }, 2, 50);
 
     expect(captured).toMatchObject({
-      queryKey: ['connections', { projectId: 'p1', tag: 'prod', q: 'web', sort: 'lastAccessed' }, 2, 50],
+      queryKey: ['connections', { projectId: 'p1', tags: 'prod,test', q: 'web', sort: 'lastAccessed' }, 2, 50],
     });
     (captured!.queryFn as () => unknown)();
-    expect(mockedGetRaw).toHaveBeenCalledWith('/connections?page=2&pageSize=50&projectId=p1&tag=prod&q=web&sort=lastAccessed');
+    // URLSearchParams.toString() 恒把逗号编码 %2C（Express 查询串解码透明，服务端收到的就是逗号串）
+    expect(mockedGetRaw).toHaveBeenCalledWith('/connections?page=2&pageSize=50&projectId=p1&tags=prod%2Ctest&q=web&sort=lastAccessed');
   });
 
   it('useConnections：空 filters → URL 只带默认分页（undefined 不拼，与审计页同口径）', () => {
@@ -502,6 +503,15 @@ describe('连接金矿 hooks（#42）', () => {
 
     useConnectionStats(null);
     expect(captured).toMatchObject({ enabled: false });
+  });
+
+  it('useGlobalConnectionStats（批 13b C3）：GET /connections/stats（api.get 剥壳），同族前缀 key + staleTime 5 分钟', () => {
+    useGlobalConnectionStats();
+
+    // 同 ['connection-stats'] 前缀族：连接 CRUD 的 invalidateConnectionCaches 自动覆盖全局视图
+    expect(captured).toMatchObject({ queryKey: ['connection-stats', 'global'], staleTime: 5 * 60_000 });
+    (captured!.queryFn as () => unknown)();
+    expect(mockedGet).toHaveBeenCalledWith('/connections/stats');
   });
 
   it('useDeleteConnection：成功后 invalidate 连接列表与统计两族缓存（stats 随 CRUD 失效）', () => {
@@ -536,6 +546,38 @@ describe('克隆连接 hook（#43）', () => {
     (mutationCaptured!.onSuccess as () => void)();
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['connections'] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['connection-stats'] });
+  });
+});
+
+// ── 批 13b 项目批量操作 hooks（C1 管理后台项目页消费）──
+describe('项目批量操作 hooks（批 13b C1）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mutationCaptured = undefined;
+  });
+
+  it('useBatchArchive：POST /projects/batch-archive body { ids }；成功后 invalidate projects 全族', () => {
+    const invalidate = vi.fn();
+    (useQueryClient as ReturnType<typeof vi.fn>).mockReturnValueOnce({ invalidateQueries: invalidate } as never);
+    useBatchArchive();
+
+    (mutationCaptured!.mutationFn as (d: unknown) => unknown)(['p1', 'p2']);
+    expect(api.post).toHaveBeenCalledWith('/projects/batch-archive', { ids: ['p1', 'p2'] });
+
+    (mutationCaptured!.onSuccess as () => void)();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['projects'] });
+  });
+
+  it('useBatchRestore：POST /projects/batch-restore body { ids }；成功后 invalidate projects 全族', () => {
+    const invalidate = vi.fn();
+    (useQueryClient as ReturnType<typeof vi.fn>).mockReturnValueOnce({ invalidateQueries: invalidate } as never);
+    useBatchRestore();
+
+    (mutationCaptured!.mutationFn as (d: unknown) => unknown)(['p-arch']);
+    expect(api.post).toHaveBeenCalledWith('/projects/batch-restore', { ids: ['p-arch'] });
+
+    (mutationCaptured!.onSuccess as () => void)();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['projects'] });
   });
 });
 

@@ -18,12 +18,15 @@ const state = vi.hoisted(() => ({
   archivedProjects: [] as Array<Record<string, unknown>>,
   archivedTotal: undefined as number | undefined,
   stats: undefined as { protocols: Record<string, number>; tags: Record<string, number> } | undefined,
+  // 批 13b C3：全局协议分布（useGlobalConnectionStats 消费）
+  globalStats: undefined as { protocols: Record<string, number>; tags: Record<string, number> } | undefined,
   paginationTotal: undefined as number | undefined,
   // #49 分页参数捕获：展示/底表两侧 page 独立记录（翻页只动展示查询，底表保持 page=1）
   projectsTotal: undefined as number | undefined,
   lastConnectionsDisplayPage: undefined as number | undefined,
   lastConnectionsBasePage: undefined as number | undefined,
   lastProjectsPages: [] as number[],
+  lastProjectsPageSizes: [] as number[],
 }));
 const connMutations = vi.hoisted(() => ({
   createAsync: vi.fn(),
@@ -42,21 +45,24 @@ const projectMutations = vi.hoisted(() => ({
 // mock 数据层：useMe 返回 admin，列表 hooks 返回扁平分页 body（真实运行时形状，T4 教训）
 vi.mock('./api/queries', () => ({
   useMe: vi.fn(() => ({ data: { id: 'u1', username: 'admin', nickname: '管理员', role: 'admin', isActive: true, lastActiveAt: null, createdAt: '2026-01-01' }, isPending: false, isError: false })),
-  // #49 捕获 page 实参（底表恒 page=1；展示受控翻页）；pageSize 对齐真实 clamp 100
-  useProjects: vi.fn((page: number = 1) => {
+  // #49 捕获 page/pageSize 实参（底表恒 page=1；展示受控翻页）；C4 后底表 pageSize 500
+  useProjects: vi.fn((page: number = 1, pageSize: number = 20) => {
     state.lastProjectsPages.push(page);
+    state.lastProjectsPageSizes.push(pageSize);
     return { data: { success: true as const, data: state.projects, pagination: { page, pageSize: 100, total: state.projectsTotal ?? state.projects.length } }, isPending: false };
   }),
   // 空 filters = 底表调用（返回独立底表数组）；带 q/tag/sort/projectId = 展示列表调用（过滤后列表）。
   // 两引用分离——若 mock 对两调用返回同一引用，聚合源错误（用了初始列表）在测试下不可检出
   useConnections: vi.fn((filters: Record<string, unknown> = {}, page: number = 1) => {
-    const isBaseTable = !('q' in filters || 'tag' in filters || 'sort' in filters || 'projectId' in filters);
+    const isBaseTable = !('q' in filters || 'tags' in filters || 'sort' in filters || 'projectId' in filters);
     if (isBaseTable) state.lastConnectionsBasePage = page; else state.lastConnectionsDisplayPage = page;
     const data = isBaseTable ? (state.allConnections ?? state.connections) : state.connections;
     return { data: { success: true as const, data, pagination: { page, pageSize: 100, total: state.paginationTotal ?? data.length } }, isPending: false };
   }),
-  // #42 项目连接统计（仅项目视图消费；全局视图 enabled false → data undefined）
+  // #42 项目连接统计（项目视图 per-project 端点；批 13b C3 后全局视图改走全局端点，两源并存）
   useConnectionStats: vi.fn(() => ({ data: state.stats })),
+  // 批 13b C3：全局协议分布（factory 随 import 扩展——缺 key 炸 "No export defined on the mock"）
+  useGlobalConnectionStats: vi.fn(() => ({ data: state.globalStats })),
   useCreateProject: vi.fn(() => ({ mutateAsync: vi.fn() })),
   useUpdateProject: vi.fn(() => ({ mutateAsync: vi.fn() })),
   useDeleteProject: vi.fn(() => ({ mutateAsync: vi.fn() })),
@@ -150,11 +156,13 @@ beforeEach(() => {
   state.archivedProjects = [];
   state.archivedTotal = undefined;
   state.stats = undefined;
+  state.globalStats = undefined;
   state.paginationTotal = undefined;
   state.projectsTotal = undefined;
   state.lastConnectionsDisplayPage = undefined;
   state.lastConnectionsBasePage = undefined;
   state.lastProjectsPages = [];
+  state.lastProjectsPageSizes = [];
 });
 
 describe('App 冒烟（T4）', () => {
@@ -273,34 +281,41 @@ describe('工作台过滤栏与 URL 联动（#42）', () => {
   const useConnectionsMock = useConnections as ReturnType<typeof vi.fn>;
   const useConnectionStatsMock = useConnectionStats as ReturnType<typeof vi.fn>;
 
-  /** 展示列表调用 = filters 对象携带 q/tag/sort/projectId 任一键（底表调用是空对象 {}） */
+  /** 展示列表调用 = filters 对象携带 q/tags/sort/projectId 任一键（底表调用是空对象 {}） */
   const displayFilterCalls = () =>
     useConnectionsMock.mock.calls
       .map((c) => c[0] as Record<string, unknown> | undefined)
-      .filter((f) => !!f && ('q' in f || 'tag' in f || 'sort' in f || 'projectId' in f));
+      .filter((f) => !!f && ('q' in f || 'tags' in f || 'sort' in f || 'projectId' in f));
   const lastDisplayFilters = () => displayFilterCalls()[displayFilterCalls().length - 1];
 
-  it('URL 携带 q/tag/sort 进入（刷新态还原）：filters 透传服务端 + 搜索框回显 + chip/排序态还原', () => {
+  it('URL 携带 q/tags/sort 进入（刷新态还原）：filters 透传服务端 + 搜索框回显 + chip/排序态还原', () => {
     state.connections = [hostConn];
-    renderApp('/?q=web&tag=生产环境&sort=lastAccessed');
+    renderApp('/?q=web&tags=生产环境&sort=lastAccessed');
 
-    expect(displayFilterCalls()[0]).toMatchObject({ tag: '生产环境', q: 'web', sort: 'lastAccessed' });
+    expect(displayFilterCalls()[0]).toMatchObject({ tags: '生产环境', q: 'web', sort: 'lastAccessed' });
     // 「搜索」会同时命中 Sidebar 项目搜索框（「搜索客户...」），收窄到连接搜索框专属前缀
     expect(screen.getByPlaceholderText(/搜索名称/)).toHaveValue('web');
     expect(screen.getByRole('button', { name: /#生产环境/ })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: '最近访问' })).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('全局视图 chips 从底表聚合；点击 chip → 服务端调用携带 tag，再点取消（单选切换）', async () => {
-    state.connections = [hostConn, vpnConn];
+  it('全局视图 chips 从底表聚合；点击 chip → 服务端调用携带 tags 并集，再点移出（多选并存，C2）', async () => {
+    state.connections = [hostConn, { ...vpnConn, tags: '测试' }];
     const events = userEvent.setup();
     renderApp();
 
+    // 点第一枚 chip：tags 并入
     await events.click(screen.getByRole('button', { name: /#生产环境/ }));
-    expect(lastDisplayFilters()).toMatchObject({ tag: '生产环境' });
+    expect(lastDisplayFilters()).toMatchObject({ tags: '生产环境' });
+    // 点第二枚：多值并存（OR 语义由服务端承接），两 chip 同时高亮
+    await events.click(screen.getByRole('button', { name: /#测试/ }));
+    expect(lastDisplayFilters()).toMatchObject({ tags: '生产环境,测试' });
+    expect(screen.getByRole('button', { name: /#生产环境/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: /#测试/ })).toHaveAttribute('aria-pressed', 'true');
 
+    // 再点第一枚：移出（多选的取消语义沿单选先例）
     await events.click(screen.getByRole('button', { name: /#生产环境/ }));
-    expect(lastDisplayFilters()?.tag).toBeUndefined();
+    expect(lastDisplayFilters()?.tags).toBe('测试');
   });
 
   it('排序切换：最近访问 → sort=lastAccessed；切回最近更新 → 移除', async () => {
@@ -330,21 +345,24 @@ describe('工作台过滤栏与 URL 联动（#42）', () => {
     }, { timeout: 3000 });
   });
 
-  it('项目视图：display 调用叠加 projectId + 统计块消费 stats 端点；全局视图统计隐藏', async () => {
+  it('项目视图：display 调用叠加 projectId + 统计块双源切换——全局走全局端点（C3），项目走 per-project 端点', async () => {
     state.connections = [hostConn];
     state.projects = [{ id: 'p1', name: '默认项目' }];
+    state.globalStats = { protocols: { RDP: 2 }, tags: {} };
     state.stats = { protocols: { RDP: 3, SSH: 1 }, tags: { 生产环境: 2 } };
     const events = userEvent.setup();
     renderApp();
 
-    expect(screen.queryByLabelText('协议分布')).not.toBeInTheDocument();
+    // 全局视图：协议分布从全局端点取数（C3 前此视图隐藏统计块——stats 曾是 per-project 专属）
+    expect(within(screen.getByLabelText('协议分布')).getByText('桌面远程')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('协议分布')).getByText('2')).toBeInTheDocument();
 
     // 项目按钮 accessible name 以项目名开头（内嵌「项目操作 …」省略号按钮另算），锚定前缀避免双命中
     await events.click(screen.getByRole('button', { name: /^默认项目/ }));
     expect(lastDisplayFilters()).toMatchObject({ projectId: 'p1' });
     expect(useConnectionStatsMock).toHaveBeenCalledWith('p1');
-    // 断言收进「协议分布」容器：RDP 徽章渲染中文「桌面远程」，与 RDP 卡片文案同词会双命中
-    expect(within(screen.getByLabelText('协议分布')).getByText('桌面远程')).toBeInTheDocument();
+    // 数据源切换可检：同一容器内 per-project 数据（RDP 3）替代全局数据（RDP 2）
+    expect(within(screen.getByLabelText('协议分布')).getByText('3')).toBeInTheDocument();
   });
 
   it('#49 分页 footer 取代截断横幅：total 150 → 「共 150 条」翻页可见全量（横幅删除）', () => {
@@ -411,6 +429,13 @@ describe('#49 分页（连接列表 + Sidebar 项目列表）', () => {
     expect(screen.getByText('共 205 条')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '下一页' }));
     expect(state.lastProjectsPages).toContain(2);
+  });
+
+  it('C4 底表参数锁：底表 useProjects(1, 500)（MAX_PAGE_SIZE 同步抬上限），展示查询仍 100/页', () => {
+    state.projects = [projectItem];
+    renderApp();
+    expect(state.lastProjectsPageSizes).toContain(500);
+    expect(state.lastProjectsPageSizes).toContain(100);
   });
 });
 

@@ -15,9 +15,9 @@ export type ConnectionSortTarget = 'default' | 'lastAccessed';
 interface ConnectionFilterBarProps {
   /** tag chips 候选（已按计数降序传入；空数组时 chips 区整体隐藏） */
   tagOptions: TagOption[];
-  /** 当前生效的 tag（空串 = 无过滤） */
-  activeTag: string;
-  /** 点 chip 切换过滤：点未选中 tag 生效，再点当前 tag 取消（单选契约，见 #41 后端 tag 单值参数） */
+  /** 当前生效的 tag 多选集（空数组 = 无过滤；批 13b C2：单选 → 真多选 OR，契约 tags:string[]） */
+  selectedTags: string[];
+  /** 点 chip 切换过滤：点选并入，再点移出（多值并存；集合运算在 App 层，URL tags=逗号串直传服务端 OR 过滤） */
   onToggleTag: (tag: string) => void;
   /** 是否按最近访问排序 */
   sortByLastAccessed: boolean;
@@ -28,12 +28,12 @@ interface ConnectionFilterBarProps {
 }
 
 /**
- * #42 工作台过滤栏：tag 单选切换 chips + 最近访问排序切换 + 项目视图协议分布。
- * 纯展示组件——URL 联动与数据请求在 App 层（q/tag/sort 均为 URL query 真相源）。
+ * #42 工作台过滤栏：tag 多选切换 chips（批 13b C2 前多选 OR 契约）+ 最近访问排序切换 + 协议分布。
+ * 纯展示组件——URL 联动与数据请求在 App 层（q/tags/sort 均为 URL query 真相源）。
  */
 const ConnectionFilterBar: React.FC<ConnectionFilterBarProps> = ({
   tagOptions,
-  activeTag,
+  selectedTags,
   onToggleTag,
   sortByLastAccessed,
   onSortChange,
@@ -45,11 +45,11 @@ const ConnectionFilterBar: React.FC<ConnectionFilterBarProps> = ({
 
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 py-1 min-h-[40px]">
-      {/* tag chips：单选切换（点选生效 / 再点取消），命中态高亮 */}
+      {/* tag chips：多选并存（点选并入 / 再点移出，多 chip 同时高亮——批 13b C2） */}
       {tagOptions.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="标签过滤">
           {tagOptions.map(({ tag, count }) => {
-            const active = tag === activeTag;
+            const active = selectedTags.includes(tag);
             return (
               <button
                 key={tag}

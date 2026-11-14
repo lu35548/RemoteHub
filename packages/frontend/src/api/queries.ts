@@ -276,23 +276,61 @@ export function useTransferProject() {
   });
 }
 
+// ─── 批 13b 项目批量操作（C1 管理后台项目页消费）───
+// 响应两个事实（读 backend projectService 定案，非猜测）：
+// ① batch-archive → { archived: string[], skipped: string[] }（archived=成功集 id 数组）；
+// ② batch-restore → { restored: string[], skipped: string[] }（键名 restored 与 archive 不同——非镜像字段名）。
+// skipped=无权/不存在/状态已一致（幂等跳过），尽力而为语义不整体 404；上限 50（BATCH_ARCHIVE_MAX）。
+
+/** 批量归档响应（archived=成功归档的项目 id 数组） */
+export interface BatchArchiveResultData {
+  archived: string[];
+  skipped: string[];
+}
+
+/** 批量恢复响应（restored=成功恢复的项目 id 数组；键名与 archive 侧不同） */
+export interface BatchRestoreResultData {
+  restored: string[];
+  skipped: string[];
+}
+
+/** 批量归档（POST /projects/batch-archive，body { ids }）：成功后 invalidate ['projects'] 全族
+ * （工作台主列表/归档列表/管理页双 tab 同步刷新） */
+export function useBatchArchive() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => api.post<BatchArchiveResultData>('/projects/batch-archive', { ids }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['projects'] }),
+  });
+}
+
+/** 批量恢复（POST /projects/batch-restore，body { ids }）：失效口径同归档 */
+export function useBatchRestore() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => api.post<BatchRestoreResultData>('/projects/batch-restore', { ids }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['projects'] }),
+  });
+}
+
 // ─── Connections ───
 
-/** #42 连接列表 URL 拼 query：只拼已设置项，键序固定（projectId→tag→q→sort，对齐审计页 auditLogParams 模式） */
+/** #42 连接列表 URL 拼 query：只拼已设置项，键序固定（projectId→tags→q→sort，对齐审计页 auditLogParams 模式）。
+ * tags（批 13b C2 多选）：逗号串直传（App 层 join(',')，空数组不拼键），服务端多值 OR 过滤 */
 function connectionListParams(
   filters: Omit<ConnectionListQuery, 'page' | 'pageSize'>,
   page: number,
   pageSize: number,
 ): string {
   const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
-  for (const key of ['projectId', 'tag', 'q', 'sort'] as const) {
+  for (const key of ['projectId', 'tags', 'q', 'sort'] as const) {
     const v = filters[key];
     if (v) params.set(key, v);
   }
   return params.toString();
 }
 
-/** 连接列表（#41 服务端过滤：tag 精确 / q 三字段模糊 / sort=lastAccessed）。
+/** 连接列表（#41 服务端过滤：tags 多值 OR（批 13b C2 替换旧 tag 单值）/ q 三字段模糊 / sort=lastAccessed）。
  * queryKey 用结构化 filters 对象——#49 分页票在此形状上追加 page/pageSize 即可，无破坏性改 key。 */
 export function useConnections(filters: Omit<ConnectionListQuery, 'page' | 'pageSize'> = {}, page = 1, pageSize = 100) {
   return useQuery({
@@ -311,6 +349,19 @@ export function useConnectionStats(projectId: string | null | undefined) {
     queryKey: ['connection-stats', projectId],
     queryFn: () => api.get<ConnectionStats>(`/projects/${projectId}/connections/stats`),
     enabled: !!projectId,
+    staleTime: 5 * 60_000,
+  });
+}
+
+/** 批 13b C3 全局视图协议分布（GET /connections/stats，批 13b-A4 端点）：聚合用户可见活跃项目
+ * （admin=全部活跃/非 admin=已加入，可见性口径对齐 listProjects；归档项目不计入）。
+ * data 壳端点走 api.get（与 per-project stats 同口径）；响应复用 shared ConnectionStats（双聚合编译期锁契约）。
+ * 失效联动零新增：连接 CRUD 的 invalidateConnectionCaches 按 ['connection-stats'] 前缀失效，
+ * 全局 key（['connection-stats','global']）与 per-project 同前缀族自动覆盖。 */
+export function useGlobalConnectionStats() {
+  return useQuery({
+    queryKey: ['connection-stats', 'global'],
+    queryFn: () => api.get<ConnectionStats>('/connections/stats'),
     staleTime: 5 * 60_000,
   });
 }

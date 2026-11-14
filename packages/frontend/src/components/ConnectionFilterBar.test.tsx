@@ -2,15 +2,15 @@ import { render, screen, fireEvent, within } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import ConnectionFilterBar from './ConnectionFilterBar';
 
-// #42 工作台过滤栏纯展示组件：chips 单选切换 / 排序 segmented / 项目视图协议分布。
-// 数据流（URL 联动、chips 来源聚合）在 App.test.tsx 接线层锁，此处只锁交互契约
-describe('ConnectionFilterBar（#42）', () => {
+// #42 工作台过滤栏纯展示组件：chips 多选并存（批 13b C2：单选→真多选 OR 语义，契约 tags:string[]）/
+// 排序 segmented / 协议分布。数据流（URL 联动、chips 来源聚合）在 App.test.tsx 接线层锁，此处只锁交互契约
+describe('ConnectionFilterBar（#42 + C2 多选）', () => {
   const baseProps = {
     tagOptions: [
       { tag: '生产环境', count: 5 },
       { tag: '测试', count: 2 },
     ],
-    activeTag: '',
+    selectedTags: [] as string[],
     onToggleTag: vi.fn(),
     sortByLastAccessed: false,
     onSortChange: vi.fn(),
@@ -20,8 +20,8 @@ describe('ConnectionFilterBar（#42）', () => {
     vi.clearAllMocks();
   });
 
-  it('tag chips 按候选渲染（含计数）：点击回调 onToggleTag，active chip aria-pressed', () => {
-    render(<ConnectionFilterBar {...baseProps} activeTag="生产环境" />);
+  it('tag chips 按候选渲染（含计数）：点击回调 onToggleTag，命中 chip aria-pressed', () => {
+    render(<ConnectionFilterBar {...baseProps} selectedTags={['生产环境']} />);
 
     const chip = screen.getByRole('button', { name: /#生产环境/ });
     expect(chip).toHaveAttribute('aria-pressed', 'true');
@@ -31,6 +31,16 @@ describe('ConnectionFilterBar（#42）', () => {
     expect(baseProps.onToggleTag).toHaveBeenCalledWith('测试');
     // 未点过的 chip 不触发
     expect(baseProps.onToggleTag).toHaveBeenCalledTimes(1);
+  });
+
+  it('多选并存（C2）：两 chip 同时点亮（aria-pressed 均 true），点选回调 tag 名（集合运算在 App 层）', () => {
+    render(<ConnectionFilterBar {...baseProps} selectedTags={['生产环境', '测试']} />);
+
+    expect(screen.getByRole('button', { name: /#生产环境/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: /#测试/ })).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: /#测试/ }));
+    expect(baseProps.onToggleTag).toHaveBeenCalledWith('测试');
   });
 
   it('排序 segmented：默认「最近更新」按下；点「最近访问」回调 lastAccessed，再点「最近更新」回调 default', () => {
