@@ -280,7 +280,7 @@ export function useTransferProject() {
 // 响应两个事实（读 backend projectService 定案，非猜测）：
 // ① batch-archive → { archived: string[], skipped: string[] }（archived=成功集 id 数组）；
 // ② batch-restore → { restored: string[], skipped: string[] }（键名 restored 与 archive 不同——非镜像字段名）。
-// skipped=无权/不存在/状态已一致（幂等跳过），尽力而为语义不整体 404；上限 50（BATCH_ARCHIVE_MAX）。
+// skipped=无权/不存在/状态已一致（幂等跳过），尽力而为语义不整体 404；上限 50（BATCH_OPS_MAX，backend 629e9a7 改名）。
 
 /** 批量归档响应（archived=成功归档的项目 id 数组） */
 export interface BatchArchiveResultData {

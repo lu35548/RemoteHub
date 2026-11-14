@@ -47,7 +47,7 @@ describe('queryAuditLogs - 分页 clamp', () => {
     expect(prisma.auditLog.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 500 }));
   });
 
-  it('pageSize=0 → take 1（clamp 进 [1,100] 而非回默认）', async () => {
+  it('pageSize=0 → take 1（clamp 进 [1,500] 而非回默认）', async () => {
     await queryAuditLogs({ page: 1, pageSize: 0 });
     expect(prisma.auditLog.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 1 }));
   });

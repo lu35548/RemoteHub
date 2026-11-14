@@ -139,12 +139,18 @@ describe('归档项目连接写禁制：create/update/delete/clone → 409 CONN_
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('CONN_007');
     expect(await b.prisma.connection.findUnique({ where: { id: connArcId } })).not.toBeNull();
+    // 拒绝路径审计留痕与 update/create 同构（auditMiddleware patch res.json 落 failure 行）
+    await waitForAudit({ action: 'CONNECTION_DELETE', resource: 'connection', resourceId: connArcId, result: 'failure' });
   });
 
   it('clone：409 CONN_007', async () => {
     const res = await apiClone(ownerToken, connArcId);
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('CONN_007');
+    // action 复用 CONNECTION_CREATE（路由注解口径，枚举无 CLONE）；resourceId=源 id 区分于裸 create 的 null。
+    // 留痕通道：gate clone 分支程序化落行（patch 通道对 clone 409 实测不落行，见 gate 头注释）——
+    // 程序化行与 patch 行逐字段同形状，本断言对两通道均有效。
+    await waitForAudit({ action: 'CONNECTION_CREATE', resource: 'connection', resourceId: connArcId, result: 'failure' });
   });
 
   it('审计：create 拒绝落 failure 行（resourceId=null——连接实体尚不存在，reason 可追溯）', async () => {

@@ -54,7 +54,7 @@ export const COPY_TARGET_LABELS = {
 
 // #48 rev（review nit）：归档列表分页大小（App 归档查询 + 总页数计算 + Sidebar 归档区 Pagination
 // 三处同值——分页正确性依赖三处一致，提为常量锁死）。值 100 与主列表/连接列表页大小一致，
-// 后端 pageSize clamp 100；主列表/连接列表的既有 100 字面量属 #49 代码，不越界改动。
+// 后端 pageSize clamp 500（批 13b-A6 抬升）；主列表/连接列表的既有 100 字面量属 #49 代码，不越界改动。
 export const ARCHIVED_LIST_PAGE_SIZE = 100;
 
 export type CopyTarget = keyof typeof COPY_TARGET_LABELS;

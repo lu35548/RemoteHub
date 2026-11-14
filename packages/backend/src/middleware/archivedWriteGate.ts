@@ -6,6 +6,8 @@
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { prisma } from '../utils/prisma.js';
 import { createAppError, type AppError } from '../utils/appError.js';
+import { maskIp } from './audit.js';
+import { logger } from '../utils/logger.js';
 
 /** 拒绝响应与审计行的原因对位信息（AppError details → 响应 error.details；审计行 reason=CONN_007） */
 function archivedReject(projectId: string): AppError {
@@ -43,10 +45,12 @@ export type ArchivedGateOp = 'create' | 'update' | 'delete' | 'clone';
  * - delete / clone：连接所属项目 archived → 拒。
  *
  * 审计留痕（import 403 留痕先例的意图复用）：被拒写操作落 failure 审计行（reason=CONN_007）。
- * **不程序化双写**——connection 四写路由的 auditMiddleware 挂在本门之前，res.json patch 捕获
- * 全局 error handler 的错误 envelope 自动落行（detail.reason=CONN_007，resourceId 对 id 路由
- * 取 params.id）；import 路由需程序化是因为其根本未挂 auditMiddleware，此处通道已存在，
- * 双写只会污染审计轨迹。create 拒绝行 resourceId=null（连接实体尚不存在）。
+ * create/update/delete 三 op 依赖前置 auditMiddleware 的 res.json patch 捕获错误 envelope 落行
+ * （create 拒绝行 resourceId=null；id 路由取 params.id）——**integration 实证三 op 拒绝行均落**。
+ * **clone 例外（实测分裂，根因挂 OQ）**：同构路由同构 gate，clone 409 的 patch 通道实测不落行
+ * （无 logger error、201 成功路径落行正常、create 裸 POST 409 落行正常）——clone 分支抛错前
+ * **程序化补行**（await 落行再 throw，形状与 patch 行逐字段对齐，waitForAudit 断言同构可锁）；
+ * 失败仅 logger.error 不传播（主 409 响应不受影响）。
  */
 export function archivedProjectWriteGate(op: ArchivedGateOp): RequestHandler {
   return async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
@@ -81,6 +85,29 @@ export function archivedProjectWriteGate(op: ArchivedGateOp): RequestHandler {
         return;
       }
       if (conn.status === 'archived') {
+        // clone 分支程序化留痕（patch 通道对 clone 409 实测不落行，见头部注释）；
+        // update/delete 经 patch 通道已实证落行，程序化会双写，故仅 clone 补行
+        if (op === 'clone') {
+          try {
+            await prisma.auditLog.create({
+              data: {
+                userId: req.user?.id ?? null,
+                action: 'CONNECTION_CREATE', // 路由注解口径（枚举无 CLONE）
+                resource: 'connection',
+                resourceId: paramId,
+                result: 'failure',
+                detail: JSON.stringify({ reason: 'CONN_007' }),
+                ip: maskIp(req.ip),
+                userAgent: (typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : undefined)?.slice(0, 500) ?? null,
+              },
+            });
+          } catch (auditErr) {
+            logger.error('归档门 clone 拒绝审计落库失败（不传播，主 409 响应不受影响）', {
+              action: 'CONNECTION_CREATE',
+              error: auditErr instanceof Error ? auditErr.message : String(auditErr),
+            });
+          }
+        }
         throw archivedReject(conn.projectId);
       }
 

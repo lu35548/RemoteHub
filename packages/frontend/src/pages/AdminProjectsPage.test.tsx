@@ -213,7 +213,6 @@ describe('AdminProjectsPage 多选与批量操作（批 13b C1）', () => {
     batchMutations.restoreAsync.mockReset();
     mockedUseMe.mockReset();
     state.me = admin;
-    state.me = admin;
     state.mePending = false;
     state.activeProjects = [];
     state.activeTotal = undefined;

@@ -7,7 +7,7 @@ import { useUI } from '../components/UIComponents';
 import { errMsg } from '../utils';
 import { ARCHIVED_LIST_PAGE_SIZE } from '../constants';
 
-/** 管理页分页大小（=后端 clamp 上限，与工作台主列表同口径） */
+/** 管理页分页大小（与工作台展示列表同口径；后端 clamp 上限已抬 500，批 13b-A6） */
 const PAGE_SIZE = 100;
 
 /**

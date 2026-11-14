@@ -518,7 +518,7 @@ describe('POST /projects/batch-restore 批量恢复', () => {
 // ─── 批 13b-A5：projects 列表 q 搜索参数（Sidebar 搜索走后端的支撑）───
 
 describe('GET /projects?q=（名称模糊搜索）', () => {
-    async function listQ(q: string): Promise<{ data: Array<{ name: string; id: string }>; pagination: { total: number } }> {
+  async function listQ(q: string): Promise<{ data: Array<{ name: string; id: string }>; pagination: { total: number } }> {
     const res = await request(b.app).get(`/api/v1/projects?q=${encodeURIComponent(q)}&pageSize=100`)
       .set('Authorization', `Bearer ${ownerToken}`);
     expect(res.status).toBe(200);
