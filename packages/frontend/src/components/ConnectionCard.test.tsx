@@ -143,7 +143,8 @@ describe('ConnectionCard 菜单触发器 a11y（批 13a）', () => {
   it('更多操作按钮 aria-haspopup + aria-expanded 随菜单开合切换', () => {
     const { unmount } = renderCard();
     const trigger = screen.getByRole('button', { name: '更多操作' });
-    expect(trigger).toHaveAttribute('aria-haspopup', 'true');
+    // 语义化值 'menu'（批 13b C5 收尾：裸 true 是旧版 a11y 口径，WAI-ARIA 1.2 起触发器标注弹出类型）
+    expect(trigger).toHaveAttribute('aria-haspopup', 'menu');
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
     fireEvent.click(trigger);
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
