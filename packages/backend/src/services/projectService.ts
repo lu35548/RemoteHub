@@ -339,10 +339,10 @@ export async function transferProjectOwnership(projectId: string, newOwnerUserId
   return { projectId, fromUserId, toUserId: newOwnerUserId };
 }
 
-/** 批量归档上限（对齐 design §10 批量语义 ≤50——members/batch 同源口径） */
-const BATCH_ARCHIVE_MAX = 50;
+/** 批量操作上限（对齐 design §10 批量语义 ≤50——members/batch 同源口径；批量归档/恢复共用） */
+const BATCH_OPS_MAX = 50;
 
-export interface BatchArchiveParams {
+export interface BatchStatusParams {
   operatorUserId: string;
   operatorRole: string;
   ip?: string;
@@ -350,26 +350,53 @@ export interface BatchArchiveParams {
   ids: unknown;
 }
 
+/** 批量结果（尽力而为语义：无权/不存在/状态已一致逐项 skipped，不整体 404——不区分原因避免响应体膨胀） */
 export interface BatchArchiveResult {
   archived: string[];
-  skipped: string[]; // 无权 / 不存在 / 已归档（幂等跳过）——不区分原因，避免响应体膨胀
+  skipped: string[];
 }
 
-/** 批量归档（body { ids: string[] }，尽力而为语义：无权/不存在/已归档逐项 skipped，不整体 404）。
+export interface BatchRestoreResult {
+  restored: string[];
+  skipped: string[];
+}
+
+/** 批量归档（body { ids: string[] }）。
  * 权限逐项目判定（design §17 batch=owner+admin：全局 admin 直通，否则须该项目 owner）。
  * 审计逐项目落行——middleware envelope 通道单请求只能落一行，无法逐项目 resourceId；
  * 程序化写入形状对齐 auditMiddleware.writeAuditLog（ip 掩码 / detail JSON / result success），事务内原子。 */
-export async function batchArchiveProjects(params: BatchArchiveParams): Promise<BatchArchiveResult> {
+export async function batchArchiveProjects(params: BatchStatusParams): Promise<BatchArchiveResult> {
+  const { succeeded, skipped } = await batchSetStatus(params, 'archive');
+  return { archived: succeeded, skipped };
+}
+
+/** 批量恢复（批 13b-A3，batch-archive 全链镜像）：非 archived 项目进 skipped 零审计（幂等口径对齐批量归档）。
+ * 响应键名 restored 对齐操作语义，形状与 batch-archive 同构。 */
+export async function batchRestoreProjects(params: BatchStatusParams): Promise<BatchRestoreResult> {
+  const { succeeded, skipped } = await batchSetStatus(params, 'restore');
+  return { restored: succeeded, skipped };
+}
+
+/** 批量状态机（archive/restore 共用内核，表驱动零逻辑分叉）：
+ * - 权限逐项目判定（design §17 batch=owner+admin：全局 admin 直通，否则须该项目 owner）；
+ * - 幂等：状态已一致（归档已 archived / 恢复已 active）进 skipped 零审计行（对齐批量归档口径）；
+ * - 审计逐项目落行——middleware envelope 单请求单行无法逐项目 resourceId；程序化写入形状
+ *   对齐 auditMiddleware.writeAuditLog（ip 掩码 / detail JSON），事务内原子。
+ */
+async function batchSetStatus(params: BatchStatusParams, op: 'archive' | 'restore'): Promise<{ succeeded: string[]; skipped: string[] }> {
+  const targetStatus = op === 'archive' ? 'archived' : 'active';
+  const action = op === 'archive' ? 'PROJECT_ARCHIVE' : 'PROJECT_RESTORE';
+
   const { operatorUserId, operatorRole, ip, userAgent, ids } = params;
   if (
-    !Array.isArray(ids) || ids.length === 0 || ids.length > BATCH_ARCHIVE_MAX ||
+    !Array.isArray(ids) || ids.length === 0 || ids.length > BATCH_OPS_MAX ||
     ids.some((id) => typeof id !== 'string')
   ) {
-    throw createAppError('VAL_001', [{ field: 'ids', message: `ids 须为 1-${BATCH_ARCHIVE_MAX} 个项目 id 的数组` }]);
+    throw createAppError('VAL_001', [{ field: 'ids', message: `ids 须为 1-${BATCH_OPS_MAX} 个项目 id 的数组` }]);
   }
 
   const uniqueIds = [...new Set(ids as string[])];
-  const archived: string[] = [];
+  const succeeded: string[] = [];
   const skipped: string[] = [];
 
   await prisma.$transaction(async (tx) => {
@@ -382,35 +409,36 @@ export async function batchArchiveProjects(params: BatchArchiveParams): Promise<
       if (operatorRole !== 'admin') {
         const member = await tx.projectMember.findUnique({
           where: { projectId_userId: { projectId: id, userId: operatorUserId } },
+          select: { role: true },
         });
         if (!member || member.role !== 'owner') {
           skipped.push(id);
           continue;
         }
       }
-      if (project.status === 'archived') {
-        skipped.push(id); // 幂等跳过（零重复审计行）
+      if (project.status === targetStatus) {
+        skipped.push(id); // 状态已一致：归档遇 archived / 恢复遇 active——幂等跳过（零重复审计行）
         continue;
       }
       await tx.project.update({
         where: { id },
-        data: { status: 'archived', updatedBy: operatorUserId },
+        data: { status: targetStatus, updatedBy: operatorUserId },
       });
       await tx.auditLog.create({
         data: {
           userId: operatorUserId,
-          action: 'PROJECT_ARCHIVE',
+          action,
           resource: 'project',
           resourceId: id,
           result: 'success',
-          detail: JSON.stringify({ after: { status: 'archived', batch: true } }),
+          detail: JSON.stringify({ after: { status: targetStatus, batch: true } }),
           ip: maskIp(ip) ?? null,
           userAgent: userAgent?.slice(0, 500) ?? null,
         },
       });
-      archived.push(id);
+      succeeded.push(id);
     }
   });
 
-  return { archived, skipped };
+  return { succeeded, skipped };
 }

@@ -263,6 +263,41 @@ projectRoutes.delete('/:id', authMiddleware, auditMiddleware({ action: 'PROJECT_
  *         $ref: '#/components/responses/ValidationError'
  */
 projectRoutes.post('/batch-archive', authMiddleware, projectController.batchArchiveProjects);
+// 批 13b-A3 批量恢复：batch-archive 全链镜像（owner+admin 权限逐项目判定、幂等 skipped 零审计；
+// 注册于 '/:id' 参数路由之前——Express 静态段优先匹配，与 batch-archive 同位次纪律）
+/**
+ * @swagger
+ * /api/v1/projects/batch-restore:
+ *   post:
+ *     summary: 批量恢复项目(owner,逐项目审计落行)
+ *     tags: [Projects]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [ids]
+ *             properties:
+ *               ids:
+ *                 type: array
+ *                 items: { type: string }
+ *                 description: 项目 ID 列表
+ *     responses:
+ *       200:
+ *         description: 批量恢复结果 { restored, skipped };无权/不存在的项目不报错,计入 skipped 明细(逐项目审计在 service 事务内落行)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessResponse'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       422:
+ *         $ref: '#/components/responses/ValidationError'
+ */
+projectRoutes.post('/batch-restore', authMiddleware, projectController.batchRestoreProjects);
 /**
  * @swagger
  * /api/v1/projects/{id}/archive:

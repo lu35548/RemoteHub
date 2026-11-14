@@ -452,3 +452,65 @@ describe('POST /projects/batch-archive 批量归档', () => {
     expect(res.body.data).toEqual({ archived: [], skipped: [arcProjId, 'ghost-id'] });
   });
 });
+
+// ─── 批 13b-A3：批量恢复（batch-archive 全链镜像）───
+
+describe('POST /projects/batch-restore 批量恢复', () => {
+  async function apiBatchRestore(token: string, ids: unknown) {
+    return request(b.app).post('/api/v1/projects/batch-restore')
+      .set('Authorization', `Bearer ${token}`).send({ ids });
+  }
+
+  it('混合归属：有权恢复 + 无权跳过 → { restored, skipped } 分类 + 库状态对应 + 逐项目审计行', async () => {
+    // 前置状态（batch-archive describe 后）：arcProjId=archived（batch-archive 用例产物）、
+    // outsiderProjId=archived（admin 直通用例产物）——owner 对 outsiderProjId 无 owner 权 → skipped
+    const res = await apiBatchRestore(ownerToken, [arcProjId, outsiderProjId]);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ restored: [arcProjId], skipped: [outsiderProjId] });
+
+    expect((await b.prisma.project.findUniqueOrThrow({ where: { id: arcProjId } })).status).toBe('active');
+    expect((await b.prisma.project.findUniqueOrThrow({ where: { id: outsiderProjId } })).status).toBe('archived');
+
+    // 逐项目落行：PROJECT_RESTORE resourceId=arcProjId（单项目 restore 用例 1 行 + 批量本行 = 2 行）
+    const logs = await b.prisma.auditLog.findMany({
+      where: { action: 'PROJECT_RESTORE', resource: 'project', resourceId: arcProjId, userId: ownerUserId },
+    });
+    expect(logs.length).toBe(2);
+    // detail.after 批量标记（镜像 batch-archive 的 detail 形状）
+    expect((logs.at(-1)!.detail as string)).toContain('"batch":true');
+  });
+
+  it('幂等：活跃项目再批量恢复 → skipped（零重复审计行）', async () => {
+    const res = await apiBatchRestore(ownerToken, [arcProjId]);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ restored: [], skipped: [arcProjId] });
+    const logs = await b.prisma.auditLog.findMany({
+      where: { action: 'PROJECT_RESTORE', resource: 'project', resourceId: arcProjId, userId: ownerUserId },
+    });
+    expect(logs.length).toBe(2); // 不增
+  });
+
+  it('admin 直通：恢复他人项目', async () => {
+    const res = await apiBatchRestore(b.adminToken, [outsiderProjId]);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ restored: [outsiderProjId], skipped: [] });
+    expect((await b.prisma.project.findUniqueOrThrow({ where: { id: outsiderProjId } })).status).toBe('active');
+  });
+
+  it.each([
+    ['空数组', []],
+    ['非数组', 'arcProjId'],
+    ['含非 string 项', [arcProjId, 42]],
+    ['超 50 上限', Array.from({ length: 51 }, (_, i) => `p${i}`)],
+  ])('%s → 422 VAL_001', async (_name, ids) => {
+    const res = await apiBatchRestore(ownerToken, ids as unknown);
+    expect(res.status).toBe(422);
+    expect(res.body.error.code).toBe('VAL_001');
+  });
+
+  it('活跃项目 + ghost id → 全 skipped（批量尽力而为，不整体 404）', async () => {
+    const res = await apiBatchRestore(ownerToken, [arcProjId, 'ghost-id']);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ restored: [], skipped: [arcProjId, 'ghost-id'] });
+  });
+});

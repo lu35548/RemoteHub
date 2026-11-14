@@ -103,3 +103,17 @@ export async function batchArchiveProjects(req: Request, res: Response, next: Ne
     res.json({ success: true, data });
   } catch (err) { next(err); }
 }
+
+/** 批 13b-A3 批量恢复：batch-archive 全链镜像（幂等 skipped 零审计口径对齐） */
+export async function batchRestoreProjects(req: Request, res: Response, next: NextFunction) {
+  try {
+    const data = await projectService.batchRestoreProjects({
+      operatorUserId: req.user.id,
+      operatorRole: req.user.role,
+      ip: req.ip,
+      userAgent: typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : undefined,
+      ids: (req.body ?? {}).ids,
+    });
+    res.json({ success: true, data });
+  } catch (err) { next(err); }
+}
