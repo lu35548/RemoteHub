@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import type { AuditLog, DailyActivityStat, SystemHealth } from '@remotehub/shared';
 import { useDashboard, useMe, useUserStats } from '../api/queries';
 import { AUDIT_ACTION_LABELS } from '../constants';
@@ -119,7 +119,11 @@ const AdminDashboardPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-950 p-8">
-      <h1 className="text-xl font-bold text-white tracking-tight">管理仪表盘</h1>
+      {/* 最小入口（批 13b C1）：admin 三页无互跳导航是既有挂账，本页仅加「项目管理」直达（不扩范围） */}
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-bold text-white tracking-tight">管理仪表盘</h1>
+        <Link to="/admin/projects" className="text-xs text-slate-400 hover:text-blue-300 transition-colors">项目管理 →</Link>
+      </div>
 
       {/* 在线数大数字 + 统计三格（与顶栏同口径的 onlineUsers，一致性验收留给 P0-10 双 tab） */}
       <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-4">

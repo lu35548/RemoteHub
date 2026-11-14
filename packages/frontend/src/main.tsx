@@ -11,6 +11,7 @@ import ResetPasswordPage from './components/ResetPasswordPage.js';
 import AdminDashboardPage from './components/AdminDashboardPage.js';
 import AuditLogsPage from './components/AuditLogsPage.js';
 import BackupsPage from './components/BackupsPage.js';
+import AdminProjectsPage from './pages/AdminProjectsPage.js';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -53,6 +54,8 @@ async function bootstrap() {
     { path: '/admin/audit-logs', loader: requireAuth, element: <AuditLogsPage /> },
     // 备份管理（票 #39，§19 预留第三页落位）：两段式同上——loader 只验登录，admin 在页面内校验
     { path: '/admin/backups', loader: requireAuth, element: <BackupsPage /> },
+    // 项目管理（批 13b C1）：两段式同三 admin 页——loader 只验登录，admin 在页面内校验
+    { path: '/admin/projects', loader: requireAuth, element: <AdminProjectsPage /> },
   ]);
 
   const root = document.getElementById('root')!;
