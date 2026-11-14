@@ -40,13 +40,13 @@ describe('listUnreadNotifications', () => {
     expect(result.pagination).toEqual({ page: 1, pageSize: 20, total: 0 });
   });
 
-  it('pageSize=500 → clamp 到 MAX_PAGE_SIZE(100)', async () => {
+  it('pageSize=600 → clamp 到 MAX_PAGE_SIZE(批 13b-A6 抬升后 500)', async () => {
     prisma.notificationQueue.findMany.mockResolvedValue([]);
     prisma.notificationQueue.count.mockResolvedValue(0);
 
-    await listUnreadNotifications('u1', 1, 500);
+    await listUnreadNotifications('u1', 1, 600);
 
-    expect(prisma.notificationQueue.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 100 }));
+    expect(prisma.notificationQueue.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 500 }));
   });
 
   it('page=0 → 按 1 算（skip 0）', async () => {

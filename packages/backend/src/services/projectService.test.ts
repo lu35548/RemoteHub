@@ -81,6 +81,13 @@ describe('listProjects', () => {
     const r = await listProjects('u1', 'admin');
     expect(r.pagination.total).toBe(0);
   });
+  it('批13b-A6:pageSize=600 → take 500（超上限 clamp 到 MAX_PAGE_SIZE=500）', async () => {
+    prisma.project.findMany.mockResolvedValue([]);
+    prisma.project.count.mockResolvedValue(0);
+    prisma.user.findMany.mockResolvedValue([]);
+    await listProjects('u1', 'admin', 1, 600);
+    expect(prisma.project.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 500 }));
+  });
 });
 
 // ─── #47 项目管理增强：status 字段 + 归档/复制/转让/批量归档 ───

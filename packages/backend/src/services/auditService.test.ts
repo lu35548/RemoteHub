@@ -42,9 +42,9 @@ describe('queryAuditLogs - 分页 clamp', () => {
     }));
   });
 
-  it('pageSize=500 → take 100（上限 clamp 到 MAX_PAGE_SIZE）', async () => {
-    await queryAuditLogs({ page: 1, pageSize: 500 });
-    expect(prisma.auditLog.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 100 }));
+  it('pageSize=600 → take 500（超上限 clamp 到 MAX_PAGE_SIZE，批 13b-A6 抬升后 500）', async () => {
+    await queryAuditLogs({ page: 1, pageSize: 600 });
+    expect(prisma.auditLog.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 500 }));
   });
 
   it('pageSize=0 → take 1（clamp 进 [1,100] 而非回默认）', async () => {

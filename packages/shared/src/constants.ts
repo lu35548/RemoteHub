@@ -18,7 +18,10 @@ export const CONNECTION_PASSWORD_MAX_LENGTH = 200;
 export const TAGS_MAX_LENGTH = 500;
 
 export const DEFAULT_PAGE_SIZE = 20;
-export const MAX_PAGE_SIZE = 100;
+/** 批 13b-A6 全局抬升 100→500（lead 裁决，cs 线汇证触发）：内网工具量级（~150 行/表）+ 登录门禁，
+ * 防滥用语义弱化可接受；分页默认值 20 不变，仅上限抬升。消费方（backend 六 service 的 Math.min
+ * 钳制）走本常量自动跟随，无硬编码 100 残留（grep 已核）。 */
+export const MAX_PAGE_SIZE = 500;
 
 export const USER_SEARCH_MAX_RESULTS = 20;
 export const USER_SEARCH_MIN_QUERY_LENGTH = 1;
