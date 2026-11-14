@@ -56,7 +56,7 @@ describe('projectController', () => {
       const { req, res, next } = mockReqRes(undefined, { page: '1', pageSize: '20' }, undefined, { id: 'u1', role: 'user' });
       await projectController.listProjects(req, res, next);
 
-      expect(projectService.listProjects).toHaveBeenCalledWith('u1', 'user', 1, 20, false); // #47 archived 缺省 false
+      expect(projectService.listProjects).toHaveBeenCalledWith('u1', 'user', 1, 20, false, undefined); // #47 archived 缺省 false / A5 q 缺省不传
       expect(res.json).toHaveBeenCalledWith({ success: true, ...mockResult });
       expect(next).not.toHaveBeenCalled();
     });
@@ -71,8 +71,20 @@ describe('projectController', () => {
       const { req, res, next } = mockReqRes(undefined, {}, undefined, { id: 'u1', role: 'admin' });
       await projectController.listProjects(req, res, next);
 
-      expect(projectService.listProjects).toHaveBeenCalledWith('u1', 'admin', 1, 20, false);
+      expect(projectService.listProjects).toHaveBeenCalledWith('u1', 'admin', 1, 20, false, undefined);
       expect(res.json).toHaveBeenCalledWith({ success: true, ...mockResult });
+    });
+
+    it('批13b-A5 q 参数 → trim 后透传 service；空串归一 undefined 不传', async () => {
+      (projectService.listProjects as ReturnType<typeof vi.fn>).mockResolvedValue({ data: [], pagination: { page: 1, pageSize: 20, total: 0 } });
+
+      const withQ = mockReqRes(undefined, { q: '  关键词  ' }, undefined, { id: 'u1', role: 'user' });
+      await projectController.listProjects(withQ.req, withQ.res, withQ.next);
+      expect(projectService.listProjects).toHaveBeenCalledWith('u1', 'user', 1, 20, false, '关键词');
+
+      const emptyQ = mockReqRes(undefined, { q: '   ' }, undefined, { id: 'u1', role: 'user' });
+      await projectController.listProjects(emptyQ.req, emptyQ.res, emptyQ.next);
+      expect(projectService.listProjects).toHaveBeenCalledWith('u1', 'user', 1, 20, false, undefined);
     });
 
     it('service 抛错 → 传递到 next', async () => {

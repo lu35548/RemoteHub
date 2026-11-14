@@ -514,3 +514,57 @@ describe('POST /projects/batch-restore 批量恢复', () => {
     expect(res.body.data).toEqual({ restored: [], skipped: [arcProjId, 'ghost-id'] });
   });
 });
+
+// ─── 批 13b-A5：projects 列表 q 搜索参数（Sidebar 搜索走后端的支撑）───
+
+describe('GET /projects?q=（名称模糊搜索）', () => {
+  async function listQ(q: string): Promise<{ body: { data: Array<{ name: string; id: string }>; pagination: { total: number } } }> {
+    const res = await request(b.app).get(`/api/v1/projects?q=${encodeURIComponent(q)}&pageSize=100`)
+      .set('Authorization', `Bearer ${ownerToken}`);
+    expect(res.status).toBe(200);
+    return res.body;
+  }
+
+  it('q 命中 name：唯一子串 → 源项目 + 其副本各 1 条（contains 语义）', async () => {
+    const body = await listQ(SRC_NAME);
+    const names = body.data.map((p) => p.name);
+    expect(names).toContain(SRC_NAME);
+    expect(body.pagination.total).toBeGreaterThanOrEqual(1);
+    // 命中行 name 全含查询串（contains 语义自洽）
+    for (const n of names) expect(n.includes(SRC_NAME)).toBe(true);
+  });
+
+  it('q 不命中 → total=0', async () => {
+    const body = await listQ('绝不存在的项目名关键词');
+    expect(body.pagination.total).toBe(0);
+    expect(body.data).toEqual([]);
+  });
+
+  it('空 q / 纯空格 q → 忽略该条件（与不带 q 等价）', async () => {
+    const withEmpty = await listQ('');
+    const noParam = await request(b.app).get('/api/v1/projects?pageSize=100')
+      .set('Authorization', `Bearer ${ownerToken}`);
+    expect(withEmpty.pagination.total).toBe(noParam.body.pagination.total);
+
+    const withBlank = await listQ('   ');
+    expect(withBlank.pagination.total).toBe(noParam.body.pagination.total);
+  });
+
+  it('翻页 total 一致：q 检索 total 与翻页 total 自洽，页内 data 恰 pageSize 条', async () => {
+    // 命中集 = 源 + 其副本们（深拷贝 describe 的 copy 次数不假设——递增用例可能产生 (副本) 2 等）
+    const page1 = await request(b.app)
+      .get(`/api/v1/projects?q=${encodeURIComponent(SRC_NAME)}&pageSize=1&page=1`)
+      .set('Authorization', `Bearer ${ownerToken}`);
+    expect(page1.status).toBe(200);
+    const total = page1.body.pagination.total as number;
+    expect(total).toBeGreaterThanOrEqual(2); // 源 + 至少一个副本
+
+    const page2 = await request(b.app)
+      .get(`/api/v1/projects?q=${encodeURIComponent(SRC_NAME)}&pageSize=1&page=2`)
+      .set('Authorization', `Bearer ${ownerToken}`);
+    expect(page2.status).toBe(200);
+    expect(page2.body.pagination.total).toBe(total); // 翻页不漂移
+    expect(page2.body.data as Array<{ name: string }>).toHaveLength(1);
+    expect((page2.body.data as Array<{ name: string }>)[0]!.name.includes(SRC_NAME)).toBe(true);
+  });
+});

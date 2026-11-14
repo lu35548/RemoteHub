@@ -27,13 +27,18 @@ function getUserRef(userMap: UserRefMap, id: string): UserRef {
 }
 
 /** 项目列表 §4 — admin 全部，非 admin 已加入。
- * #47 归档过滤：缺省/false=仅 active（默认列表不显归档）；archived=true=仅归档项目（归档视图专用）。 */
-export async function listProjects(userId: string, userRole: string, page: number = 1, pageSize: number = DEFAULT_PAGE_SIZE, archived: boolean = false) {
+ * #47 归档过滤：缺省/false=仅 active（默认列表不显归档）；archived=true=仅归档项目（归档视图专用）。
+ * 批 13b-A5 q 搜索：对 name 模糊匹配（SQLite contains=LIKE %q%，ASCII 大小写不敏感——
+ * 大小写语义注释口径对齐 connections q 先例）；trim 后空串忽略该条件；
+ * 第 6 参缺省 undefined 不破坏既有调用。 */
+export async function listProjects(userId: string, userRole: string, page: number = 1, pageSize: number = DEFAULT_PAGE_SIZE, archived: boolean = false, q?: string) {
   pageSize = Math.min(pageSize, MAX_PAGE_SIZE);
 
+  const qTrim = q?.trim();
   const where = {
     status: archived ? 'archived' : 'active',
     ...(userRole === 'admin' ? {} : { members: { some: { userId } } }),
+    ...(qTrim ? { name: { contains: qTrim } } : {}),
   };
 
   const [projects, total] = await Promise.all([

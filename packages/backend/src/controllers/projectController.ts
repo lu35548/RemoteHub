@@ -14,7 +14,9 @@ export async function listProjects(req: Request, res: Response, next: NextFuncti
     const pageSize = parseInt(qsParam(req.query.pageSize, '20')) || 20;
     // #47 归档过滤：缺省/false=仅 active；archived=true=仅归档项目（归档视图专用）
     const archived = qsParam(req.query.archived, 'false') === 'true';
-    const result = await projectService.listProjects(req.user.id, req.user.role, page, pageSize, archived);
+    // 批 13b-A5 q 搜索：trim 后透传，空串归一为不传（service 缺省 undefined 不破坏既有调用）
+    const q = qsParam(req.query.q, '').trim();
+    const result = await projectService.listProjects(req.user.id, req.user.role, page, pageSize, archived, q || undefined);
     res.json({ success: true, ...result });
   } catch (err) { next(err); }
 }
