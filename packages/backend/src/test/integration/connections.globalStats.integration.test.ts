@@ -21,8 +21,6 @@ let arcProjId = '';
 beforeAll(async () => {
   b = await setupServerWithDb();
 
-  const admin = await b.prisma.user.findUniqueOrThrow({ where: { username: 'admin' } });
-
   async function mkProject(token: string, name: string): Promise<string> {
     const res = await request(b.app).post('/api/v1/projects')
       .set('Authorization', `Bearer ${token}`).send({ name });

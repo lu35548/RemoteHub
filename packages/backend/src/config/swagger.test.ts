@@ -1,6 +1,7 @@
 // 票 #51:Swagger 文档测试(unit——swagger 端点自身不碰库,server.ts 的 NODE_ENV=test guard
 // 保证 import 不触发 bootstrap/seed/cleaner,先例与 probeRoutes.test.ts 同源纪律)。
-// 对账口径:路由表 60 个操作(multiline grep 盘点,含 4 个跨行定义端点;批 13a #54 +1 read-all)——精确相等,不是 ≥。
+// 对账口径:路由表 62 个操作(multiline grep 盘点,含 4 个跨行定义端点;批 13a #54 +1 read-all;
+// 批 13b +2:Projects batch-restore / Connections 全局 stats)——精确相等,不是 ≥。
 import '../test/helpers/env.js'; // 环境前置:必须第一个 import(拉起 server.ts→config/env.ts 的 requireEnv 快照)
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -31,9 +32,9 @@ const EXPECTED_OPERATIONS_BY_TAG: Record<string, number> = {
   Health: 1, // GET /api/v1/health
   Auth: 14, // 含 forgot/reset-password(跨行定义)与 mfa 三端点
   Users: 5,
-  Projects: 11, // 含 batch-archive 与归档四操作
+  Projects: 12, // 含 batch-archive/batch-restore(批 13b-A3)与归档四操作
   Members: 4, // 嵌套前缀 /api/v1/projects/{id}/members
-  Connections: 8, // 含 decrypt-password/launch/clone
+  Connections: 9, // 含 decrypt-password/launch/clone + 全局 stats(批 13b-A4)
   Audit: 2, // 含 /export CSV
   Monitoring: 5, // dashboard + stats×3 + users/{id}/reset-link(跨行定义)
   Backups: 3, // POST /(手动触发,跨行定义)+ GET 列表 + download

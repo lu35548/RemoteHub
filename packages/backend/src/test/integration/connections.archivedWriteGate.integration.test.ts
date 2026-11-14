@@ -16,7 +16,6 @@ let ownerToken = '';
 let ownerUserId = '';
 let editorToken = '';
 let editorUserId = '';
-let adminUserId = '';
 let activeProjId = '';
 let arcProjId = '';
 let connArcId = ''; // 归档项目普通 SSH 连接（update/delete/clone/源侧换项目用例的靶）
@@ -60,9 +59,6 @@ const apiClone = (token: string, id: string) =>
 
 beforeAll(async () => {
   b = await setupServerWithDb();
-
-  const admin = await b.prisma.user.findUniqueOrThrow({ where: { username: 'admin' } });
-  adminUserId = admin.id;
 
   const owner = await registerUser('agown', '写禁制-owner');
   ownerToken = owner.token;
