@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LayoutGrid, Plus, Monitor, Network, PanelLeftClose, PanelLeftOpen, Search, X, LogOut, Settings, MoreVertical, Edit2, Trash2, LayoutDashboard, Users, Archive, FolderDown, ArrowLeftRight, RotateCcw, ChevronDown } from 'lucide-react';
 import type { ProjectListItem, UserPublic } from '@remotehub/shared';
@@ -7,6 +7,7 @@ import { Pagination } from './Pagination';
 import { ProjectIcon } from './ProjectIcons';
 import { ARCHIVED_LIST_PAGE_SIZE } from '../constants';
 import type { ProjectListItemWithStatus } from '../api/queries';
+import { useProjects } from '../api/queries';
 
 interface SidebarProps {
   projects: ProjectListItem[];
@@ -78,11 +79,20 @@ const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  // B2（批 13b）：搜索后端化——输入经 300ms debounce 落为 debouncedQ（trim 后），搜索态
+  // （debouncedQ 非空）由本组件发起 useProjects(searchPage, 100, q) 服务端查询，展示/翻页/total
+  // 全口径走查询结果；清空立即回退 props 列表（不等 debounce）。底表查询（App 层固定 1,100）
+  // 不带 q——依赖查找全量口径不变（lead 批 13b 裁决）。
+  const [debouncedQ, setDebouncedQ] = useState('');
+  const [searchPage, setSearchPage] = useState(1);
+  const isSearchMode = debouncedQ !== '';
   const [projectMenuOpenId, setProjectMenuOpenId] = useState<string | null>(null);
   // #48 归档折叠区开合（默认收起：归档项目非工作台主角，「默认隐藏」语义）
   const [archivedOpen, setArchivedOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  // B1（批 13b）：抽屉容器 ref——focus trap 的可聚焦元素集合计算边界
+  const drawerRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
   // M3（#49 rev）：抽屉打开即移焦至关闭按钮（焦点入抽屉，Tab 序从抽屉开始 + Escape 可达）。
@@ -111,11 +121,55 @@ const Sidebar: React.FC<SidebarProps> = ({
     }
   };
 
-  const filteredProjects = useMemo(() => {
-    if (!searchTerm) return projects;
-    const lowerTerm = searchTerm.toLowerCase();
-    return projects.filter(p => p.name.toLowerCase().includes(lowerTerm));
-  }, [projects, searchTerm]);
+  // B1（批 13b）：抽屉开态 Tab 循环 focus trap——容器 onKeyDown 拦截，首尾环绕不落背景内容。
+  // 桌面常驻（isMobileOpen=false）不拦截，Tab 正常全页走；中间元素不拦截（浏览器默认序前进）；
+  // 焦点在抽屉外（如 body）时 Tab/Shift+Tab 入首/末元素（初始移焦已保证开态焦点在抽屉内，
+  // 此分支兜底极短窗口——容器级监听够用，真机 Tab 循环验收项移交 lead）。
+  const handleDrawerKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Escape') {
+      onMobileClose?.();
+      return;
+    }
+    if (e.key !== 'Tab' || !isMobileOpen) return;
+    const focusables = Array.from(
+      drawerRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+      ) ?? [],
+    );
+    if (focusables.length === 0) return;
+    const active = document.activeElement as HTMLElement | null;
+    const idx = active ? focusables.indexOf(active) : -1;
+    // 焦点在抽屉外（activeElement 不在集合内，含 null）→ Tab 入首元素 / Shift+Tab 入末元素
+    if (idx === -1) {
+      e.preventDefault();
+      (e.shiftKey ? focusables[focusables.length - 1] : focusables[0])?.focus();
+      return;
+    }
+    if (e.shiftKey && idx === 0) {
+      // 首元素 Shift+Tab → 末元素（环绕）
+      e.preventDefault();
+      focusables[focusables.length - 1]?.focus();
+    } else if (!e.shiftKey && idx === focusables.length - 1) {
+      // 末元素 Tab → 环绕回首元素
+      e.preventDefault();
+      focusables[0]?.focus();
+    }
+  };
+
+  // B2：输入 → 300ms debounce → 服务端查询；清空（trim 空）走 0ms 定时器立即回退（异步回退语义等价，避开 effect 内同步 setState 的 cascading-render lint 规则；输入框续打字重计时）
+  useEffect(() => {
+    const trimmed = searchTerm.trim();
+    const timer = setTimeout(() => {
+      setDebouncedQ(trimmed);
+      setSearchPage(1);
+    }, trimmed ? 300 : 0);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  // 搜索态查询（enabled 门：非搜索态停查）；展示/翻页/total 全口径双态派生
+  const searchQuery = useProjects(searchPage, 100, debouncedQ || undefined, isSearchMode);
+  const displayProjects = isSearchMode ? (searchQuery.data?.data ?? []) : projects;
+  const displayTotal = isSearchMode ? (searchQuery.data?.pagination?.total ?? 0) : projectTotal;
 
   const handleSearchClick = () => {
     if (isCollapsed) {
@@ -153,6 +207,32 @@ const Sidebar: React.FC<SidebarProps> = ({
     },
   });
 
+  // B4 nit（批 13a 挂账「closeMenuAnd 工厂属性收敛」）：项目菜单项重复属性串（role/tabIndex/
+  // closeMenuAnd 工厂属性/公共 className）收敛为内部组件，6 处 JSX 收敛为一处定义。
+  // 行为零变化：class 串 filter(Boolean).join(' ') 与收敛前逐 class 一致（tone/border 差异段参数化）。
+  const ProjectMenuItem: React.FC<{
+    label: string;
+    icon: React.ReactNode;
+    tone?: string;
+    border?: string;
+    onAction: () => void;
+  }> = ({ label, icon, tone = 'text-slate-300 hover:bg-blue-600 hover:text-white', border = '', onAction }) => (
+    <div
+      role="button"
+      tabIndex={0}
+      {...closeMenuAnd(onAction)}
+      className={[
+        'w-full text-left px-3 py-2 text-xs',
+        tone,
+        'flex items-center gap-2',
+        border,
+        'cursor-pointer transition-colors',
+      ].filter(Boolean).join(' ')}
+    >
+      {icon} {label}
+    </div>
+  );
+
   useEffect(() => {
     const closeMenu = () => setProjectMenuOpenId(null);
     if (projectMenuOpenId) window.addEventListener('click', closeMenu);
@@ -161,11 +241,14 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <div
+      ref={drawerRef}
       id="mobile-sidebar"
-      onKeyDown={(e) => {
-        // M3：焦点在抽屉内（打开即移焦至此）按 Escape 关闭抽屉
-        if (e.key === 'Escape') onMobileClose?.();
-      }}
+      // B1（批 13b）：开态 dialog 语义（role/aria-modal/aria-labelledby 指向抽屉标题）；
+      // 桌面常驻（关态）非 dialog——导航 landmark 语义由 aria-label 保留
+      role={isMobileOpen ? 'dialog' : undefined}
+      aria-modal={isMobileOpen || undefined}
+      aria-labelledby="sidebar-drawer-title"
+      onKeyDown={handleDrawerKeyDown}
       onTransitionEnd={handleDrawerTransitionEnd}
       className={`
         fixed inset-y-0 left-0 z-40 h-full flex flex-col border-r border-white/5 bg-slate-950/80 backdrop-blur-xl md:static md:z-20 md:shrink-0
@@ -181,7 +264,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           <div className="w-9 h-9 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/20 ring-1 ring-white/10">
             <Monitor className="text-white w-5 h-5 drop-shadow-md" />
           </div>
-          <h1 className="text-lg font-bold text-white tracking-tight whitespace-nowrap bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
+          <h1 id="sidebar-drawer-title" className="text-lg font-bold text-white tracking-tight whitespace-nowrap bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
             RemoteHub
           </h1>
         </div>
@@ -293,12 +376,18 @@ const Sidebar: React.FC<SidebarProps> = ({
           
           {/* List */}
           <div className="space-y-1 min-h-[100px]">
-            {filteredProjects.length === 0 && !isCollapsed && (
+            {/* B2：搜索态加载态「搜索中...」；空态文案沿用现状风格（非搜索态空列表维持原空态） */}
+            {!isCollapsed && isSearchMode && searchQuery.isPending && (
+              <div className="px-4 py-8 text-center text-xs text-slate-600 animate-in fade-in italic">
+                搜索中...
+              </div>
+            )}
+            {displayProjects.length === 0 && !isCollapsed && !(isSearchMode && searchQuery.isPending) && (
               <div className="px-4 py-8 text-center text-xs text-slate-600 animate-in fade-in italic">
                 未找到相关客户
               </div>
             )}
-            {filteredProjects.map((project) => (
+            {displayProjects.map((project) => (
               <Tooltip key={project.id} content={project.name} side="right" className={isCollapsed ? 'w-full' : ''}>
                 <button
                   onClick={() => { onSelectViewMode('all'); onSelectProject(project.id); }}
@@ -323,7 +412,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                          <div
                            role="button"
                            tabIndex={0}
-                           aria-haspopup="true"
+                           aria-haspopup="menu"
                            aria-expanded={projectMenuOpenId === project.id}
                            aria-label={`项目操作 ${project.name}`}
                            onClick={(e) => toggleProjectMenu(e, project.id)}
@@ -343,61 +432,25 @@ const Sidebar: React.FC<SidebarProps> = ({
                             <div className="absolute right-0 top-8 w-32 bg-slate-900/95 border border-white/10 rounded-xl shadow-2xl backdrop-blur-xl z-50 py-1 animate-in fade-in zoom-in duration-200 origin-top-right ring-1 ring-black/50">
                               {/* #40 成员管理入口：admin 全局直通或项目成员（对齐后端 member 权限链，非成员遮蔽） */}
                               {(currentUser.role === 'admin' || !!project.currentUserRole) && (
-                                <div
-                                  role="button"
-                                  tabIndex={0}
-                                  {...closeMenuAnd(() => onManageMembers(project))}
-                                  className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white flex items-center gap-2 cursor-pointer transition-colors"
-                                >
-                                  <Users size={12} /> 成员管理
-                                </div>
+                                <ProjectMenuItem label="成员管理" icon={<Users size={12} />} onAction={() => onManageMembers(project)} />
                               )}
                               {/* #48 管理操作入口：owner 或 admin 直通可见（对齐五端点 projectRole('owner')+admin 门）；
                                   handler 缺省点击无动作（App 恒传），可见性只由权限决定 */}
                               {(currentUser.role === 'admin' || project.currentUserRole === 'owner') && (
                                 <>
-                                  <div
-                                    role="button"
-                                    tabIndex={0}
-                                    {...closeMenuAnd(() => onArchiveProject?.(project))}
-                                    className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white flex items-center gap-2 cursor-pointer transition-colors"
-                                  >
-                                    <Archive size={12} /> 归档项目
-                                  </div>
-                                  <div
-                                    role="button"
-                                    tabIndex={0}
-                                    {...closeMenuAnd(() => onCopyProject?.(project))}
-                                    className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white flex items-center gap-2 cursor-pointer transition-colors"
-                                  >
-                                    <FolderDown size={12} /> 复制项目
-                                  </div>
-                                  <div
-                                    role="button"
-                                    tabIndex={0}
-                                    {...closeMenuAnd(() => onTransferProject?.(project))}
-                                    className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white flex items-center gap-2 cursor-pointer transition-colors"
-                                  >
-                                    <ArrowLeftRight size={12} /> 转让所有权
-                                  </div>
+                                  <ProjectMenuItem label="归档项目" icon={<Archive size={12} />} onAction={() => onArchiveProject?.(project)} />
+                                  <ProjectMenuItem label="复制项目" icon={<FolderDown size={12} />} onAction={() => onCopyProject?.(project)} />
+                                  <ProjectMenuItem label="转让所有权" icon={<ArrowLeftRight size={12} />} onAction={() => onTransferProject?.(project)} />
                                 </>
                               )}
-                              <div
-                                role="button"
-                                tabIndex={0}
-                                {...closeMenuAnd(() => onEditProject(project))}
-                                className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white flex items-center gap-2 cursor-pointer transition-colors"
-                              >
-                                <Edit2 size={12} /> 编辑
-                              </div>
-                              <div
-                                role="button"
-                                tabIndex={0}
-                                {...closeMenuAnd(() => onDeleteProject(project.id))}
-                                className="w-full text-left px-3 py-2 text-xs text-rose-400 hover:bg-rose-600 hover:text-white flex items-center gap-2 border-t border-white/5 cursor-pointer transition-colors"
-                              >
-                                <Trash2 size={12} /> 删除
-                              </div>
+                              <ProjectMenuItem label="编辑" icon={<Edit2 size={12} />} onAction={() => onEditProject(project)} />
+                              <ProjectMenuItem
+                                label="删除"
+                                icon={<Trash2 size={12} />}
+                                tone="text-rose-400 hover:bg-rose-600 hover:text-white"
+                                border="border-t border-white/5"
+                                onAction={() => onDeleteProject(project.id)}
+                              />
                             </div>
                          )}
                       </div>
@@ -459,9 +512,17 @@ const Sidebar: React.FC<SidebarProps> = ({
           )}
         </div>
 
-        {/* #49 项目列表受控分页 footer：total>0 才渲染；折叠态隐藏（紧凑模式不放分页） */}
-        {!isCollapsed && projectTotal > 0 && onProjectPageChange && (
-          <Pagination page={projectPage} total={projectTotal} pageSize={100} onPageChange={onProjectPageChange} className="mt-2 px-1" />
+        {/* #49 项目列表受控分页 footer：total>0 才渲染；折叠态隐藏（紧凑模式不放分页）。
+            B2：搜索态走搜索结果 total + 内部 searchPage 翻页（服务端口径自然一致，「搜索态禁翻页」消失），
+            非搜索态维持 props 链路（App 层 projectPage/onProjectPageChange） */}
+        {!isCollapsed && displayTotal > 0 && (isSearchMode || onProjectPageChange) && (
+          <Pagination
+            page={isSearchMode ? searchPage : projectPage}
+            total={displayTotal}
+            pageSize={100}
+            onPageChange={isSearchMode ? setSearchPage : onProjectPageChange!}
+            className="mt-2 px-1"
+          />
         )}
       </div>
 

@@ -1,9 +1,18 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import type { ProjectListItem, UserPublic } from '@remotehub/shared';
+import { useProjects } from '../api/queries';
+
+// B2（批 13b）：Sidebar 搜索态走 useProjects 服务端查询——hook 契约由 queries.projectsQ.test.ts
+// 独立锁定，本文件 mock hook 断言 Sidebar 交互参数（debounce → q/enabled/翻页）。
+vi.mock('../api/queries', () => ({
+  useProjects: vi.fn(() => ({ data: undefined, isPending: true })),
+}));
+
+const mockedUseProjects = vi.mocked(useProjects);
 
 const admin: UserPublic = { id: 'u1', username: 'admin', nickname: '管理员', role: 'admin', isActive: true, lastActiveAt: null, createdAt: '2026-01-01' };
 
@@ -28,6 +37,31 @@ const props = {
   onOpenUserModal: noop,
 };
 
+// B2（批 13b）：搜索态 mock——按参数返回：搜索态（enabled && q）返回可控结果集，
+// 非搜索态返回 undefined（Sidebar 回退 props 列表口径）
+const searchResultItems: ProjectListItem[] = [
+  { id: 'px', name: '某某科技 - 云端搜索结果', icon: 'server', createdBy: { id: 'u1', nickname: '管理员' }, updatedBy: { id: 'u1', nickname: '管理员' }, createdAt: '2026-01-01', updatedAt: '2026-01-01' },
+];
+const setupSearchMock = () => {
+  mockedUseProjects.mockImplementation(((page: number, _pageSize: number, q?: string, enabled?: boolean) => {
+    if (enabled && q) {
+      return {
+        data: { data: searchResultItems, pagination: { page, pageSize: 100, total: 150 } },
+        isPending: false,
+      };
+    }
+    return pendingResult;
+  }) as unknown as typeof useProjects);
+};
+
+// UseQueryResult 完整形状宽 cast 常量（mock 部分形状，非搜索态统一返回）
+const pendingResult = { data: undefined, isPending: true } as unknown as ReturnType<typeof useProjects>;
+
+beforeEach(() => {
+  mockedUseProjects.mockReset();
+  mockedUseProjects.mockImplementation(() => pendingResult);
+});
+
 describe('Sidebar 冒烟（T4）', () => {
   it('渲染项目列表与视图入口', () => {
     render(
@@ -40,7 +74,8 @@ describe('Sidebar 冒烟（T4）', () => {
     expect(screen.getByRole('button', { name: /所有资源/ })).toBeInTheDocument();
   });
 
-  it('项目搜索过滤', async () => {
+  it('项目搜索：输入 debounce 后展示服务端查询结果（客户端 filter 已移除）', async () => {
+    setupSearchMock();
     const events = userEvent.setup();
     render(
       <MemoryRouter>
@@ -48,7 +83,9 @@ describe('Sidebar 冒烟（T4）', () => {
       </MemoryRouter>,
     );
     await events.type(screen.getByPlaceholderText('搜索客户...'), '某某');
-    expect(screen.getByText('某某科技 - 私有云')).toBeInTheDocument();
+    // debounce 到点 → mock 返回的搜索结果渲染（名字不含「私有云」语境，非客户端 filter 可产出）
+    await waitFor(() => expect(screen.getByText('某某科技 - 云端搜索结果')).toBeInTheDocument(), { timeout: 2000 });
+    // props 列表条目退出展示（搜索态口径 = 服务端结果）
     expect(screen.queryByText('测试项目')).not.toBeInTheDocument();
   });
 
@@ -64,6 +101,67 @@ describe('Sidebar 冒烟（T4）', () => {
     expect(onSelectProject).toHaveBeenCalledWith('p1');
   });
 });
+
+// ── 批 13b B2：搜索后端化交互契约 ──
+describe('批 13b B2 搜索后端化交互', () => {
+  it('输入 → debounce 前 enabled=false 停查；debounce 到点 useProjects(page,100,q,enabled=true)', async () => {
+    setupSearchMock();
+    const events = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <Sidebar {...props} />
+      </MemoryRouter>,
+    );
+    await events.type(screen.getByPlaceholderText('搜索客户...'), '某某');
+    // debounce 计时窗口内（输入刚完成）：搜索态查询停查
+    expect(mockedUseProjects).toHaveBeenLastCalledWith(1, 100, undefined, false);
+    // 300ms debounce 到点：带 q 查询开启
+    await waitFor(
+      () => expect(mockedUseProjects).toHaveBeenLastCalledWith(1, 100, '某某', true),
+      { timeout: 2000 },
+    );
+  });
+
+  it('搜索态翻页走内部 searchPage：搜索结果 total=150 → Pagination「共 150 条」，下一页 → useProjects(2,100,q,true)', async () => {
+    setupSearchMock();
+    const events = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <Sidebar {...props} />
+      </MemoryRouter>,
+    );
+    await events.type(screen.getByPlaceholderText('搜索客户...'), '某某');
+    await waitFor(() => expect(screen.getByText('共 150 条')).toBeInTheDocument(), { timeout: 2000 });
+    expect(screen.getByText('第 1 / 2 页')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+    await waitFor(
+      () => expect(mockedUseProjects).toHaveBeenLastCalledWith(2, 100, '某某', true),
+      { timeout: 2000 },
+    );
+  });
+
+  it('清空搜索（键盘全删）→ 回退无 q：useProjects 回 enabled=false，props 列表条目复现', async () => {
+    setupSearchMock();
+    const events = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <Sidebar {...props} />
+      </MemoryRouter>,
+    );
+    const input = screen.getByPlaceholderText('搜索客户...');
+    await events.type(input, '某某');
+    await waitFor(() => expect(mockedUseProjects).toHaveBeenLastCalledWith(1, 100, '某某', true), { timeout: 2000 });
+    // 清空输入（clearSearch 按钮 X 无 aria-label；fireEvent.change 直设空值等价「清空」语义）
+    fireEvent.change(input, { target: { value: '' } });
+    await waitFor(
+      () => expect(mockedUseProjects).toHaveBeenLastCalledWith(1, 100, undefined, false),
+      { timeout: 2000 },
+    );
+    expect(screen.getByText('某某科技 - 私有云')).toBeInTheDocument();
+  });
+});
+
+
 
 describe('成员管理入口（#40）', () => {
   // MoreVertical 按钮 opacity-0 hover 才显示——userEvent 点击会静默失效，用 fireEvent 直点
@@ -126,7 +224,7 @@ describe('成员管理入口（#40）', () => {
       </MemoryRouter>,
     );
     const trigger = screen.getByRole('button', { name: '项目操作 某某科技 - 私有云' });
-    expect(trigger).toHaveAttribute('aria-haspopup', 'true');
+    expect(trigger).toHaveAttribute('aria-haspopup', 'menu');
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
     fireEvent.click(trigger);
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
@@ -452,5 +550,95 @@ describe('#48 归档折叠视图', () => {
     await events.click(screen.getByRole('button', { name: /已归档/ }));
     expect(screen.queryByText('共 5 条')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '下一页' })).not.toBeInTheDocument();
+  });
+});
+
+// ── 批 13b B1：M3 focus trap + dialog accessible name（OQ 挂账批 10 + 13a std 轴 minor 同域）──
+// 抽屉开态 Tab/Shift+Tab 在抽屉内可聚焦元素间循环（首尾环绕），Tab 不落背景内容；
+// 容器 onKeyDown 拦截实现（初始移焦已保证焦点入抽屉，容器级拦截即闭环）。
+describe('批 13b B1 抽屉 focus trap + dialog 语义', () => {
+  /** 抽屉内可聚焦元素集合（与实现同款选择器，DOM 序） */
+  const getDrawerFocusables = (drawer: HTMLElement) =>
+    Array.from(drawer.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+    ));
+
+  const renderOpenDrawer = (propsOverride: Partial<Parameters<typeof Sidebar>[0]> = {}) => {
+    const view = render(
+      <MemoryRouter>
+        <Sidebar {...props} isMobileOpen onMobileClose={vi.fn()} {...propsOverride} />
+      </MemoryRouter>,
+    );
+    const drawer = view.container.firstElementChild as HTMLElement;
+    return { view, drawer, focusables: getDrawerFocusables(drawer) };
+  };
+
+  it('开态末元素 Tab → preventDefault + 焦点环绕回首元素（不落背景）', async () => {
+    const { focusables } = renderOpenDrawer();
+    await waitFor(() => expect(screen.getByRole('button', { name: '关闭导航菜单' })).toHaveFocus());
+    const last = focusables[focusables.length - 1]!;
+    last.focus();
+    // fireEvent 返回 false = preventDefault 被调用（Tab 被拦截改环绕）
+    const defaulted = fireEvent.keyDown(last, { key: 'Tab' });
+    expect(defaulted).toBe(false);
+    // 环绕目标 = 抽屉 DOM 首个可聚焦元素（「折叠侧栏」按钮；「关闭导航菜单」是 DOM 序第二）
+    expect(screen.getByRole('button', { name: '折叠侧栏' })).toHaveFocus();
+  });
+
+  it('开态首元素 Shift+Tab → preventDefault + 焦点环绕回末元素', async () => {
+    const { focusables } = renderOpenDrawer();
+    await waitFor(() => expect(screen.getByRole('button', { name: '关闭导航菜单' })).toHaveFocus());
+    // DOM 首个可聚焦元素是「折叠侧栏」按钮（hidden md:block，jsdom 不管 CSS）
+    const first = focusables[0]!;
+    expect(screen.getByRole('button', { name: '折叠侧栏' })).toBe(first);
+    first.focus();
+    const defaulted = fireEvent.keyDown(first, { key: 'Tab', shiftKey: true });
+    expect(defaulted).toBe(false);
+    expect(screen.getByRole('button', { name: '退出登录' })).toHaveFocus();
+  });
+
+  it('开态中间元素 Tab 不拦截（fireEvent true = 默认行为前进，自然环绕前逻辑走浏览器默认序）', async () => {
+    const { focusables } = renderOpenDrawer();
+    await waitFor(() => expect(screen.getByRole('button', { name: '关闭导航菜单' })).toHaveFocus());
+    // 中间元素（关闭按钮之后第二个：搜索输入框）Tab → 不 preventDefault
+    const middle = focusables[2]!;
+    const defaulted = fireEvent.keyDown(middle, { key: 'Tab' });
+    expect(defaulted).toBe(true);
+  });
+
+  it('关态 Tab 不拦截（桌面常驻侧栏 Tab 正常全页走，不圈进抽屉）', async () => {
+    render(
+      <MemoryRouter>
+        <Sidebar {...props} />
+      </MemoryRouter>,
+    );
+    const closeBtnAbsent = screen.queryByRole('button', { name: '关闭导航菜单' });
+    expect(closeBtnAbsent).not.toBeInTheDocument();
+    const target = screen.getByRole('button', { name: '所有资源' });
+    target.focus();
+    const defaulted = fireEvent.keyDown(target, { key: 'Tab' });
+    expect(defaulted).toBe(true);
+  });
+
+  it('开态容器 role=dialog + aria-modal + aria-labelledby 指向标题 id；关态无 dialog 语义（桌面常驻非 dialog）', () => {
+    const { container, unmount } = render(
+      <MemoryRouter>
+        <Sidebar {...props} isMobileOpen />
+      </MemoryRouter>,
+    );
+    const drawer = container.firstElementChild!;
+    expect(drawer).toHaveAttribute('role', 'dialog');
+    expect(drawer).toHaveAttribute('aria-modal', 'true');
+    expect(drawer).toHaveAttribute('aria-labelledby', 'sidebar-drawer-title');
+    expect(screen.getByText('RemoteHub')).toHaveAttribute('id', 'sidebar-drawer-title');
+    unmount();
+    const closed = render(
+      <MemoryRouter>
+        <Sidebar {...props} />
+      </MemoryRouter>,
+    );
+    expect(closed.container.firstElementChild!.getAttribute('role')).toBeNull();
+    // 关态保留 13a 既有 aria-label（桌面常驻 landmark 语义）
+    expect(closed.container.firstElementChild!.getAttribute('aria-label')).toBe('主导航');
   });
 });

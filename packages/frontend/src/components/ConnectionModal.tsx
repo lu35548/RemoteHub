@@ -246,7 +246,15 @@ const ConnectionModal: React.FC<ConnectionModalProps> = ({
       // 前端先行防御对齐后端「显式切 port:none 协议自动清 port」语义（review M1，避免 VAL_001 死锁）
       port: PROTOCOL_REGISTRY[data.protocol].fields.port === 'none' ? null : data.port !== '' ? Number(data.port) : null,
       protocol: data.protocol,
-      username: data.username || null,
+      // B3（批 13b）：username 隐藏类协议（registry fields.username='none'）的 'none' 遗留哨兵
+      // 提交时清值——存量 HTTPS/TODESK 行历史哨兵回填后输入框隐藏（showUsername=false），用户
+      // 不可见不可改、静默重提交永不清；按 registry 单一真相源判定，清成 null（后端 update
+      // 白名单接受 null，与下方空串转 null 惯例同形态）。只清 'none' 哨兵：可见 username 协议
+      // （RDP/SSH 等 fields.username='optional'）用户真输入的 "none" 字符串原样保留。
+      // 新建态不可达：隐藏协议表单无 username 输入框，username 恒空串。
+      username: data.username === 'none' && PROTOCOL_REGISTRY[data.protocol].fields.username === 'none'
+        ? null
+        : (data.username || null),
       tags: data.tags.length > 0 ? data.tags.join(',') : null,
     };
     // #44 密码三态：clearPassword 标记 → 提交 password:null（后端键存在语义 = 清密文列，

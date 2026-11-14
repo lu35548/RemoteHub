@@ -267,6 +267,51 @@ describe('ConnectionModal 协议注册表动态表单（#46）', () => {
   });
 });
 
+// ── 批 13b B3：编辑态 username:'none' 协议遗留哨兵清值（OQ 挂账批 8）──
+// 存量 HTTPS/TODESK 行历史 username='none' 回填后输入框隐藏（fields.username='none'），
+// 用户不可见不可改、静默重提交永不清——提交时按协议 registry 单一真相源判定清成 null。
+// 只清 'none' 遗留哨兵：可见 username 协议（RDP 等）用户真输入的 "none" 字符串不受影响。
+describe("ConnectionModal username:'none' 遗留哨兵清值（批 13b B3）", () => {
+  it('编辑 HTTPS 行存量 username=none（输入框隐藏）→ 提交 payload.username=null', async () => {
+    // 存量脏数据形态：HTTPS 行 username='none'（哨兵），表单无 username 框可自救
+    const legacy = detail({ protocol: 'HTTPS', port: 443, username: 'none', host: 'intranet.corp' });
+    const onSave = vi.fn().mockResolvedValue(detail(legacy));
+    const events = userEvent.setup();
+    renderModal({ onSave, editingConnection: legacy });
+
+    // username 输入框隐藏——哨兵值用户不可见不可改（回填后静默残留的根源）
+    expect(screen.queryByPlaceholderText('root / administrator')).not.toBeInTheDocument();
+    await events.click(screen.getByRole('button', { name: '保存修改' }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect((onSave.mock.calls[0]?.[0] as Record<string, unknown>).username).toBeNull();
+  });
+
+  it('编辑 TODESK 行存量 username=none → 同清（port:none 防御先例同构的存量自救）', async () => {
+    const legacy = detail({ protocol: 'TODESK', port: null, username: 'none', host: '882 331 992' });
+    const onSave = vi.fn().mockResolvedValue(detail(legacy));
+    const events = userEvent.setup();
+    renderModal({ onSave, editingConnection: legacy });
+
+    await events.click(screen.getByRole('button', { name: '保存修改' }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect((onSave.mock.calls[0]?.[0] as Record<string, unknown>).username).toBeNull();
+  });
+
+  it('可见 username 协议（RDP）用户真输入 none → 原样保留（只清隐藏类哨兵，不碰真实输入）', async () => {
+    const onSave = vi.fn().mockResolvedValue(detail());
+    const events = userEvent.setup();
+    renderModal({ onSave, editingConnection: detail({ protocol: 'RDP', username: 'realuser' }) });
+
+    // RDP 的 username 输入框可见——用户清空后手动输入字面量 "none" 是真实数据
+    const usernameInput = screen.getByPlaceholderText('root / administrator');
+    await events.clear(usernameInput);
+    await events.type(usernameInput, 'none');
+    await events.click(screen.getByRole('button', { name: '保存修改' }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect((onSave.mock.calls[0]?.[0] as Record<string, unknown>).username).toBe('none');
+  });
+});
+
 // ── #44 编辑换项目 + 密码清空 ──
 // 编辑态开放所属项目下拉（换项目 = updateConnection 显式传 projectId，后端校验目标项目写权）；
 // 密码「清空密码」显式按钮（clearPassword 标记 → 提交 password:null）与「留空=不变」严格区分。

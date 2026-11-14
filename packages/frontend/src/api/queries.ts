@@ -141,13 +141,21 @@ export function useLogout() {
 
 // ─── Projects ───
 
-export function useProjects(page = 1, pageSize = 20) {
+export function useProjects(page = 1, pageSize = 20, q?: string, enabled = true) {
+  // B2（批 13b）：q 参数化——Sidebar 搜索走服务端（批 10 OQ「>100 项目搜索只搜当前 100 条静默缩窄」修复）。
+  // q trim 归一：空白串与未传同 key 同 URL（条件展开无尾元素，不产生独立缓存条目）；
+  // URL 仅在非空时拼 &q=（encodeURIComponent）；enabled 第 4 参是 Sidebar 搜索态门（非搜索态停查，
+  // App 层旧调用缺省 true 零影响）。底表调用（App 固定 page=1）不带 q——依赖查找全量口径不变。
+  const normalizedQ = q?.trim() ?? '';
   return useQuery({
-    queryKey: ['projects', page, pageSize],
-    queryFn: () => api.getRaw<PaginatedResponse<ProjectListItem>>(`/projects?page=${page}&pageSize=${pageSize}`),
+    queryKey: ['projects', page, pageSize, ...(normalizedQ ? [normalizedQ] : [])],
+    queryFn: () => api.getRaw<PaginatedResponse<ProjectListItem>>(
+      `/projects?page=${page}&pageSize=${pageSize}${normalizedQ ? `&q=${encodeURIComponent(normalizedQ)}` : ''}`,
+    ),
     // M1（#49 rev）：翻页拉新数据期间保持上一页 data 渲染（isPlaceholderData），消除闪空态/footer 闪没；
     // 底表调用（固定 1,100）key 恒同不触发此行为，无害
     placeholderData: keepPreviousData,
+    enabled,
   });
 }
 
