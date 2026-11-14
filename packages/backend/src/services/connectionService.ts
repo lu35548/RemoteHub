@@ -71,15 +71,16 @@ interface ConnectionUpdateData {
 
 // ─── Public Functions ───
 
-/** #41 连接列表过滤参数：tag 精确匹配 / q 三字段模糊 / sort=lastAccessed。
+/** #41 连接列表过滤参数：tags 多值 OR（批 13b-A2 由单值 tag 替换而来）/ q 三字段模糊 / sort=lastAccessed。
  * extends Pick 锁与 shared wire 形状（ConnectionListQuery）的字段级同步——shared 改字段名时此处编译期报错；
  * 职责仍分离：wire 形含 projectId/page/pageSize，service 侧分页与项目过滤走独立位置参数。 */
-export interface ConnectionListFilters extends Pick<ConnectionListQuery, 'tag' | 'q' | 'sort'> {}
+export interface ConnectionListFilters extends Pick<ConnectionListQuery, 'tags' | 'q' | 'sort'> {}
 
 /** 连接列表 — admin 全部，非 admin 已加入项目的连接。
- * #41：tag 包夹法（四条件 OR，等价 SQL 「','||tags||',' LIKE '%,tag,%'」——防 test 命中 test2，
- * NULL tags 自然排除）；q 对 name/host/username contains；sort='lastAccessed' 时最近访问优先。
- * tag/q 匹配为 SQLite LIKE 家族——ASCII 大小写不敏感（语义详见 shared ConnectionListQuery 注释）。 */
+ * #41：tags 包夹法（批 13b-A2 扩展多值：逗号分隔 → 值间 OR，每值四条件 OR——等价 SQL
+ * 「','||tags||',' LIKE '%,tag,%'」逐值展开，防 test 命中 test2，NULL tags 自然排除）；
+ * q 对 name/host/username contains；sort='lastAccessed' 时最近访问优先。
+ * tags/q 匹配为 SQLite LIKE 家族——ASCII 大小写不敏感（语义详见 shared ConnectionListQuery 注释）。 */
 export async function listConnections(
   userId: string,
   userRole: string,
@@ -96,17 +97,21 @@ export async function listConnections(
     ? projectFilter
     : { ...projectFilter, project: { members: { some: { userId } } } };
 
-  // #41 过滤条件叠加（AND 组内各自 OR）
+  // #41 过滤条件叠加（AND 组内各自 OR）；批 13b-A2：tags 逗号分隔多值——片段 trim 归一
+  // （对齐旧 tag 整串 trim 口径）、空段剔除，全空段忽略条件；值间 OR，每值四条件包夹展平 4N 分支
   const and: Prisma.ConnectionWhereInput[] = [];
-  const tag = filters.tag?.trim();
-  if (tag) {
+  const tagList = (filters.tags ?? '')
+    .split(',')
+    .map((t) => t.trim())
+    .filter((t) => t !== '');
+  if (tagList.length > 0) {
     and.push({
-      OR: [
+      OR: tagList.flatMap((tag) => [
         { tags: tag },
         { tags: { startsWith: `${tag},` } },
         { tags: { endsWith: `,${tag}` } },
         { tags: { contains: `,${tag},` } },
-      ],
+      ]),
     });
   }
   const q = filters.q?.trim();

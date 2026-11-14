@@ -862,21 +862,21 @@ describe('connectionService', () => {
 
     // ── #41 连接金矿：tag / q / sort 过滤 ──
 
-    it("#41 tag 过滤 → 包夹法四条件 OR（等价 SQL 包夹法「,||tags||, LIKE %,tag,%」，防 test 命中 test2）", async () => {
+    it("#41/批13b-A2 tags 多值 OR：单值等价旧 tag（包夹法四条件），N 值间 OR 展平为 4N 分支", async () => {
       (prisma.connection.findMany as MockFn).mockResolvedValue([]);
       (prisma.connection.count as MockFn).mockResolvedValue(0);
 
-      await listConnections('admin-1', 'admin', undefined, 1, 20, { tag: 'test' });
-
+      // 单值：与旧 tag=ssh 逐字段等价
+      await listConnections('admin-1', 'admin', undefined, 1, 20, { tags: 'ssh' });
       expect(prisma.connection.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             AND: [{
               OR: [
-                { tags: 'test' },
-                { tags: { startsWith: 'test,' } },
-                { tags: { endsWith: ',test' } },
-                { tags: { contains: ',test,' } },
+                { tags: 'ssh' },
+                { tags: { startsWith: 'ssh,' } },
+                { tags: { endsWith: ',ssh' } },
+                { tags: { contains: ',ssh,' } },
               ],
             }],
           }),
@@ -888,15 +888,69 @@ describe('connectionService', () => {
           where: expect.objectContaining({
             AND: [{
               OR: [
-                { tags: 'test' },
-                { tags: { startsWith: 'test,' } },
-                { tags: { endsWith: ',test' } },
-                { tags: { contains: ',test,' } },
+                { tags: 'ssh' },
+                { tags: { startsWith: 'ssh,' } },
+                { tags: { endsWith: ',ssh' } },
+                { tags: { contains: ',ssh,' } },
               ],
             }],
           }),
         }),
       );
+
+      // 多值 ssh,rdp → N 值间 OR（每值仍四条件包夹，展平 4N 分支）
+      await listConnections('admin-1', 'admin', undefined, 1, 20, { tags: 'ssh,rdp' });
+      expect(prisma.connection.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            AND: [{
+              OR: [
+                { tags: 'ssh' },
+                { tags: { startsWith: 'ssh,' } },
+                { tags: { endsWith: ',ssh' } },
+                { tags: { contains: ',ssh,' } },
+                { tags: 'rdp' },
+                { tags: { startsWith: 'rdp,' } },
+                { tags: { endsWith: ',rdp' } },
+                { tags: { contains: ',rdp,' } },
+              ],
+            }],
+          }),
+        }),
+      );
+    });
+
+    it('批13b-A2 tags 片段处理：中段值命中 / 空段剔除 / 全空段忽略条件', async () => {
+      (prisma.connection.findMany as MockFn).mockResolvedValue([]);
+      (prisma.connection.count as MockFn).mockResolvedValue(0);
+
+      // 中段值（三段串第二段）+ 空段剔除：'a,,b' → ['a','b']（空段不产生分支）
+      await listConnections('admin-1', 'admin', undefined, 1, 20, { tags: 'a,,b' });
+      expect(prisma.connection.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            AND: [{
+              OR: [
+                { tags: 'a' },
+                { tags: { startsWith: 'a,' } },
+                { tags: { endsWith: ',a' } },
+                { tags: { contains: ',a,' } },
+                { tags: 'b' },
+                { tags: { startsWith: 'b,' } },
+                { tags: { endsWith: ',b' } },
+                { tags: { contains: ',b,' } },
+              ],
+            }],
+          }),
+        }),
+      );
+
+      // 全空段（空串/纯逗号/纯空格）→ 忽略该条件（AND 无 tags 组）
+      for (const tags of ['', ',', ' , ']) {
+        await listConnections('admin-1', 'admin', undefined, 1, 20, { tags });
+        const call = (prisma.connection.findMany as MockFn).mock.calls.at(-1)![0]!;
+        expect(call.where.AND).toBeUndefined();
+      }
     });
 
     it('#41 q 模糊 → name/host/username 三字段 OR contains', async () => {
@@ -924,7 +978,7 @@ describe('connectionService', () => {
       (prisma.connection.findMany as MockFn).mockResolvedValue([]);
       (prisma.connection.count as MockFn).mockResolvedValue(0);
 
-      await listConnections('admin-1', 'admin', undefined, 1, 20, { tag: 'prod', q: 'web' });
+      await listConnections('admin-1', 'admin', undefined, 1, 20, { tags: 'prod', q: 'web' });
 
       const call = (prisma.connection.findMany as MockFn).mock.calls[0]![0]!;
       expect(call.where.AND).toHaveLength(2);
@@ -940,7 +994,7 @@ describe('connectionService', () => {
       (prisma.connection.findMany as MockFn).mockResolvedValue([]);
       (prisma.connection.count as MockFn).mockResolvedValue(0);
 
-      await listConnections('user-1', 'user', 'proj-1', 1, 20, { tag: 'test' });
+      await listConnections('user-1', 'user', 'proj-1', 1, 20, { tags: 'test' });
 
       expect(prisma.connection.findMany).toHaveBeenCalledWith(
         expect.objectContaining({

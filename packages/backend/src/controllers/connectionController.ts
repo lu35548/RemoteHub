@@ -14,12 +14,13 @@ export async function listConnections(req: Request, res: Response, next: NextFun
     const projectId = qsParam(req.query.projectId, '');
     const page = Math.max(1, parseInt(qsParam(req.query.page, '1')) || 1);
     const pageSize = parseInt(qsParam(req.query.pageSize, '20')) || 20;
-    // #41 连接金矿：tag/q/sort 透传 service（只含有值键；空串归一为不传，service 侧 trim 后亦不生效）
+    // #41 连接金矿：tags/q/sort 透传 service（只含有值键；空串归一为不传，service 侧 trim 后亦不生效；
+    // 批 13b-A2 tag → tags 多值串——controller 原样透传逗号分隔串，OR 解析在 service）
     const filters: ConnectionListFilters = {};
-    const tag = qsParam(req.query.tag, '');
+    const tags = qsParam(req.query.tags, '');
     const q = qsParam(req.query.q, '');
     const sort = qsParam(req.query.sort, '');
-    if (tag) filters.tag = tag;
+    if (tags) filters.tags = tags;
     if (q) filters.q = q;
     if (sort) filters.sort = sort;
     const result = await connectionService.listConnections(

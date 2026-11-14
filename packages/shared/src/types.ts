@@ -267,12 +267,15 @@ export interface DecryptedPasswordResponse {
 // ─── 连接金矿（票 #41：tag 过滤 / 搜索 / 最近访问排序 / 统计）───
 
 /** GET /connections 查询参数。
- * tag：精确匹配 tags 串中单个片段（包夹法，防 test 命中 test2；SQLite LIKE 家族对 ASCII 大小写不敏感）；
+ * tags（批 13b-A2 替换旧 tag 单值参数）：逗号分隔多值，值间 **OR**，每值仍四条件包夹精确匹配
+ * （包夹法防 test 命中 test2；SQLite LIKE 家族对 ASCII 大小写不敏感）；空段剔除、全空段忽略条件；
+ * 单值 `tags=ssh` 等价旧 `tag=ssh`。注意 validateTags 未禁逗号（tag 本体可含逗号），但 URL 多值
+ * 语法下逗号恒为分隔符——含逗号 tag 本体无法经该参数精确表达（URL 语法限制，语义注释记录）。
  * q：name/host/username 三字段模糊匹配（contains，同为 ASCII 大小写不敏感）；
  * sort：'lastAccessed' = 最近访问优先（NULL 殿后），缺省或其他值 = updatedAt desc。 */
 export interface ConnectionListQuery {
   projectId?: string;
-  tag?: string;
+  tags?: string;
   q?: string;
   sort?: string;
   page?: number;

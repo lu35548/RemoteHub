@@ -32,8 +32,9 @@ export const connectionRoutes: RouterType = Router();
  *         name: projectId
  *         schema: { type: string }
  *       - in: query
- *         name: tag
+ *         name: tags
  *         schema: { type: string }
+ *         description: 标签过滤(逗号分隔多值,值间 OR,每值四条件包夹精确匹配)
  *       - in: query
  *         name: q
  *         schema: { type: string }

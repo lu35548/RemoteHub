@@ -36,7 +36,7 @@ interface SeedConn {
 
 const T0 = new Date('2026-01-01T00:00:00.000Z');
 const SEEDS: SeedConn[] = [
-  // tag=test 应命中：单值 / 首段 / 尾段；不应命中：xtest 前缀（防子串误命中 AC）、NULL tags
+  // tags=test 应命中：单值 / 首段 / 尾段；不应命中：xtest 前缀（防子串误命中 AC）、NULL tags
   { id: 'c1', name: 'Web Server', host: '192.168.1.10', username: 'root', protocol: 'SSH', tags: 'test', lastAccessed: new Date('2026-01-10T00:00:00.000Z'), updatedAt: new Date(T0.getTime() + 1) },
   { id: 'c2', name: 'DB Primary', host: '192.168.1.11', username: 'admin', protocol: 'RDP', tags: 'test,test2', lastAccessed: new Date('2026-02-01T00:00:00.000Z'), updatedAt: new Date(T0.getTime() + 2) },
   { id: 'c3', name: 'Backup Host', host: '192.168.1.12', username: 'dba', protocol: 'SSH', tags: 'xtest,test2', lastAccessed: null, updatedAt: new Date(T0.getTime() + 3) },
@@ -89,10 +89,10 @@ afterAll(() => teardownServerWithDb(b));
 
 // ─── AC1a：tag 精确匹配（包夹法）───
 
-describe('GET /api/v1/connections?tag=（包夹法精确匹配）', () => {
-  it('tag=test → 命中单值/首段/中段/尾段，不命中 xtest 前缀与 NULL tags（防 test 命中 test2 的反向即防 test 命中 xtest）', async () => {
+describe('GET /api/v1/connections?tags=（包夹法精确匹配）', () => {
+  it('tags=test → 命中单值/首段/中段/尾段，不命中 xtest 前缀与 NULL tags（防 test 命中 test2 的反向即防 test 命中 xtest）', async () => {
     const res = await request(b.app)
-      .get(`/api/v1/connections?tag=test`)
+      .get(`/api/v1/connections?tags=test`)
       .set('Authorization', `Bearer ${b.adminToken}`);
     expect(res.status).toBe(200);
     const names = res.body.data.map((c: { name: string }) => c.name);
@@ -100,18 +100,18 @@ describe('GET /api/v1/connections?tag=（包夹法精确匹配）', () => {
     // c3（xtest,test2）与 c5（NULL）不在结果；c4（test2,test）以尾段命中；c7（prod,test,web）以中段 contains ',test,' 命中
   });
 
-  it('tag=test2 → 命中首段/中段/尾段（c2 尾段、c3 尾段、c4 首段），tag=test 的行不因 test 前缀误命中', async () => {
+  it('tags=test2 → 命中首段/中段/尾段（c2 尾段、c3 尾段、c4 首段），tags=test 的行不因 test 前缀误命中', async () => {
     const res = await request(b.app)
-      .get(`/api/v1/connections?tag=test2`)
+      .get(`/api/v1/connections?tags=test2`)
       .set('Authorization', `Bearer ${b.adminToken}`);
     expect(res.status).toBe(200);
     const names = res.body.data.map((c: { name: string }) => c.name);
     expect(names.sort()).toEqual(['Backup Host', 'DB Primary', 'Monitoring']);
   });
 
-  it('tag=test + projectId → 与项目过滤叠加，total 与 data 一致', async () => {
+  it('tags=test + projectId → 与项目过滤叠加，total 与 data 一致', async () => {
     const res = await request(b.app)
-      .get(`/api/v1/connections?tag=test&projectId=${projectId}&page=1&pageSize=2`)
+      .get(`/api/v1/connections?tags=test&projectId=${projectId}&page=1&pageSize=2`)
       .set('Authorization', `Bearer ${b.adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(2);
@@ -120,7 +120,7 @@ describe('GET /api/v1/connections?tag=（包夹法精确匹配）', () => {
 
   it('tag 无一命中 → 空列表 total=0', async () => {
     const res = await request(b.app)
-      .get(`/api/v1/connections?tag=nosuchtag`)
+      .get(`/api/v1/connections?tags=nosuchtag`)
       .set('Authorization', `Bearer ${b.adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body.data).toEqual([]);
@@ -128,6 +128,40 @@ describe('GET /api/v1/connections?tag=（包夹法精确匹配）', () => {
   });
 });
 
+// ─── 批 13b-A2：tags 多值 OR（#42 tag 多选 chips 的后端侧）───
+
+describe('GET /api/v1/connections?tags=a,b（多值 OR）', () => {
+  async function listTags(query: string): Promise<string[]> {
+    const res = await request(b.app)
+      .get(`/api/v1/connections?${query}`)
+      .set('Authorization', `Bearer ${b.adminToken}`);
+    expect(res.status).toBe(200);
+    return (res.body.data as Array<{ name: string }>).map((c) => c.name);
+  }
+
+  it('tags=test,prod → 并集（test 4 条 ∪ prod 2 条 = 5 条，交叠行不重复计）', async () => {
+    expect((await listTags('tags=test,prod')).sort()).toEqual(
+      ['CI Runner', 'DB Primary', 'Legacy Jump', 'Monitoring', 'Web Server'],
+    );
+  });
+
+  it('tags=test,nosuchtag → 并集退化为单值集（不存在的值不产生噪声行）', async () => {
+    expect((await listTags('tags=test,nosuchtag')).sort()).toEqual(
+      ['CI Runner', 'DB Primary', 'Monitoring', 'Web Server'],
+    );
+  });
+
+  it('tags=,test, → 空段剔除后单值语义', async () => {
+    expect((await listTags('tags=,test,')).sort()).toEqual(
+      ['CI Runner', 'DB Primary', 'Monitoring', 'Web Server'],
+    );
+  });
+
+  it('tags=%20test%20 → 片段 trim 后命中（与旧 tag 参数整串 trim 语义对齐）', async () => {
+    expect((await listTags('tags=%20test%20')).sort()).toEqual(
+      ['CI Runner', 'DB Primary', 'Monitoring', 'Web Server']);
+  });
+});
 // ─── AC1b：q 模糊（name/host/username）───
 
 describe('GET /api/v1/connections?q=（三字段模糊）', () => {
@@ -157,15 +191,15 @@ describe('GET /api/v1/connections?q=（三字段模糊）', () => {
     expect(res.body.data.map((c: { name: string }) => c.name)).toEqual(['Backup Host']);
   });
 
-  it('q + tag 叠加（q=web 命中 1 条且其 tags 含 test → tag=test&q=web 仍 1 条；tag=prod&q=web → 0 条）', async () => {
+  it('q + tag 叠加（q=web 命中 1 条且其 tags 含 test → tags=test&q=web 仍 1 条；tags=prod&q=web → 0 条）', async () => {
     const hit = await request(b.app)
-      .get(`/api/v1/connections?tag=test&q=web`)
+      .get(`/api/v1/connections?tags=test&q=web`)
       .set('Authorization', `Bearer ${b.adminToken}`);
     expect(hit.status).toBe(200);
     expect(hit.body.data.map((c: { name: string }) => c.name)).toEqual(['Web Server']);
 
     const miss = await request(b.app)
-      .get(`/api/v1/connections?tag=prod&q=web`)
+      .get(`/api/v1/connections?tags=prod&q=web`)
       .set('Authorization', `Bearer ${b.adminToken}`);
     expect(miss.status).toBe(200);
     expect(miss.body.pagination.total).toBe(0);

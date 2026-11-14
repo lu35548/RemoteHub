@@ -83,18 +83,18 @@ describe('connectionController', () => {
 
     // ── #41 连接金矿：tag / q / sort 透传 ──
 
-    it('#41 tag/q/sort 查询参数 → 组装 filters 透传 service', async () => {
+    it('#41/批13b-A2 tags/q/sort 查询参数 → 组装 filters 透传 service（tags 多值串原样透传，service 解析 OR）', async () => {
       (connectionService.listConnections as ReturnType<typeof vi.fn>).mockResolvedValue({ data: [], pagination: { page: 1, pageSize: 20, total: 0 } });
 
       const { req, res, next } = mockReqRes(
         undefined,
-        { projectId: 'p1', tag: 'prod', q: 'web', sort: 'lastAccessed' },
+        { projectId: 'p1', tags: 'ssh,rdp', q: 'web', sort: 'lastAccessed' },
         undefined,
         { id: 'u1', role: 'user' },
       );
       await connectionController.listConnections(req, res, next);
 
-      expect(connectionService.listConnections).toHaveBeenCalledWith('u1', 'user', 'p1', 1, 20, { tag: 'prod', q: 'web', sort: 'lastAccessed' });
+      expect(connectionService.listConnections).toHaveBeenCalledWith('u1', 'user', 'p1', 1, 20, { tags: 'ssh,rdp', q: 'web', sort: 'lastAccessed' });
       expect(next).not.toHaveBeenCalled();
     });
 
@@ -103,7 +103,7 @@ describe('connectionController', () => {
 
       const { req, res, next } = mockReqRes(
         undefined,
-        { q: 'web', tag: '', sort: '' },
+        { q: 'web', tags: '', sort: '' },
         undefined,
         { id: 'u1', role: 'user' },
       );
