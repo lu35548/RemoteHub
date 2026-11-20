@@ -81,7 +81,7 @@
 ### Deviations
 - acctest48 密码非交接文档记载的 LeadTest123(历史批次已改)——以新密码 Acctest48#2027 为准,交接文档失真已在证据文件标注。
 - 路径 4 备份端点首打 POST /backups 404 系脚本路径笔误(真实挂载 /api/v1/admin/backups,Swagger 注释一致)——非应用缺陷。
-- **Draft PR #56 fresh runner 首跑红(1m21s,批 14 收官后):CI 无 .env→unit 测试 collection throw**(env.ts requireEnv 四变量;本机绿=vitest 自动加载 backend/.env,CI checkout 无该文件)——本地无 .env 复现锁根因,ci.yml test step 注入测试占位 env(commit 1d1a389);同款性质=P0「CI prisma generate 遗漏」。另 2 红(backup 失败通知 0 条——Linux mkdir 语义或通知时序、ws shutdown——批 12 已知时序形态)重跑观察再现性。
+- **Draft PR #56 fresh runner 首跑红(1m21s,批 14 收官后):CI 无 .env→unit 测试 collection throw**(env.ts requireEnv 四变量;本机绿=vitest 自动加载 backend/.env,CI checkout 无该文件)——本地无 .env 复现锁根因;同款性质=P0「CI prisma generate 遗漏」。另 2 红(backup 失败通知 0 条、ws shutdown)。**六轮 CI 修复链全绿收束(44718650018:backend 2m2s+frontend 54s,commit 链 dea999c→2288cb0→32066c6→ccf851f)**:①projectService.test 补 test/helpers/env 首位 import(项目既有 helper 即为此设计,`||=` 兜底语义,勿走 ci.yml env 注入——占位值会污染 helper 的 || =)②ws shutdown 双连接 waitFor(c1-only await 在 CI 快机抢跑)③backup 失败注入改 vi.spyOn(fs.mkdirSync) 函数级 mock——**fs 语义注入(文件路径/文件下子路径)在 Linux recursive mkdir 下静默成功,平台差不可作注入面**;waitFor 落行兜底保留。**教训:本机 Windows 恒绿 ≠ 跨平台行为一致;失败注入优先函数级 mock 而非文件系统构造。**
 
 ### Tradeoffs
 - **备份替换 SQLite 必须清 WAL 残留**(首跑「database disk image is malformed」根因:cp 主文件后卷内残留 -wal/-shm 与新库页结构不匹配;备份文件本身完好,Prisma 直读副本 integrity OK)——正确 runbook=`cp backup.db prod.db && rm -f prod.db-wal prod.db-shm`。纯验证票不改 spec,批 15 修订候选。
