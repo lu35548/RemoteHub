@@ -208,15 +208,16 @@ describe('GET /api/v1/admin/backups/:filename/download（下载）', () => {
 
 describe('备份失败路径（函数级：backupDir 指向文件 → mkdir 失败）', () => {
   it('失败 → 抛错 + admin 收到 BACKUP_FAILED 通知（通知在 service 层接线，cron/手动两入口共用）', async () => {
-    const blocker = path.join(backupDir, 'blocker');
-    fs.writeFileSync(blocker, 'not a dir');
+    // 失败注入用 vi.spyOn 函数级 mock——#56 CI 五轮实录:文件系统语义注入(backupDir
+    // 指向文件/文件下子路径)在 Linux recursive mkdir 下静默成功或行为漂移,平台差
+    // 不可作为失败注入面;mock 后通知链路(emitToAdmins→Queue 落行)照真走。
+    const mkdirSpy = vi.spyOn(fs, 'mkdirSync').mockImplementation(() => {
+      throw new Error('EEXIST: mocked mkdir failure (函数级失败注入)');
+    });
 
     const before = await b.prisma.notificationQueue.count({ where: { type: 'BACKUP_FAILED' } });
     await expect(
-      // backupDir 指向「已存在文件的子路径」——mkdir 逐级建目录时父是文件,跨平台必抛
-      // (ENOTDIR/EEXIST)。#56 CI 实录:纯文件路径在 Linux recursive mkdir 下静默成功
-      // (Node 跨平台行为差,本机 Windows 抛 EEXIST 恒绿),不能作为失败注入面。
-      svc.createBackup({ backupDir: path.join(blocker, 'sub') }), // sourceUrl 默认 env.DATABASE_URL（本套临时库，源校验通过）
+      svc.createBackup({ backupDir }), // sourceUrl 默认 env.DATABASE_URL（本套临时库，源校验通过）
     ).rejects.toThrow();
     // #56 CI 实录:失败通知为 fire-and-forget 异步落行——CI 快机上断言抢在 Queue
     // 写入前(本机慢 fs 恒绿)。waitFor 轮询等落行,与本文件既有 waitFor 先例同法。
@@ -225,7 +226,7 @@ describe('备份失败路径（函数级：backupDir 指向文件 → mkdir 失�
       expect(after).toBe(before + 1);
     }, { timeout: 2000 });
 
-    fs.rmSync(blocker, { force: true });
+    mkdirSpy.mockRestore();
   });
 });
 
