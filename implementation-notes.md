@@ -2,6 +2,8 @@
 
 ## 活跃 Open Questions
 
+- [ ] **#53 验收发现①:mfa 解绑(disable)端点缺失**(批 14 路径 2 实测):后端仅 setup/confirm/verify 三函数,用户绑错/换机即锁死(恢复码耗尽=永久失联);复原只能 dev DB 直清。候选:P2 安全票(disable 需 TOTP/恢复码再验证+全 session 撤销语义)。
+- [ ] **#53 验收发现②:mfa 启用开关无应用内入口**(批 14 路径 2 实测):login 二段分流要求 `twoFactorEnabled=true`(authService.ts:38),但该布尔无任何 API/UI 可置位;未启用用户无 mfa token(aud:'mfa' 与 access 双向互斥),首次绑定只能 DB 直改。票面「开关」两字在产品面上均不存在。候选:与发现①合并一张 P2 票(开关+解绑=完整生命周期)。
 - [x] **D7** Docker runtime libstdc++ —— ✅ 查证反转：node:20-alpine 自带 libstdc++，spec §1.4 不补；builder build tools 保留作 prebuild fallback；plan 验证项 docker build 后 `require('better-sqlite3')` 坐实
 - [x] **D8** B-6 mock helper —— ✅ 抽 `createPrismaMock()`，新增 3 + 现有 2 service test 全迁移（5→1）
 - [x] **D9** 集成测试 —— ✅ 把 spec §2 BLOCKER-1 验收做成集成测试（setupTestDb + 临时 SQLite + migrate deploy + 验 5 表/unique/cascade/自引用约束）
@@ -45,6 +47,50 @@
 - [x] **越界页码显示边角**（批 10）：末页末条删除瞬间 footer 可显示「第 2/1 页」（消费方钳制已修,Pagination 组件自身不自正）——rev-49-std nit,记录备查。 —— ✅ 批 13a 落地(commit e8bc951/7c01588)
 
 ---
+
+## [2026-11-20] P1 批 14:#53 浏览器级总验收 ✅
+
+**Sizing 判定:单人串行**(浏览器 MCP 单实例资源+批 13b 实锤「终版验收必须无并行负载亲跑」,拆并行得不偿失)。
+
+**收官(2026-11-20 lead 终验)**:12 条验收路径全过,#53 关票(证据流水+收官裁决两评论在票)。质量门九门 EXIT=0 无负载亲跑:**backend 809 / shared 59 / frontend 355**(P2 起点基线;frontend +1 vs 交接文档 354 系记载偏差,工作树零改动核对在案)。console 全程零脏(唯一 issue=已知 a11y 基线→**#55 已开票**)。compose 三项全过(生产 404 语义/生产卫生/备份 runbook 全链)。**26/26 子票全关,#27 关票待用户确认。**
+
+### 进度(收官版)
+
+- [x] 环境:双栈起(dev 3000/3001)、探针三绿、造数核对(121/154/5)、console 基线一致(form field id/name ×2,零 error 零 warn)
+- [x] 路径 5 金矿全项(chips OR 判别性实验/搜索/最近访问/clone 密码等价/stats 对照)
+- [x] B3 username:'none' 真机双边界(A:SSH 字面量保留;B:切 HTTPS 哨兵清 null+port 2222→443 自动跟随)
+- [x] 路径 6 协议(5 协议表单语义/.rdp blob 拦截/命令串复制 toast)
+- [x] 路径 7 项目增强(深拷贝/转让 API 双侧复核/归档循环/删除 confirm)
+- [x] 路径 9 dev 侧(api-docs 渲染+探针语义分层)
+- [x] 路径 10 移动视口(375px focus trap 回归 ✅/分页 155=100+55)
+- [x] 路径 2 2FA 全链(2 条验收发现挂 OQ;acctest48 已 DB 复原)
+- [x] 路径 1 密码重置全链(admin 代重置/一次性链接/自助改密/会话空窗 DB 实锤 session=0/forgot-password 防枚举)
+- [x] 路径 3 WS(可疑 IP 1001 精确触发一窗一次/MutationObserver 捕 WS 直推 toast/断线重连 hook 单测锁定+握手 OPEN)
+- [x] 路径 8 导入导出(126/155 逐字段 0 错配/密码密文逐字节等价/指纹 422/一窗一次备份 52ms)
+- [x] 路径 11 dev 侧卫生(console 零脏+network 73 请求零失败)
+- [x] compose 三项:生产 404(SPA 404 非 Swagger,backend 无端口映射)/生产卫生(refresh 401 噪音挂账)/**备份 runbook 全链**(备份→下载 SQLite 头验证→灾难模拟→停栈替换→演练项目回归)
+- [x] 路径 12:九门全零(终值见上)
+- [x] 证据贴票→#53 关票;draft PR 预演随收尾执行(ci.yml `pull_request: {}` 无过滤实锤)
+
+### Design decisions
+- [2026-11-20] 决策:**破坏性路径压轴+账号状态复原纪律**——路径 8(清库导入)放最后;路径 1/2(改密/绑 2FA)验完即复原(acctest48 密码改动在案,2FA DB 直清)。理由:改密撤 session/2FA 锁死会毁后续全部验收。
+- [2026-11-20] 决策:**2FA 实验品 acctest48+DB 层复原**(发现无解绑端点后)——dev 环境 DB 直清等价 disable,验收后账号回原始态;「解绑端点缺失」本身升级为验收发现挂 OQ。
+- [2026-11-20] 决策:**路径 8 走 node 脚本编排**(导入导出无前端 UI,纯 API 功能)——文件落盘不烧 context;等价对比用 DB 逐字段(比 API 列表硬:API 列表默认过滤 archived 导致首验 false 假阴性,口径教训在案)。
+- [2026-11-20] 决策:**draft PR 预演留 #53 收尾后**——ci.yml `pull_request: {}` 无过滤实锤可行,开 draft PR 让 fresh runner CI 首跑提前暴露 prisma generate 类风险。
+
+### Deviations
+- acctest48 密码非交接文档记载的 LeadTest123(历史批次已改)——以新密码 Acctest48#2027 为准,交接文档失真已在证据文件标注。
+- 路径 4 备份端点首打 POST /backups 404 系脚本路径笔误(真实挂载 /api/v1/admin/backups,Swagger 注释一致)——非应用缺陷。
+
+### Tradeoffs
+- **备份替换 SQLite 必须清 WAL 残留**(首跑「database disk image is malformed」根因:cp 主文件后卷内残留 -wal/-shm 与新库页结构不匹配;备份文件本身完好,Prisma 直读副本 integrity OK)——正确 runbook=`cp backup.db prod.db && rm -f prod.db-wal prod.db-shm`。纯验证票不改 spec,批 15 修订候选。
+- 验收期临时数据全自净:克隆连接/项目已删、acctest48 mfa 三字段 DB 全清(20 恢复码删+开关关+secret 清)、compose 演练项目随恢复闭环回归、compose 栈已停。
+- emulate 视口渲染延迟秒级(memory 预期内):分页翻页轮询 3s 后数据到位;resize_page 不被支持用 emulate viewport 替代。
+
+### Open questions
+- (挂顶部清单:验收发现①②——mfa 生命周期完整缺口,候选合并 P2 票)
+
+
 
 ## [2026-11-14] P1 批 13b：B 类 8 条功能全做 ✅
 
