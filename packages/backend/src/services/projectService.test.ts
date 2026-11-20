@@ -1,3 +1,6 @@
+// 必须首个 import：CI 无 .env（vitest 自动加载仅限本机），projectService→notificationService
+// 链上 config/env.ts 在 import 期 requireEnv 快照——helper 用 ||= 兜底，不覆盖已有 env。
+import '../test/helpers/env.js';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Prisma } from '@prisma/client';
 

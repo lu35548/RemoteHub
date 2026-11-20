@@ -19,15 +19,7 @@ jobs:
       - run: pnpm --filter @remotehub/shared test
       - run: pnpm --filter @remotehub/backend lint
       - run: pnpm --filter @remotehub/backend exec tsc --noEmit
-      # vitest 会自动加载 packages/backend/.env,但 .env 不入 repo——CI 需显式提供
-      # unit 测试 import 链上 config/env.ts 的必需变量(integration project 自建临时库不受影响)。
-      # 值为测试占位,不承载任何真实凭据。
       - run: pnpm --filter @remotehub/backend test
-        env:
-          DATABASE_URL: file:./ci-placeholder.db
-          JWT_SECRET: ci-placeholder-jwt-secret
-          ENCRYPTION_KEY: ci-placeholder-encryption-key-32bytes!!
-          ADMIN_PASSWORD: ci-placeholder-admin-pass
   frontend:
     runs-on: ubuntu-latest
     steps:
