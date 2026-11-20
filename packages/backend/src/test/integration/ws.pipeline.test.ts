@@ -250,8 +250,12 @@ describe('graceful shutdown', () => {
     await serverMod.gracefulShutdown();
 
     await closed;
-    expect(c1.ws.readyState).toBe(WebSocket.CLOSED);
-    expect(c2.ws.readyState).toBe(WebSocket.CLOSED);
+    // #56 CI 实录:await closed 仅挂 c1——CI 快机上 c2 的 close 事件轮转未完成时
+    // readyState 断言抢跑(3 CLOSED vs 2 CLOSING 竞态,本机慢 fs 恒绿)。waitFor 双向等。
+    await vi.waitFor(() => {
+      expect(c1.ws.readyState).toBe(WebSocket.CLOSED);
+      expect(c2.ws.readyState).toBe(WebSocket.CLOSED);
+    }, { timeout: 2000 });
     await serverClosed;
     // terminate 后服务端 clients 集合在 ws 'close' 事件轮转才移除，waitFor 等清空
     await vi.waitFor(() => expect(wss.clients.size).toBe(0), { timeout: 2000 });

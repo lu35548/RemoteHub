@@ -81,6 +81,7 @@
 ### Deviations
 - acctest48 密码非交接文档记载的 LeadTest123(历史批次已改)——以新密码 Acctest48#2027 为准,交接文档失真已在证据文件标注。
 - 路径 4 备份端点首打 POST /backups 404 系脚本路径笔误(真实挂载 /api/v1/admin/backups,Swagger 注释一致)——非应用缺陷。
+- **Draft PR #56 fresh runner 首跑红(1m21s,批 14 收官后):CI 无 .env→unit 测试 collection throw**(env.ts requireEnv 四变量;本机绿=vitest 自动加载 backend/.env,CI checkout 无该文件)——本地无 .env 复现锁根因,ci.yml test step 注入测试占位 env(commit 1d1a389);同款性质=P0「CI prisma generate 遗漏」。另 2 红(backup 失败通知 0 条——Linux mkdir 语义或通知时序、ws shutdown——批 12 已知时序形态)重跑观察再现性。
 
 ### Tradeoffs
 - **备份替换 SQLite 必须清 WAL 残留**(首跑「database disk image is malformed」根因:cp 主文件后卷内残留 -wal/-shm 与新库页结构不匹配;备份文件本身完好,Prisma 直读副本 integrity OK)——正确 runbook=`cp backup.db prod.db && rm -f prod.db-wal prod.db-shm`。纯验证票不改 spec,批 15 修订候选。
