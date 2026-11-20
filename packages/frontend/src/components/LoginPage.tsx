@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Monitor, Lock, User, ArrowRight, ShieldCheck, AlertCircle } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useLogin } from '../api/queries';
+import { setMfaPending } from '../api/mfaPending';
 import { useUI } from './UIComponents';
 import type { ApiErrorResponse } from '@remotehub/shared';
 
@@ -20,6 +21,13 @@ const LoginPage: React.FC = () => {
 
     try {
       const result = await loginMutation.mutateAsync({ username, password });
+
+      // 票 #31：2FA enabled 用户 → mfaPending，存内存态后进挑战页（不 setAccessToken）
+      if ('mfaPending' in result) {
+        setMfaPending(result);
+        navigate('/mfa');
+        return;
+      }
 
       if (result?.user) {
         toast('success', '欢迎回来', `${result.user.nickname}，系统已准备就绪`);
@@ -53,11 +61,14 @@ const LoginPage: React.FC = () => {
 
           <form onSubmit={handleLogin} className="space-y-5">
             <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider ml-1">账号</label>
+              <label htmlFor="login-username" className="text-[11px] font-bold text-slate-400 uppercase tracking-wider ml-1">账号</label>
               <div className="relative group">
                 <User className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-blue-400 transition-colors" size={18} />
-                <input 
-                  type="text" 
+                <input
+                  id="login-username"
+                  type="text"
+                  name="username"
+                  autoComplete="username"
                   value={username}
                   onChange={e => setUsername(e.target.value)}
                   className="w-full bg-slate-950/50 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-white placeholder:text-slate-600 focus:ring-2 focus:ring-blue-600/50 focus:border-blue-500/50 outline-none transition-all shadow-inner"
@@ -68,11 +79,14 @@ const LoginPage: React.FC = () => {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider ml-1">密码</label>
+              <label htmlFor="login-password" className="text-[11px] font-bold text-slate-400 uppercase tracking-wider ml-1">密码</label>
               <div className="relative group">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-blue-400 transition-colors" size={18} />
-                <input 
-                  type="password" 
+                <input
+                  id="login-password"
+                  type="password"
+                  name="password"
+                  autoComplete="current-password"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
                   className="w-full bg-slate-950/50 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-white placeholder:text-slate-600 focus:ring-2 focus:ring-blue-600/50 focus:border-blue-500/50 outline-none transition-all shadow-inner"
@@ -103,6 +117,13 @@ const LoginPage: React.FC = () => {
               )}
             </button>
           </form>
+
+          {/* 票 #29：自助重置入口 */}
+          <div className="mt-4 text-center">
+            <Link to="/forgot-password" className="text-xs text-slate-400 hover:text-blue-400 transition-colors">
+              忘记密码？
+            </Link>
+          </div>
 
           <div className="mt-8 pt-6 border-t border-white/5 text-center">
             <div className="inline-flex items-center gap-1.5 text-[10px] text-slate-500 bg-white/5 px-3 py-1 rounded-full border border-white/5">

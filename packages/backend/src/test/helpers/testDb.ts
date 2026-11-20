@@ -9,7 +9,8 @@ import { fileURLToPath } from 'node:url';
 // src/test/helpers/testDb.ts → backend 包根
 const BACKEND_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const PRISMA_BIN = process.platform === 'win32' ? 'prisma.CMD' : 'prisma';
-const PRISMA_CLI = path.join(BACKEND_ROOT, 'node_modules', '.bin', PRISMA_BIN);
+/** 本地 prisma 二进制绝对路径——测试需要独立 execSync prisma CLI 时从这里消费（单一真相源，勿再复制定义） */
+export const PRISMA_CLI = path.join(BACKEND_ROOT, 'node_modules', '.bin', PRISMA_BIN);
 
 let dbInstanceCounter = 0;
 

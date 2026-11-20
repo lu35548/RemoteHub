@@ -25,5 +25,5 @@ _Avoid_: 登录次数统计（易被误解为含失败）
 _Avoid_: 操作日志（无成败语义）
 
 **可疑 IP（Suspicious IP）**:
-非白名单端点流量 1 分钟内超过阈值的来源地址——仅告警记录，不阻断；限流白名单端点（heartbeat/online/health）不计入。
+非白名单端点流量 1 分钟内超过阈值的来源地址——仅告警记录，不阻断；限流白名单端点（heartbeat/online/health/healthz/readyz）不计入。
 _Avoid_: 黑名单 IP（本产品不做阻断）

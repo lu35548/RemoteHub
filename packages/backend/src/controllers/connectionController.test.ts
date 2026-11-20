@@ -9,6 +9,7 @@ vi.mock('../services/connectionService.js', () => ({
   updateConnection: vi.fn(),
   deleteConnection: vi.fn(),
   decryptPassword: vi.fn(),
+  getConnectionStats: vi.fn(),
 }));
 
 import * as connectionController from './connectionController.js';
@@ -62,7 +63,7 @@ describe('connectionController', () => {
       );
       await connectionController.listConnections(req, res, next);
 
-      expect(connectionService.listConnections).toHaveBeenCalledWith('u1', 'owner', 'p1', 1, 20);
+      expect(connectionService.listConnections).toHaveBeenCalledWith('u1', 'owner', 'p1', 1, 20, {});
       expect(res.json).toHaveBeenCalledWith({ success: true, ...mockResult });
       expect(next).not.toHaveBeenCalled();
     });
@@ -77,7 +78,38 @@ describe('connectionController', () => {
       const { req, res, next } = mockReqRes(undefined, {}, undefined, { id: 'u1', role: 'admin' });
       await connectionController.listConnections(req, res, next);
 
-      expect(connectionService.listConnections).toHaveBeenCalledWith('u1', 'admin', undefined, 1, 20);
+      expect(connectionService.listConnections).toHaveBeenCalledWith('u1', 'admin', undefined, 1, 20, {});
+    });
+
+    // ── #41 连接金矿：tag / q / sort 透传 ──
+
+    it('#41/批13b-A2 tags/q/sort 查询参数 → 组装 filters 透传 service（tags 多值串原样透传，service 解析 OR）', async () => {
+      (connectionService.listConnections as ReturnType<typeof vi.fn>).mockResolvedValue({ data: [], pagination: { page: 1, pageSize: 20, total: 0 } });
+
+      const { req, res, next } = mockReqRes(
+        undefined,
+        { projectId: 'p1', tags: 'ssh,rdp', q: 'web', sort: 'lastAccessed' },
+        undefined,
+        { id: 'u1', role: 'user' },
+      );
+      await connectionController.listConnections(req, res, next);
+
+      expect(connectionService.listConnections).toHaveBeenCalledWith('u1', 'user', 'p1', 1, 20, { tags: 'ssh,rdp', q: 'web', sort: 'lastAccessed' });
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    it('#41 部分参数（仅 q）→ filters 只含有值键，空串不透传', async () => {
+      (connectionService.listConnections as ReturnType<typeof vi.fn>).mockResolvedValue({ data: [], pagination: { page: 1, pageSize: 20, total: 0 } });
+
+      const { req, res, next } = mockReqRes(
+        undefined,
+        { q: 'web', tags: '', sort: '' },
+        undefined,
+        { id: 'u1', role: 'user' },
+      );
+      await connectionController.listConnections(req, res, next);
+
+      expect(connectionService.listConnections).toHaveBeenCalledWith('u1', 'user', undefined, 1, 20, { q: 'web' });
     });
 
     it('service 抛错 → 传递到 next', async () => {
@@ -205,9 +237,25 @@ describe('connectionController', () => {
       );
       await connectionController.updateConnection(req, res, next);
 
-      expect(connectionService.updateConnection).toHaveBeenCalledWith('u1', 'c1', { name: '更新后' });
+      // #44：第 4 参透传全局角色（service 层目标项目写权校验的 admin 直通用）
+      expect(connectionService.updateConnection).toHaveBeenCalledWith('u1', 'c1', { name: '更新后' }, 'editor');
       expect(res.json).toHaveBeenCalledWith({ success: true, data: mockData });
       expect(next).not.toHaveBeenCalled();
+    });
+
+    it('#44 admin 角色第 4 参透传（直通语义的上游锁）', async () => {
+      const mockData = { id: 'c1', projectId: 'p1', name: '更新后' };
+      (connectionService.updateConnection as ReturnType<typeof vi.fn>).mockResolvedValue(mockData);
+
+      const { req, res, next } = mockReqRes(
+        { id: 'c1' }, undefined,
+        { name: '更新后' },
+        { id: 'u1', role: 'admin' },
+      );
+      await connectionController.updateConnection(req, res, next);
+
+      expect(connectionService.updateConnection).toHaveBeenCalledWith('u1', 'c1', { name: '更新后' }, 'admin');
+      expect(res.json).toHaveBeenCalledWith({ success: true, data: mockData });
     });
 
     it('连接不存在 → 传递 CONN_002 到 next', async () => {
@@ -302,6 +350,36 @@ describe('connectionController', () => {
 
       const { req, res, next } = mockReqRes({ id: 'nonexist' }, undefined, undefined, { id: 'u1', role: 'editor' });
       await connectionController.decryptPassword(req, res, next);
+
+      expect(next).toHaveBeenCalledWith(error);
+    });
+  });
+
+  // ─── #41 getProjectConnectionStats ───
+  describe('getProjectConnectionStats', () => {
+    it('有效项目 ID → 返回协议/标签聚合计数', async () => {
+      const mockData = {
+        protocols: { SSH: 2, RDP: 1 },
+        tags: { prod: 2, web: 1 },
+      };
+      (connectionService.getConnectionStats as ReturnType<typeof vi.fn>).mockResolvedValue(mockData);
+
+      const { req, res, next } = mockReqRes({ id: 'p1' }, undefined, undefined, { id: 'u1', role: 'viewer' });
+      await connectionController.getProjectConnectionStats(req, res, next);
+
+      expect(connectionService.getConnectionStats).toHaveBeenCalledWith('p1');
+      expect(res.json).toHaveBeenCalledWith({ success: true, data: mockData });
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    it('项目不存在 → 传递 PROJ_002 到 next', async () => {
+      const error = new Error('PROJ_002') as any;
+      error.code = 'PROJ_002';
+      error.statusCode = 404;
+      (connectionService.getConnectionStats as ReturnType<typeof vi.fn>).mockRejectedValue(error);
+
+      const { req, res, next } = mockReqRes({ id: 'nonexist' }, undefined, undefined, { id: 'u1', role: 'viewer' });
+      await connectionController.getProjectConnectionStats(req, res, next);
 
       expect(next).toHaveBeenCalledWith(error);
     });

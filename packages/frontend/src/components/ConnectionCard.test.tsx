@@ -1,23 +1,26 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectionListItem } from '@remotehub/shared';
+import type { LaunchConnectionResult } from '../api/queries';
 import { UIProvider } from './UIComponents';
 import ConnectionCard from './ConnectionCard';
 
-// useDecryptPassword 边界 mock（按运行时形状：mutateAsync(id) → { password }）
-const { decryptMock } = vi.hoisted(() => ({ decryptMock: vi.fn() }));
+// useDecryptPassword / launchConnection（#46）边界 mock（按运行时形状：mutateAsync(id) → { password }）
+const { decryptMock, launchMock } = vi.hoisted(() => ({ decryptMock: vi.fn(), launchMock: vi.fn() }));
 vi.mock('../api/queries', () => ({
   useDecryptPassword: () => ({ mutateAsync: decryptMock }),
+  launchConnection: launchMock,
 }));
 
-// RDP utils 边界 mock（DOM 下载副作用不在 jsdom 验证，真链路浏览器覆盖）
+// RDP utils 边界 mock（DOM 下载副作用不在 jsdom 验证，真链路浏览器覆盖；downloadBlob 由 launchConnection 消费）
 const { rdpMocks } = vi.hoisted(() => ({
   rdpMocks: {
     isRdpConfigured: vi.fn(),
     markRdpConfigured: vi.fn(),
     downloadRdpFile: vi.fn(),
     generateRdpRegistryFile: vi.fn(),
+    downloadBlob: vi.fn(),
   },
 }));
 vi.mock('../utils', () => rdpMocks);
@@ -50,6 +53,7 @@ const renderCard = (props: Partial<Parameters<typeof ConnectionCard>[0]> = {}) =
         connection={hostItem()}
         onEdit={vi.fn()}
         onDelete={vi.fn()}
+        onClone={vi.fn()}
         {...props}
       />
     </UIProvider>,
@@ -59,6 +63,7 @@ describe('ConnectionCard（T5）', () => {
   beforeEach(() => {
     decryptMock.mockReset();
     decryptMock.mockResolvedValue({ password: 'S3cret!' });
+    launchMock.mockReset();
   });
 
   it('渲染 v1 等价信息集：名称/协议短名/主机/用户名/密码占位/tags/审计 footer', () => {
@@ -122,14 +127,71 @@ describe('ConnectionCard（T5）', () => {
     await events.click(screen.getByText('删除'));
     expect(onDelete).toHaveBeenCalledWith('c1');
   });
+
+  it('菜单：克隆连接回调 connection（#43 克隆入口）', async () => {
+    const onClone = vi.fn();
+    const events = userEvent.setup();
+    renderCard({ onClone });
+
+    await events.click(screen.getByRole('button', { name: /更多/i }));
+    await events.click(screen.getByText('克隆连接'));
+    expect(onClone).toHaveBeenCalledWith(expect.objectContaining({ id: 'c1' }));
+  });
 });
 
-describe('ConnectionCard 动作系统（T6）', () => {
+describe('ConnectionCard 菜单触发器 a11y（批 13a）', () => {
+  it('更多操作按钮 aria-haspopup + aria-expanded 随菜单开合切换', () => {
+    const { unmount } = renderCard();
+    const trigger = screen.getByRole('button', { name: '更多操作' });
+    // 语义化值 'menu'（批 13b C5 收尾：裸 true 是旧版 a11y 口径，WAI-ARIA 1.2 起触发器标注弹出类型）
+    expect(trigger).toHaveAttribute('aria-haspopup', 'menu');
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    unmount();
+
+    // readOnly（#48）不渲染菜单 → 触发器整体不渲染
+    const ro = renderCard({ readOnly: true });
+    expect(ro.container.ownerDocument.body.querySelector('[aria-label="更多操作"]')).toBeNull();
+    ro.unmount();
+  });
+});
+
+describe('ConnectionCard lastAccessed 脚注（#42）', () => {
   beforeEach(() => {
     decryptMock.mockReset();
     decryptMock.mockResolvedValue({ password: 'S3cret!' });
-    Object.values(rdpMocks).forEach((m) => m.mockReset());
-    rdpMocks.isRdpConfigured.mockReturnValue(false); // 默认未配置直连
+    launchMock.mockReset();
+  });
+
+  it('lastAccessed 有值 → 脚注含「访问 <相对时间>」与「更新 <相对时间>」', () => {
+    const now = Date.now();
+    renderCard({
+      connection: hostItem({
+        lastAccessed: new Date(now - 3 * 3600_000).toISOString(),
+        updatedAt: new Date(now - 5 * 24 * 3600_000).toISOString(),
+      }),
+    });
+
+    expect(screen.getByText(/访问 3小时前/)).toBeInTheDocument();
+    expect(screen.getByText(/更新 5天前/)).toBeInTheDocument();
+  });
+
+  it('lastAccessed 为 null → 「未访问」中文占位（更新时间仍展示）', () => {
+    renderCard({
+      connection: hostItem({ lastAccessed: null, updatedAt: new Date(Date.now() - 2 * 3600_000).toISOString() }),
+    });
+
+    expect(screen.getByText(/未访问/)).toBeInTheDocument();
+    expect(screen.getByText(/更新 2小时前/)).toBeInTheDocument();
+  });
+});
+
+describe('ConnectionCard 复制/密码系统（T6）', () => {
+  beforeEach(() => {
+    decryptMock.mockReset();
+    decryptMock.mockResolvedValue({ password: 'S3cret!' });
+    launchMock.mockReset();
   });
 
   it('复制系：HOST/USER 复制按钮写入剪贴板并弹 toast', async () => {
@@ -156,54 +218,6 @@ describe('ConnectionCard 动作系统（T6）', () => {
     expect(decryptMock).toHaveBeenCalledWith('c1');
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('S3cret!'));
     expect(await screen.findByText('密码 已复制到剪贴板')).toBeInTheDocument();
-  });
-
-  it('主操作分派：Web 开新页、SSL_VPN 跳转补 https、专有协议/其他 VPN 复制 host、SSH 复制唤起命令', async () => {
-    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
-    // jsdom 对 window.location.href = 'ssh://...' 会打 not-implemented console 错误，压掉
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
-    try {
-      // HTTP：显式端口
-      const http = renderCard({ connection: hostItem({ protocol: 'HTTP', port: 8080 }) });
-      fireEvent.click(screen.getByRole('button', { name: /打开网页/ }));
-      expect(openSpy).toHaveBeenCalledWith('http://192.168.1.10:8080', '_blank');
-      http.unmount();
-
-      // HTTPS：端口缺省 443
-      const https = renderCard({ connection: hostItem({ protocol: 'HTTPS', port: null }) });
-      fireEvent.click(screen.getByRole('button', { name: /打开网页/ }));
-      expect(openSpy).toHaveBeenCalledWith('https://192.168.1.10:443', '_blank');
-      https.unmount();
-
-      // VPN SSL_VPN：host 补 https 前缀后跳转（v2 语义：host 即登录 URL）
-      const sslVpn = renderCard({ connection: vpnItem() });
-      fireEvent.click(screen.getByRole('button', { name: /跳转登录/ }));
-      expect(openSpy).toHaveBeenCalledWith('https://vpn.example.com', '_blank');
-      sslVpn.unmount();
-
-      // VPN 其他类型：复制 host
-      const clientVpn = renderCard({ connection: vpnItem({ vpnType: 'OTHER' }) });
-      fireEvent.click(screen.getByRole('button', { name: /复制 VPN 地址/ }));
-      expect(writeText).toHaveBeenCalledWith('vpn.example.com');
-      clientVpn.unmount();
-
-      // 专有协议：主按钮即复制设备码
-      const todesk = renderCard({ connection: hostItem({ protocol: 'TODESK' }) });
-      fireEvent.click(screen.getByRole('button', { name: /复制设备码/ }));
-      expect(writeText).toHaveBeenCalledWith('192.168.1.10');
-      todesk.unmount();
-
-      // SSH：复制完整命令（带端口）
-      const ssh = renderCard({ connection: hostItem({ protocol: 'SSH', username: 'root', port: 22 }) });
-      fireEvent.click(screen.getByRole('button', { name: /打开 SSH/ }));
-      expect(writeText).toHaveBeenCalledWith('ssh root@192.168.1.10 -p 22');
-      ssh.unmount();
-    } finally {
-      openSpy.mockRestore();
-      errSpy.mockRestore();
-    }
   });
 
   it('Via 行：SSL_VPN 依赖跳转登录页，其他依赖复制地址', () => {
@@ -242,7 +256,7 @@ describe('ConnectionCard 动作系统（T6）', () => {
     renderCard();
 
     fireEvent.click(screen.getByTitle('未配置直连'));
-    expect(screen.getByText('启用一键直连')).toBeInTheDocument();
+    expect(screen.getByText('配置 RDP 直连')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /下载配置脚本/ }));
     expect(rdpMocks.generateRdpRegistryFile).toHaveBeenCalled();
@@ -250,60 +264,112 @@ describe('ConnectionCard 动作系统（T6）', () => {
     fireEvent.click(screen.getByRole('button', { name: /我已安装，完成设置/ }));
     expect(rdpMocks.markRdpConfigured).toHaveBeenCalled();
     expect(screen.getByTitle('已配置直连')).toBeInTheDocument();
-    expect(screen.queryByText('启用一键直连')).not.toBeInTheDocument();
+    expect(screen.queryByText('配置 RDP 直连')).not.toBeInTheDocument();
+  });
+});
+
+// ── #46 一键直连 launch 分派 ──
+// 主按钮统一走 GET /connections/:id/launch（后端 PROTOCOL_REGISTRY 单一真相源），
+// 按 launchConnection 解析结果分派 UI 动作；blob 下载副作用在 launchConnection 内部（同 CSV 导出先例）。
+describe('ConnectionCard 一键直连 launch 分派（#46）', () => {
+  beforeEach(() => {
+    decryptMock.mockReset();
+    decryptMock.mockResolvedValue({ password: 'S3cret!' });
+    launchMock.mockReset();
+    Object.values(rdpMocks).forEach((m) => m.mockReset());
+    rdpMocks.isRdpConfigured.mockReturnValue(false);
   });
 
-  it('RDP 检测：未配置点击主按钮呼叫中，窗口失焦视为协议支持 → 标记就绪', async () => {
-    vi.useFakeTimers();
-    // jsdom 对 rh-rdp:// 的 <a>.click() 导航报 not-implemented，压掉
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  it('url → window.open 端点返回的 URL（HTTPS）', async () => {
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
     try {
-      renderCard();
-      fireEvent.click(screen.getByRole('button', { name: /一键直连/ }));
-      expect(screen.getByText('呼叫中...')).toBeInTheDocument();
+      launchMock.mockResolvedValue({ type: 'url', url: 'https://192.168.1.10' } satisfies LaunchConnectionResult);
+      renderCard({ connection: hostItem({ protocol: 'HTTPS', port: null }) });
 
-      fireEvent.blur(window); // rh-rdp:// 处理器接管 → 失焦
-      await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
-      expect(rdpMocks.markRdpConfigured).toHaveBeenCalled();
-      expect(screen.getByTitle('已配置直连')).toBeInTheDocument();
-      expect(screen.getByText('一键直连协议已就绪')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /打开网页/ }));
+      await waitFor(() => expect(openSpy).toHaveBeenCalledWith('https://192.168.1.10', '_blank'));
+      expect(await screen.findByText('正在打开')).toBeInTheDocument();
     } finally {
-      errSpy.mockRestore();
-      vi.useRealTimers();
+      openSpy.mockRestore();
     }
   });
 
-  it('RDP 检测：无失焦（协议未安装）→ 1.5s 后弹配置引导', async () => {
-    vi.useFakeTimers();
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    try {
-      renderCard();
-      fireEvent.click(screen.getByRole('button', { name: /一键直连/ }));
-      await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
-      expect(screen.getByText('启用一键直连')).toBeInTheDocument();
-    } finally {
-      errSpy.mockRestore();
-      vi.useRealTimers();
-    }
+  it('command → 复制端点命令串（SSH）', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    launchMock.mockResolvedValue({ type: 'command', command: 'ssh root@192.168.1.10 -p 22' } satisfies LaunchConnectionResult);
+    renderCard({ connection: hostItem({ protocol: 'SSH', username: 'root', port: 22 }) });
+
+    fireEvent.click(screen.getByRole('button', { name: /打开 SSH/ }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('ssh root@192.168.1.10 -p 22'));
+    expect(await screen.findByText('连接命令已复制到剪贴板')).toBeInTheDocument();
+    expect(launchMock).toHaveBeenCalledWith('c1');
   });
 
-  it('RDP 直连：已配置点击主按钮弹 launching Modal，失焦后 500ms 收起', async () => {
-    vi.useFakeTimers();
-    try {
-      rdpMocks.isRdpConfigured.mockReturnValue(true);
-      renderCard();
-      fireEvent.click(screen.getByRole('button', { name: /一键直连/ }));
-      expect(screen.getByText('正在建立连接')).toBeInTheDocument();
+  it('command → 复制设备码本体（TODESK，host 即设备 ID）', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    launchMock.mockResolvedValue({ type: 'command', command: '882 331 992' } satisfies LaunchConnectionResult);
+    renderCard({ connection: hostItem({ protocol: 'TODESK', host: '882 331 992' }) });
 
-      act(() => { vi.advanceTimersByTime(300); }); // 300ms 后触发 rh-rdp://
-      fireEvent.blur(window);
-      // 两段推进：500ms 收起（isOpen=false，act flush 让 Modal 注册退出 timer）
-      // → 300ms 退出动画后卸载（UIComponents Modal 行为）
-      await act(async () => { await vi.advanceTimersByTimeAsync(500); });
-      await act(async () => { await vi.advanceTimersByTimeAsync(350); });
-      expect(screen.queryByText('正在建立连接')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /复制设备码/ }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('882 331 992'));
+    expect(await screen.findByText('连接命令已复制到剪贴板')).toBeInTheDocument();
+  });
+
+  it('rdp_file → launchConnection 内部完成 Blob 下载，卡片 toast 已下载', async () => {
+    launchMock.mockResolvedValue({ type: 'rdp_file', filename: '应用服务器.rdp' } satisfies LaunchConnectionResult);
+    renderCard();
+
+    fireEvent.click(screen.getByRole('button', { name: /一键直连/ }));
+    expect(await screen.findByText(/RDP 文件已下载/)).toBeInTheDocument();
+    expect(launchMock).toHaveBeenCalledWith('c1');
+  });
+
+  it('CONN_006 → toast「该协议不支持直连」（VNC）', async () => {
+    launchMock.mockRejectedValue(Object.assign(new Error('该协议不支持直连'), { code: 'CONN_006' }));
+    renderCard({ connection: hostItem({ protocol: 'VNC', port: null }) });
+
+    fireEvent.click(screen.getByRole('button', { name: /连接/ }));
+    expect(await screen.findByText('该协议不支持直连')).toBeInTheDocument();
+  });
+
+  it('其他错误 → toast 服务端中文消息', async () => {
+    launchMock.mockRejectedValue(new Error('连接不存在'));
+    renderCard();
+
+    fireEvent.click(screen.getByRole('button', { name: /一键直连/ }));
+    expect(await screen.findByText('连接不存在')).toBeInTheDocument();
+  });
+
+  it('OTHER 类型 VPN：主按钮「打开 VPN 地址」→ launch url 分派 window.open', async () => {
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+    try {
+      launchMock.mockResolvedValue({ type: 'url', url: 'https://vpn.example.com' } satisfies LaunchConnectionResult);
+      renderCard({ connection: vpnItem({ vpnType: 'OTHER' }) });
+
+      fireEvent.click(screen.getByRole('button', { name: /打开 VPN 地址/ }));
+      await waitFor(() => expect(openSpy).toHaveBeenCalledWith('https://vpn.example.com', '_blank'));
+      expect(await screen.findByText('正在打开')).toBeInTheDocument();
     } finally {
-      vi.useRealTimers();
+      openSpy.mockRestore();
     }
+  });
+});
+
+// ── #48 归档项目只读态：写操作入口整体遮蔽(编辑/克隆/删除藏于「更多操作」菜单,
+// 整菜单不渲染;连接主按钮属使用语义保留) ──
+describe('#48 ConnectionCard 只读态(readOnly)', () => {
+  it('readOnly=true → 无「更多操作」菜单按钮,主连接按钮保留', () => {
+    renderCard({ readOnly: true });
+
+    expect(screen.queryByRole('button', { name: '更多操作' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /一键直连/ })).toBeInTheDocument();
+  });
+
+  it('缺省(非归档视图) → 菜单按钮照常渲染(既有行为零变化)', () => {
+    renderCard();
+
+    expect(screen.getByRole('button', { name: '更多操作' })).toBeInTheDocument();
   });
 });

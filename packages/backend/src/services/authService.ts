@@ -1,26 +1,31 @@
 // packages/backend/src/services/authService.ts
 import { prisma } from '../utils/prisma.js';
 import { verifyPassword, hashPassword } from '../utils/password.js';
-import { signAccessToken, generateRefreshToken, hashRefreshToken } from '../utils/jwt.js';
+import { signAccessToken, signMfaToken, generateRefreshToken, hashRefreshToken } from '../utils/jwt.js';
 import { createAppError, handlePrismaUniqueViolation } from '../utils/appError.js';
+import { logger } from '../utils/logger.js';
+import { emitNotification } from './notificationService.js';
 import { validateUsername, validateNickname, validatePassword as validatePwd, validateRole } from '@remotehub/shared';
 import { REFRESH_CONCURRENT_WINDOW_SEC } from '@remotehub/shared';
 import type { UserPublic } from '@remotehub/shared';
 
 /** 数据库 User → 公开 DTO（strip passwordHash, updatedAt）§4.1 */
-function toUserPublic(user: { id: string; username: string; nickname: string; role: string; isActive: boolean; lastActiveAt: Date | null; createdAt: Date }): UserPublic {
+export function toUserPublic(user: { id: string; username: string; nickname: string; role: string; isActive: boolean; twoFactorEnabled?: boolean; lastActiveAt: Date | null; createdAt: Date }): UserPublic {
   return {
     id: user.id,
     username: user.username,
     nickname: user.nickname,
     role: user.role as 'admin' | 'user',
     isActive: user.isActive,
+    twoFactorEnabled: user.twoFactorEnabled ?? false,
     lastActiveAt: user.lastActiveAt?.toISOString() ?? null,
     createdAt: user.createdAt.toISOString(),
   };
 }
 
-/** 登录 §5.1 — 全程 AUTH_001 防止用户名枚举 */
+/** 登录 §5.1 — 全程 AUTH_001 防止用户名枚举。
+ * 票 #30 二段分流：2FA enabled 用户密码通过后返回 mfaPending + aud:'mfa' 挑战 token，
+ * 不建 session、不签 access token（session 建立时机 = mfa/verify 成功后）。 */
 export async function login(username: string, password: string) {
   const user = await prisma.user.findUnique({ where: { username } });
   if (!user) throw createAppError('AUTH_001');
@@ -29,6 +34,12 @@ export async function login(username: string, password: string) {
   if (!valid) throw createAppError('AUTH_001');
 
   if (!user.isActive) throw createAppError('AUTH_001');
+
+  if (user.twoFactorEnabled) {
+    const mfaToken = await signMfaToken(user.id);
+    const mfaStage = user.totpSecret ? ('verify' as const) : ('setup' as const);
+    return { mfaPending: true as const, mfaStage, mfaToken };
+  }
 
   const accessToken = await signAccessToken(user.id);
   const refreshToken = generateRefreshToken();
@@ -171,6 +182,24 @@ export async function refresh(oldRefreshToken: string) {
   }
 }
 
+/**
+ * WS upgrade 通道的 session 校验（#34 review F1：消复制 + 补 consumedAt）。
+ * 严格拒绝已消费（consumedAt 非空）的 token——与 refresh 的 30s 并发宽容**不同口径**，
+ * 理由：浏览器 cookie jar 在 refresh 的 Set-Cookie 落地后即更新，多标签页竞态窗口
+ * 毫秒级且前端重连自愈；而已轮换旧 token 重放走 REST 通道会触发重用检测（撤全部
+ * session），WS 通道放行即旁路该语义。
+ * 返回 null 表示无效（不区分原因，WS 层统一 401）。
+ */
+export async function validateRefreshSession(token: string): Promise<{ userId: string; role: string } | null> {
+  const tokenHash = hashRefreshToken(token);
+  const session = await prisma.session.findUnique({ where: { tokenHash }, include: { user: true } });
+  if (!session) return null;
+  if (session.consumedAt !== null) return null;
+  if (session.expiresAt <= new Date()) return null;
+  if (!session.user.isActive) return null;
+  return { userId: session.userId, role: session.user.role };
+}
+
 /** Logout §5.1 */
 export async function logout(refreshToken: string | undefined) {
   if (!refreshToken) return;
@@ -196,6 +225,15 @@ export async function changePassword(userId: string, oldPassword: string, newPas
     prisma.user.update({ where: { id: userId }, data: { passwordHash } }),
     prisma.session.deleteMany({ where: { userId } }),
   ]);
+
+  // #36 强制登出通知：改密撤 session 后按已知 userId 直推（无需查列表）。
+  // 事务外 fire-and-forget（WS 推送不进事务）；WS 连接 upgrade 时已鉴权不受撤 session
+  // 影响，FORCE_LOGOUT 直达在线客户端；失败只记日志不破改密主流程。
+  void emitNotification({
+    userId,
+    type: 'FORCE_LOGOUT',
+    payload: { reason: 'password_changed', message: '密码已修改，请重新登录' },
+  }).catch((err: Error) => logger.error('强制登出通知下发失败（不传播）', { userId, error: err.message }));
 }
 
 /** 获取当前用户信息 */

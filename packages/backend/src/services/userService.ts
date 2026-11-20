@@ -8,7 +8,7 @@ export async function listUsers(page: number = 1, pageSize: number = DEFAULT_PAG
   pageSize = Math.min(pageSize, MAX_PAGE_SIZE);
   const [users, total] = await Promise.all([
     prisma.user.findMany({
-      select: { id: true, username: true, nickname: true, role: true, isActive: true, lastActiveAt: true, createdAt: true },
+      select: { id: true, username: true, nickname: true, role: true, isActive: true, twoFactorEnabled: true, lastActiveAt: true, createdAt: true },
       orderBy: { updatedAt: 'desc' },
       skip: (page - 1) * pageSize,
       take: pageSize,
@@ -38,14 +38,14 @@ export async function searchUsers(query: string) {
 export async function getUser(id: string) {
   const user = await prisma.user.findUnique({
     where: { id },
-    select: { id: true, username: true, nickname: true, role: true, isActive: true, lastActiveAt: true, createdAt: true },
+    select: { id: true, username: true, nickname: true, role: true, isActive: true, twoFactorEnabled: true, lastActiveAt: true, createdAt: true },
   });
   if (!user) throw createAppError('USER_002');
   return user;
 }
 
 /** 管理员修改用户 §4.2（事务：admin count 检查 + update） */
-export async function updateUser(callerId: string, targetId: string, data: { nickname?: string; role?: string; isActive?: boolean }) {
+export async function updateUser(callerId: string, targetId: string, data: { nickname?: string; role?: string; isActive?: boolean; twoFactorEnabled?: boolean }) {
   // 白名单过滤 §4.2
   const updateData: Record<string, unknown> = {};
 
@@ -63,6 +63,15 @@ export async function updateUser(callerId: string, targetId: string, data: { nic
 
   if (data.isActive !== undefined) {
     updateData.isActive = data.isActive;
+  }
+
+  // 2FA 开关（票 #30）：关闭时清 totpSecret + 作废全部恢复码（admin 关掉再开 = 强制重新绑定，
+  // 也是「绑定中途放弃/恢复码耗尽且丢失」场景的管理员逃生通道）
+  if (data.twoFactorEnabled !== undefined) {
+    updateData.twoFactorEnabled = data.twoFactorEnabled;
+    if (data.twoFactorEnabled === false) {
+      updateData.totpSecret = null;
+    }
   }
 
   return prisma.$transaction(async (tx) => {
@@ -84,8 +93,13 @@ export async function updateUser(callerId: string, targetId: string, data: { nic
     const updated = await tx.user.update({
       where: { id: targetId },
       data: updateData,
-      select: { id: true, username: true, nickname: true, role: true, isActive: true, lastActiveAt: true, createdAt: true },
+      select: { id: true, username: true, nickname: true, role: true, isActive: true, twoFactorEnabled: true, lastActiveAt: true, createdAt: true },
     });
+
+    // 关闭 2FA 时作废全部恢复码（与 totpSecret 清空同事务，防半关状态）
+    if (data.twoFactorEnabled === false) {
+      await tx.twoFactorRecoveryCode.deleteMany({ where: { userId: targetId } });
+    }
 
     return updated;
   });

@@ -1,9 +1,13 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LayoutGrid, Plus, Monitor, Network, PanelLeftClose, PanelLeftOpen, Search, X, LogOut, Settings, MoreVertical, Edit2, Trash2, LayoutDashboard } from 'lucide-react';
+import { LayoutGrid, Plus, Monitor, Network, PanelLeftClose, PanelLeftOpen, Search, X, LogOut, Settings, MoreVertical, Edit2, Trash2, LayoutDashboard, Users, Archive, FolderDown, ArrowLeftRight, RotateCcw, ChevronDown } from 'lucide-react';
 import type { ProjectListItem, UserPublic } from '@remotehub/shared';
 import { Tooltip } from './UIComponents';
+import { Pagination } from './Pagination';
 import { ProjectIcon } from './ProjectIcons';
+import { ARCHIVED_LIST_PAGE_SIZE } from '../constants';
+import type { ProjectListItemWithStatus } from '../api/queries';
+import { useProjects } from '../api/queries';
 
 interface SidebarProps {
   projects: ProjectListItem[];
@@ -14,9 +18,35 @@ interface SidebarProps {
   onAddProject: () => void;
   onEditProject: (project: ProjectListItem) => void;
   onDeleteProject: (id: string) => void;
+  /** #40 成员管理弹窗入口（admin 直通或项目成员可见） */
+  onManageMembers: (project: ProjectListItem) => void;
   onLogout: () => void;
   currentUser: UserPublic;
   onOpenUserModal: () => void;
+  /** #49 项目列表受控分页（page state 在 App 层，服务端分页） */
+  projectPage?: number;
+  projectTotal?: number;
+  onProjectPageChange?: (page: number) => void;
+  /** #49 移动抽屉（<md 生效；桌面常驻不受影响） */
+  isMobileOpen?: boolean;
+  onMobileClose?: () => void;
+  // ── #48 项目管理增强 ──
+  /** 归档项目列表（App 层拉取传入，Sidebar 保持哑组件；空数组/缺省 = 归档区不渲染） */
+  archivedProjects?: ProjectListItemWithStatus[];
+  /** 归档总数（折叠钮计数 + 归档分页 total） */
+  archivedTotal?: number;
+  /** 归档列表受控分页（归档区展开且跨页时显示 Pagination） */
+  archivedPage?: number;
+  onArchivedPageChange?: (page: number) => void;
+  /** 归档菜单入口回调（App 层 confirm + mutation；缺省 = 入口不渲染，向后兼容旧 props 基准） */
+  onArchiveProject?: (project: ProjectListItem) => void;
+  onCopyProject?: (project: ProjectListItem) => void;
+  onTransferProject?: (project: ProjectListItem) => void;
+  /** 恢复入口回调（App 层 mutation；缺省 = 归档区不渲染） */
+  onRestoreProject?: (project: ProjectListItemWithStatus) => void;
+  /** #48 rev：归档区条目点击（App 层据此记录归档视图事实——与归档列表当前页解耦的只读态判定，
+   *  见 App.tsx archivedView 注记；在 onSelectProject 之后调用，App 侧顺序依赖） */
+  onSelectArchivedProject?: (project: ProjectListItemWithStatus) => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -28,21 +58,123 @@ const Sidebar: React.FC<SidebarProps> = ({
   onAddProject,
   onEditProject,
   onDeleteProject,
+  onManageMembers,
   onLogout,
   currentUser,
-  onOpenUserModal
+  onOpenUserModal,
+  projectPage = 1,
+  projectTotal = 0,
+  onProjectPageChange,
+  isMobileOpen = false,
+  onMobileClose,
+  archivedProjects,
+  archivedTotal = 0,
+  archivedPage = 1,
+  onArchivedPageChange,
+  onArchiveProject,
+  onCopyProject,
+  onTransferProject,
+  onRestoreProject,
+  onSelectArchivedProject,
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  // B2（批 13b）：搜索后端化——输入经 300ms debounce 落为 debouncedQ（trim 后），搜索态
+  // （debouncedQ 非空）由本组件发起 useProjects(searchPage, 100, q) 服务端查询，展示/翻页/total
+  // 全口径走查询结果；清空立即回退 props 列表（不等 debounce）。底表查询（App 层固定 1,100）
+  // 不带 q——依赖查找全量口径不变（lead 批 13b 裁决）。
+  const [debouncedQ, setDebouncedQ] = useState('');
+  const [searchPage, setSearchPage] = useState(1);
+  const isSearchMode = debouncedQ !== '';
   const [projectMenuOpenId, setProjectMenuOpenId] = useState<string | null>(null);
+  // #48 归档折叠区开合（默认收起：归档项目非工作台主角，「默认隐藏」语义）
+  const [archivedOpen, setArchivedOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  // B1（批 13b）：抽屉容器 ref——focus trap 的可聚焦元素集合计算边界
+  const drawerRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
-  const filteredProjects = useMemo(() => {
-    if (!searchTerm) return projects;
-    const lowerTerm = searchTerm.toLowerCase();
-    return projects.filter(p => p.name.toLowerCase().includes(lowerTerm));
-  }, [projects, searchTerm]);
+  // M3（#49 rev）：抽屉打开即移焦至关闭按钮（焦点入抽屉，Tab 序从抽屉开始 + Escape 可达）。
+  // 双路移焦（lead 两轮真机实证定案）：
+  // ① 双 rAF 首帧兜底——首次开抽屉有效；但关→开循环后 rAF 回调与渲染帧合并，等不到 style
+  //    recalc（按钮 used visibility 仍 invisible，Chrome 静默拒绝 focus），循环场景恒失效；
+  // ② transitionend 与 CSS 严格同步——visibility 过渡（300ms）结束事件是可靠信号，根治循环
+  //    失效；桌面 md 以上关态也 visible、无 visibility 过渡，不触发，常驻侧栏不受影响。
+  // focus 幂等（已聚焦再 focus 无害），双路并存无副作用。
+  useEffect(() => {
+    if (!isMobileOpen) return;
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => closeButtonRef.current?.focus());
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+  }, [isMobileOpen]);
+
+  /** ② visibility 过渡结束 → 移焦（仅抽屉容器自身的 visibility 过渡；width 折叠过渡不过滤会误触） */
+  const handleDrawerTransitionEnd = (e: React.TransitionEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget && e.propertyName === 'visibility' && isMobileOpen) {
+      closeButtonRef.current?.focus();
+    }
+  };
+
+  // B1（批 13b）：抽屉开态 Tab 循环 focus trap——容器 onKeyDown 拦截，首尾环绕不落背景内容。
+  // 桌面常驻（isMobileOpen=false）不拦截，Tab 正常全页走；中间元素不拦截（浏览器默认序前进）；
+  // 焦点在抽屉外（如 body）时 Tab/Shift+Tab 入首/末元素（初始移焦已保证开态焦点在抽屉内，
+  // 此分支兜底极短窗口——容器级监听够用，真机 Tab 循环验收项移交 lead）。
+  const handleDrawerKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Escape') {
+      onMobileClose?.();
+      return;
+    }
+    if (e.key !== 'Tab' || !isMobileOpen) return;
+    const focusables = Array.from(
+      drawerRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+      ) ?? [],
+      // 真机复验修复（批 13b）：移动态 display:none 的桌面折叠按钮排集合首位，Tab 环回首元素时
+      // focus() 被 Chrome 静默拒绝（jsdom 无 focusability 检查测不出）——须过滤不可见元素。
+      // 判定三态：真浏览器 offsetParent 非空即可见；display:none 时 offsetParent 为 null，
+      // 回落计算样式判定；jsdom 无 layout（offsetParent 恒 null 且不应用样式表）→ 全保留，
+      // 既有 jsdom 用例语义不变。
+    ).filter((el) => el.offsetParent !== null || getComputedStyle(el).display !== 'none');
+    if (focusables.length === 0) return;
+    const active = document.activeElement as HTMLElement | null;
+    const idx = active ? focusables.indexOf(active) : -1;
+    // 焦点在抽屉外（activeElement 不在集合内，含 null）→ Tab 入首元素 / Shift+Tab 入末元素
+    if (idx === -1) {
+      e.preventDefault();
+      (e.shiftKey ? focusables[focusables.length - 1] : focusables[0])?.focus();
+      return;
+    }
+    if (e.shiftKey && idx === 0) {
+      // 首元素 Shift+Tab → 末元素（环绕）
+      e.preventDefault();
+      focusables[focusables.length - 1]?.focus();
+    } else if (!e.shiftKey && idx === focusables.length - 1) {
+      // 末元素 Tab → 环绕回首元素
+      e.preventDefault();
+      focusables[0]?.focus();
+    }
+  };
+
+  // B2：输入 → 300ms debounce → 服务端查询；清空（trim 空）走 0ms 定时器立即回退（异步回退语义等价，避开 effect 内同步 setState 的 cascading-render lint 规则；输入框续打字重计时）
+  useEffect(() => {
+    const trimmed = searchTerm.trim();
+    const timer = setTimeout(() => {
+      setDebouncedQ(trimmed);
+      setSearchPage(1);
+    }, trimmed ? 300 : 0);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  // 搜索态查询（enabled 门：非搜索态停查）；展示/翻页/total 全口径双态派生
+  const searchQuery = useProjects(searchPage, 100, debouncedQ || undefined, isSearchMode);
+  const displayProjects = isSearchMode ? (searchQuery.data?.data ?? []) : projects;
+  const displayTotal = isSearchMode ? (searchQuery.data?.pagination?.total ?? 0) : projectTotal;
 
   const handleSearchClick = () => {
     if (isCollapsed) {
@@ -65,6 +197,47 @@ const Sidebar: React.FC<SidebarProps> = ({
     setProjectMenuOpenId(projectMenuOpenId === projectId ? null : projectId);
   };
 
+  // a11y（批 13a）：项目菜单项 div 语义化工厂——role="button" + tabIndex + Enter/Space 键与点击同逻辑。
+  // 不改真 <button>：菜单项 DOM 上嵌套在行按钮内，真按钮会产生非法嵌套（React 嵌套 button 告警）；
+  // 样式不动，仅补语义与键盘可达。
+  const closeMenuAnd = (action: () => void) => ({
+    onClick: (e: React.MouseEvent) => { e.stopPropagation(); setProjectMenuOpenId(null); action(); },
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        e.stopPropagation();
+        setProjectMenuOpenId(null);
+        action();
+      }
+    },
+  });
+
+  // B4 nit（批 13a 挂账「closeMenuAnd 工厂属性收敛」）：项目菜单项重复属性串（role/tabIndex/
+  // closeMenuAnd 工厂属性/公共 className）收敛为内部组件，6 处 JSX 收敛为一处定义。
+  // 行为零变化：class 串 filter(Boolean).join(' ') 与收敛前逐 class 一致（tone/border 差异段参数化）。
+  const ProjectMenuItem: React.FC<{
+    label: string;
+    icon: React.ReactNode;
+    tone?: string;
+    border?: string;
+    onAction: () => void;
+  }> = ({ label, icon, tone = 'text-slate-300 hover:bg-blue-600 hover:text-white', border = '', onAction }) => (
+    <div
+      role="button"
+      tabIndex={0}
+      {...closeMenuAnd(onAction)}
+      className={[
+        'w-full text-left px-3 py-2 text-xs',
+        tone,
+        'flex items-center gap-2',
+        border,
+        'cursor-pointer transition-colors',
+      ].filter(Boolean).join(' ')}
+    >
+      {icon} {label}
+    </div>
+  );
+
   useEffect(() => {
     const closeMenu = () => setProjectMenuOpenId(null);
     if (projectMenuOpenId) window.addEventListener('click', closeMenu);
@@ -72,11 +245,23 @@ const Sidebar: React.FC<SidebarProps> = ({
   }, [projectMenuOpenId]);
 
   return (
-    <div 
+    <div
+      ref={drawerRef}
+      id="mobile-sidebar"
+      // B1（批 13b）：开态 dialog 语义（role/aria-modal/aria-labelledby 指向抽屉标题）；
+      // 桌面常驻（关态）非 dialog——导航 landmark 语义由 aria-label 保留
+      role={isMobileOpen ? 'dialog' : undefined}
+      aria-modal={isMobileOpen || undefined}
+      aria-labelledby="sidebar-drawer-title"
+      onKeyDown={handleDrawerKeyDown}
+      onTransitionEnd={handleDrawerTransitionEnd}
       className={`
-        h-full flex flex-col border-r border-white/5 bg-slate-950/80 backdrop-blur-xl transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1.0)] relative z-20
-        ${isCollapsed ? 'w-[80px]' : 'w-[280px]'}
+        fixed inset-y-0 left-0 z-40 h-full flex flex-col border-r border-white/5 bg-slate-950/80 backdrop-blur-xl md:static md:z-20 md:shrink-0
+        transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1.0)]
+        ${isMobileOpen ? 'translate-x-0 visible' : '-translate-x-full md:translate-x-0 invisible md:visible'}
+        w-[280px] ${isCollapsed ? 'md:w-[80px]' : 'md:w-[280px]'}
       `}
+      aria-label="主导航"
     >
       {/* Header Area */}
       <div className="h-20 flex items-center justify-between px-6 border-b border-white/5 flex-shrink-0">
@@ -84,17 +269,30 @@ const Sidebar: React.FC<SidebarProps> = ({
           <div className="w-9 h-9 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/20 ring-1 ring-white/10">
             <Monitor className="text-white w-5 h-5 drop-shadow-md" />
           </div>
-          <h1 className="text-lg font-bold text-white tracking-tight whitespace-nowrap bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
+          <h1 id="sidebar-drawer-title" className="text-lg font-bold text-white tracking-tight whitespace-nowrap bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
             RemoteHub
           </h1>
         </div>
         
-        <button 
+        {/* #49 桌面折叠按钮：移动抽屉隐藏（折叠是桌面语义）；a11y aria-label 落位 */}
+        <button
           onClick={() => setIsCollapsed(!isCollapsed)}
-          className={`text-slate-500 hover:text-white transition-colors p-2 rounded-lg hover:bg-white/5 active:scale-90 duration-200 ${isCollapsed ? 'mx-auto' : ''}`}
+          aria-label="折叠侧栏"
+          className={`text-slate-500 hover:text-white transition-colors p-2 rounded-lg hover:bg-white/5 active:scale-90 duration-200 hidden md:block ${isCollapsed ? 'mx-auto' : ''}`}
         >
           {isCollapsed ? <PanelLeftOpen size={20} /> : <PanelLeftClose size={20} />}
         </button>
+        {/* #49 移动抽屉关闭按钮（仅抽屉打开时渲染，<md 显示；M3 打开即移焦至此） */}
+        {isMobileOpen && (
+          <button
+            ref={closeButtonRef}
+            onClick={onMobileClose}
+            aria-label="关闭导航菜单"
+            className="text-slate-500 hover:text-white transition-colors p-2 rounded-lg hover:bg-white/5 active:scale-90 duration-200 md:hidden"
+          >
+            <X size={20} />
+          </button>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-6 custom-scrollbar space-y-8 overflow-x-hidden">
@@ -183,12 +381,18 @@ const Sidebar: React.FC<SidebarProps> = ({
           
           {/* List */}
           <div className="space-y-1 min-h-[100px]">
-            {filteredProjects.length === 0 && !isCollapsed && (
+            {/* B2：搜索态加载态「搜索中...」；空态文案沿用现状风格（非搜索态空列表维持原空态） */}
+            {!isCollapsed && isSearchMode && searchQuery.isPending && (
+              <div className="px-4 py-8 text-center text-xs text-slate-600 animate-in fade-in italic">
+                搜索中...
+              </div>
+            )}
+            {displayProjects.length === 0 && !isCollapsed && !(isSearchMode && searchQuery.isPending) && (
               <div className="px-4 py-8 text-center text-xs text-slate-600 animate-in fade-in italic">
                 未找到相关客户
               </div>
             )}
-            {filteredProjects.map((project) => (
+            {displayProjects.map((project) => (
               <Tooltip key={project.id} content={project.name} side="right" className={isCollapsed ? 'w-full' : ''}>
                 <button
                   onClick={() => { onSelectViewMode('all'); onSelectProject(project.id); }}
@@ -210,26 +414,48 @@ const Sidebar: React.FC<SidebarProps> = ({
                       <span className="text-sm font-medium truncate text-left flex-1 tracking-tight">{project.name}</span>
                       
                       <div className="relative" onClick={(e) => e.stopPropagation()}>
-                         <div 
+                         <div
+                           role="button"
+                           tabIndex={0}
+                           aria-haspopup="menu"
+                           aria-expanded={projectMenuOpenId === project.id}
+                           aria-label={`项目操作 ${project.name}`}
                            onClick={(e) => toggleProjectMenu(e, project.id)}
+                           onKeyDown={(e) => {
+                             // 键盘可达：Enter/Space 与 onClick 同逻辑（stopPropagation + 切换菜单）；Space 阻默认滚动
+                             if (e.key === 'Enter' || e.key === ' ') {
+                               e.preventDefault();
+                               e.stopPropagation();
+                               setProjectMenuOpenId(projectMenuOpenId === project.id ? null : project.id);
+                             }
+                           }}
                            className={`p-1 rounded-md transition-all ${projectMenuOpenId === project.id ? 'text-white bg-white/10' : 'text-slate-600 hover:text-white hover:bg-white/10 opacity-0 group-hover:opacity-100'}`}
                          >
                            <MoreVertical size={14} />
                          </div>
                          {projectMenuOpenId === project.id && (
                             <div className="absolute right-0 top-8 w-32 bg-slate-900/95 border border-white/10 rounded-xl shadow-2xl backdrop-blur-xl z-50 py-1 animate-in fade-in zoom-in duration-200 origin-top-right ring-1 ring-black/50">
-                              <div 
-                                onClick={(e) => { e.stopPropagation(); setProjectMenuOpenId(null); onEditProject(project); }}
-                                className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white flex items-center gap-2 cursor-pointer transition-colors"
-                              >
-                                <Edit2 size={12} /> 编辑
-                              </div>
-                              <div 
-                                onClick={(e) => { e.stopPropagation(); setProjectMenuOpenId(null); onDeleteProject(project.id); }}
-                                className="w-full text-left px-3 py-2 text-xs text-rose-400 hover:bg-rose-600 hover:text-white flex items-center gap-2 border-t border-white/5 cursor-pointer transition-colors"
-                              >
-                                <Trash2 size={12} /> 删除
-                              </div>
+                              {/* #40 成员管理入口：admin 全局直通或项目成员（对齐后端 member 权限链，非成员遮蔽） */}
+                              {(currentUser.role === 'admin' || !!project.currentUserRole) && (
+                                <ProjectMenuItem label="成员管理" icon={<Users size={12} />} onAction={() => onManageMembers(project)} />
+                              )}
+                              {/* #48 管理操作入口：owner 或 admin 直通可见（对齐五端点 projectRole('owner')+admin 门）；
+                                  handler 缺省点击无动作（App 恒传），可见性只由权限决定 */}
+                              {(currentUser.role === 'admin' || project.currentUserRole === 'owner') && (
+                                <>
+                                  <ProjectMenuItem label="归档项目" icon={<Archive size={12} />} onAction={() => onArchiveProject?.(project)} />
+                                  <ProjectMenuItem label="复制项目" icon={<FolderDown size={12} />} onAction={() => onCopyProject?.(project)} />
+                                  <ProjectMenuItem label="转让所有权" icon={<ArrowLeftRight size={12} />} onAction={() => onTransferProject?.(project)} />
+                                </>
+                              )}
+                              <ProjectMenuItem label="编辑" icon={<Edit2 size={12} />} onAction={() => onEditProject(project)} />
+                              <ProjectMenuItem
+                                label="删除"
+                                icon={<Trash2 size={12} />}
+                                tone="text-rose-400 hover:bg-rose-600 hover:text-white"
+                                border="border-t border-white/5"
+                                onAction={() => onDeleteProject(project.id)}
+                              />
                             </div>
                          )}
                       </div>
@@ -239,7 +465,70 @@ const Sidebar: React.FC<SidebarProps> = ({
               </Tooltip>
             ))}
           </div>
+
+          {/* #48 归档折叠视图：默认收起（归档项目「工作台默认隐藏」语义）、折叠态隐藏（紧凑模式）。
+              条目点击进入归档项目视图（onSelectArchivedProject 回传完整对象，App 层记只读态事实，
+              #48 rev 与归档列表当前页解耦）；恢复入口 owner|admin 可见（对齐后端 restore 权限门） */}
+          {!isCollapsed && (archivedProjects?.length ?? 0) > 0 && (
+            <div className="mt-2 pt-3 border-t border-white/5">
+              <button
+                type="button"
+                onClick={() => setArchivedOpen(!archivedOpen)}
+                aria-expanded={archivedOpen}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-white/5 transition-colors"
+              >
+                <Archive size={12} />
+                <span className="text-[11px] font-bold uppercase tracking-widest">已归档 ({archivedTotal})</span>
+                <ChevronDown size={12} className={`ml-auto transition-transform ${archivedOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {archivedOpen && (
+                <div role="region" className="mt-1 space-y-1" aria-label="已归档项目区">
+                  {archivedProjects!.map((p) => {
+                    const canRestore = currentUser.role === 'admin' || p.currentUserRole === 'owner';
+                    return (
+                      <div key={p.id} className="flex items-center gap-1 group/arch rounded-lg hover:bg-white/5 transition-colors">
+                        <button
+                          onClick={() => { onSelectViewMode('all'); onSelectProject(p.id); onSelectArchivedProject?.(p); }}
+                          className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 text-left text-xs text-slate-500 hover:text-slate-200 truncate"
+                        >
+                          <ProjectIcon name={p.icon} size={14} className="text-slate-600 flex-shrink-0" />
+                          <span className="truncate">{p.name}</span>
+                        </button>
+                        {canRestore && onRestoreProject && (
+                          <button
+                            onClick={() => onRestoreProject(p)}
+                            aria-label={`恢复 ${p.name}`}
+                            title="恢复项目"
+                            className="p-1.5 mr-1 rounded-md text-slate-600 hover:text-emerald-400 hover:bg-white/10 opacity-0 group-hover/arch:opacity-100 transition-all active:scale-90"
+                          >
+                            <RotateCcw size={12} />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {/* 归档分页：跨页才渲染 footer（单页不占位，复用 Pagination 先例）；页大小与 App 归档查询同常量 */}
+                  {archivedTotal > archivedProjects!.length && onArchivedPageChange && (
+                    <Pagination page={archivedPage} total={archivedTotal} pageSize={ARCHIVED_LIST_PAGE_SIZE} onPageChange={onArchivedPageChange} className="px-1 pt-1" />
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
+
+        {/* #49 项目列表受控分页 footer：total>0 才渲染；折叠态隐藏（紧凑模式不放分页）。
+            B2：搜索态走搜索结果 total + 内部 searchPage 翻页（服务端口径自然一致，「搜索态禁翻页」消失），
+            非搜索态维持 props 链路（App 层 projectPage/onProjectPageChange） */}
+        {!isCollapsed && displayTotal > 0 && (isSearchMode || onProjectPageChange) && (
+          <Pagination
+            page={isSearchMode ? searchPage : projectPage}
+            total={displayTotal}
+            pageSize={100}
+            onPageChange={isSearchMode ? setSearchPage : onProjectPageChange!}
+            className="mt-2 px-1"
+          />
+        )}
       </div>
 
       {/* Footer */}

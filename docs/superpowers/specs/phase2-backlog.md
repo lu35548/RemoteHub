@@ -21,10 +21,14 @@
 - [ ] input name/autocomplete a11y issue（T3，v1 遗留）
 - [ ] setup Modal「暂不配置」文案与行为不符（T6）
 - [ ] copyTarget 魔法串重构（T6）
-- [ ] favicon.ico 404：加 `public/favicon.ico` 即清零（T11）
+- [x] ~~favicon.ico 404~~ ✅ P0-7 以 `favicon.svg` 解决（页面 link 声明，浏览器不再请求 .ico，#24 路径 6 复验 console 零 404；commit 9d8cc1e）
+
+### 安全/审计（批 13a OQ 大裁决立项，2026-11-13）
+- [ ] **mfa 二段流审计口径**（批 2 #30 review 提出，2026-11-13 立项）：mfa/verify 成功/失败零审计（2FA 爆破不可见，OWASP 建议恢复码使用事件可见）；mfaPending 第一段被记 AUTH_LOGIN success 但无 session 建立语义失真。修复需新增审计 action 枚举（跨 shared AUDIT_ACTIONS + 前端 #23 标签映射）——契约变更，P2 安全域做。
+- [ ] **Zap「配置直连」引导链路砍除**（批 8 发现，2026-11-13 立项）：launch 端点时代该链路承诺（唤起 mstsc）与实际行为（下载 .rdp）矛盾，批 8 只修文案；整链砍除=triggerRdpProtocol/isRdpReady/showRdpSetup/downloadRdpFile 引用链一并删除。历史死链路清理，P2 做。
 
 ### 部署/工程
-- [ ] nginx index.html 显式 no-cache 头（T10：新版本入口可能被浏览器启发式缓存延迟）
+- [x] ~~nginx index.html 显式 no-cache 头~~ ✅ #24 验收修复补 `location = /index.html` 规则（commit 00901e5，`/` 与 `/index.html` 双命中，assets immutable 不变）
 - [ ] nginx `proxy_pass` DNS resolver 方案（T10：现仅启动时解析，backend 重建换 IP 需 restart frontend）
 - [ ] CI actions v4 → v5 升级（T9：v4 强制跑 Node 24，「Node.js 20 is deprecated」告警）
 

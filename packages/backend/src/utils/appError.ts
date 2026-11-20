@@ -26,6 +26,12 @@ export const ERROR_CODES: Record<string, number> = {
   CONN_003: 400,
   CONN_004: 409,
   CONN_005: 409,
+  // 协议注册表（票 #45）：该协议无定义直连动作（如 VNC——v1 handleConnect 即无分支，等价保留）
+  CONN_006: 400,
+  // 批 13b 票 A1（OQ 批 10 挂账）：归档项目连接域端点级写禁制——目标项目 status=archived 时
+  // 连接写入操作（create/update/delete/clone，含换项目双向与 requiredVpnId 依赖侧）一律 409；
+  // 读端点不拦（归档=只读展示+消费语义）
+  CONN_007: 409,
   PROJ_001: 409,
   PROJ_002: 404,
   MEMBER_001: 409,
@@ -33,9 +39,34 @@ export const ERROR_CODES: Record<string, number> = {
   MEMBER_003: 409,
   AUDIT_001: 400,
   AUDIT_002: 500,
+  // 密码重置（design §16）：RESET_001 业务校验语义（token 无效/过期/复用）400，RESET_003 配额语义 429
+  // （真机验收修正：401 会触发前端 client 的 refresh 重放，未登录重置流用户被误判会话失效强制登出——T7 AUTH_006 同款）
+  // （RESET_002 已删：无 throw 点，限流 429 走 RATE_LIMIT 统一形状）
+  RESET_001: 400,
+  RESET_003: 429,
+  // 2FA（票 #30）：MFA_001 业务校验（验证码/恢复码错误）400——401 会触发前端 refresh 重放
+  // 误判会话失效（RESET_001/AUTH_006 同款坑）；MFA_002 是认证失败（挑战 token 无效/过期）401；
+  // MFA_003 是状态冲突（2FA 未启用/已绑定）400。
+  MFA_001: 400,
+  MFA_002: 401,
+  MFA_003: 400,
   VAL_001: 422,
   SYS_001: 500,
   SYS_002: 404,
+  // 票 #50 review F1:/import 大 body 预检——CL 头超 50mb 在读 body 之前直接 413
+  // (未认证请求也不许白推 ≤50mb 进内存;chunked 无 CL 的残余敞口记 OQ)
+  SYS_003: 413,
+  // 批 11 OQ(#50 畸形 JSON 落 500):body-parser entity.parse.failed 的统一 4xx 归口——
+  // 请求体畸形是客户端责任,全局 error handler 识别该 type 后按 SYS_004 落 400(旧口径非 AppError 一律 500 吞掉 body-parser 400)
+  SYS_004: 400,
+  // 通知（票 #35）：NOTIF_001 资源缺失 404；NOTIF_002 是越权门禁（非本人通知不可读）403
+  NOTIF_001: 404,
+  NOTIF_002: 403,
+  // 备份（票 #38）：BACKUP_001 文件名不在白名单（下载防遍历第一道防线）400；
+  // BACKUP_002 备份文件不存在 404；BACKUP_003 手动触发执行失败 500
+  BACKUP_001: 400,
+  BACKUP_002: 404,
+  BACKUP_003: 500,
 };
 
 export const ERROR_MESSAGES: Record<string, string> = {
@@ -51,6 +82,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   CONN_003: 'VPN 依赖循环',
   CONN_004: 'VPN 仍被其他连接依赖',
   CONN_005: '同项目内连接名称已存在',
+  CONN_006: '该协议不支持直连',
+  CONN_007: '项目已归档，连接不可变更',
   PROJ_001: '项目名称冲突',
   PROJ_002: '项目不存在',
   MEMBER_001: '成员已存在于项目中',
@@ -58,9 +91,25 @@ export const ERROR_MESSAGES: Record<string, string> = {
   MEMBER_003: '用户是项目唯一owner，无法删除',
   AUDIT_001: '审计日志查询参数无效',
   AUDIT_002: '审计日志导出失败',
+  // 密码重置（design §16）
+  RESET_001: '密码重置令牌无效或已过期',
+  RESET_003: '重置请求已达上限，请等待现有令牌过期后再试',
+  // 2FA（票 #30）
+  MFA_001: '动态验证码或恢复码错误',
+  MFA_002: '多因素认证令牌无效或已过期',
+  MFA_003: '双因素认证未启用或已完成绑定',
   VAL_001: '输入验证失败',
   SYS_001: '内部服务器错误',
   SYS_002: '路由不存在',
+  SYS_003: '请求体超过大小限制',
+  SYS_004: '请求体格式错误',
+  // 通知（票 #35）
+  NOTIF_001: '通知不存在',
+  NOTIF_002: '无权操作他人通知',
+  // 备份（票 #38）
+  BACKUP_001: '备份文件名非法',
+  BACKUP_002: '备份文件不存在',
+  BACKUP_003: '备份执行失败',
 };
 
 export function createAppError(code: string, details?: Array<{ field: string; message: string }>): AppError {

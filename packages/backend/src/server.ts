@@ -3,18 +3,55 @@ import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import cors from 'cors';
+import { createServer } from 'node:http';
 import { env } from './config/env.js';
 import { logger } from './utils/logger.js';
 import { AppError, createAppError } from './utils/appError.js';
 import { startSessionCleaner } from './utils/sessionCleaner.js';
 import { startAuditCleaner } from './utils/auditCleaner.js';
+import { startNotificationCleaner } from './utils/notificationCleaner.js';
+import { startBackupScheduler } from './utils/backupService.js';
 import { checkIpRisk, RATE_LIMIT_SKIP_PATHS } from './utils/ipMonitor.js';
 import { sanitizationMiddleware } from './middleware/sanitization.js';
+import { performanceMonitorMiddleware } from './middleware/performanceMonitor.js';
+import { initWsServer, closeWsServer } from './ws/wsServer.js';
 import type { Request, Response, NextFunction } from 'express';
 
 const app: Express = express();
 
+// #34：http server 实例（ws 库 attach 点 + graceful shutdown 操作对象）。
+// createServer 本身不 listen——「import 不 listen」红线保持（NODE_ENV=test guard 依赖）。
+const server = createServer(app);
+
 // ─── Global middleware stack (in order) ───
+
+// -1. 票 #50 review F1:/api/v1/admin/import 专属 Content-Length 预检——必须在 50mb parser
+//     **之前**(全局栈第一个)。预挂 parser 只解决「路由级大 limit 不生效」,但未认证请求
+//     仍可推 ≤50mb 进内存(chunked 无 CL 时流式读满才 413——残余敞口记 OQ 由 lead 处理)。
+//     CL 头存在且超限即 413,不读 body;CL 缺失(chunked)时放行,由 parser limit 兜底。
+//     413 响应后须关连接:服务器已声明读 N 字节却提前终止,keep-alive 复用会协议失步。
+const IMPORT_BODY_LIMIT_BYTES = 50 * 1024 * 1024;
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (req.path === '/api/v1/admin/import') {
+    const cl = req.headers['content-length'];
+    if (typeof cl === 'string' && Number(cl) > IMPORT_BODY_LIMIT_BYTES) {
+      res.setHeader('Connection', 'close');
+      res.status(413).json({
+        success: false,
+        error: { code: 'SYS_003', message: '请求体超过大小限制' },
+      });
+      return;
+    }
+  }
+  next();
+});
+
+// 0. 票 #50:/api/v1/admin/import 专属 50mb parser。必须预挂在全局 1mb parser **之前**——
+//    body-parser 2.x 对 body 流已消费的请求短路跳过(lib/read.js 的 onFinished.isFinished(req)
+//    判流已终结即跳过;「req._body」短路是 body-parser 1.x 机制,2.x 已移除),路由级后挂的
+//    大 limit 永不生效;预挂后本端点由 50mb parser 消费,全局 1mb parser 检测流已消费
+//    直接放行,后续全局栈(限流/净化/CORS)对本端点照常生效。
+app.use('/api/v1/admin/import', express.json({ limit: '50mb' }));
 
 // 1. JSON body parser
 app.use(express.json({ limit: '1mb' }));
@@ -103,8 +140,14 @@ app.use('/api/v1/', generalLimiter);
 // 8. 输入净化（P0-4）：限流之后、路由之前——净化正则的 CPU 消耗处于限流保护之内
 app.use(sanitizationMiddleware);
 
+// 8.5 性能监控（P1-5，票 #32）：净化之后、路由之前——被限流/净化拒绝的请求不进业务延迟分布。
+//     res.on('finish') 取路由模板（req.baseUrl + req.route.path）聚合，与挂载点无关；
+//     探针/心跳白名单路径豁免（高频基础设施打点不进业务延迟分布）。
+app.use(performanceMonitorMiddleware);
+
 // ─── Route registration ───
 import { healthRoutes } from './routes/healthRoutes.js';
+import { probeRoutes } from './routes/probeRoutes.js';
 import { authRoutes } from './routes/authRoutes.js';
 import { userRoutes } from './routes/userRoutes.js';
 import { projectRoutes } from './routes/projectRoutes.js';
@@ -112,7 +155,26 @@ import { memberRoutes } from './routes/memberRoutes.js';
 import { connectionRoutes } from './routes/connectionRoutes.js';
 import { auditRoutes } from './routes/auditRoutes.js';
 import { monitoringRoutes } from './routes/monitoringRoutes.js';
+import { notificationRoutes } from './routes/notificationRoutes.js';
+import { backupRoutes } from './routes/backupRoutes.js';
+import * as swaggerUi from 'swagger-ui-express';
+import { isSwaggerEnabled, swaggerSpec, swaggerUiOptions } from './config/swagger.js';
+import { adminRoutes } from './routes/adminRoutes.js';
 
+// 票 #51 Swagger:/api-docs 仅非生产环境暴露(lead 裁决口径;生产真机 404 由 lead compose 验收)。
+// JSON 端点须先于 swaggerUi.serve 注册(serve 对 /api-docs/* 全拦,后注册永不命中)。
+// 只在路由区追加,不动既有 middleware 栈(批 11 集成用例锁死顺序)。
+if (isSwaggerEnabled(env.NODE_ENV)) {
+  app.get('/api-docs/swagger.json', (_req: Request, res: Response) => {
+    res.json(swaggerSpec);
+  });
+  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, swaggerUiOptions));
+}
+
+// K8s 探针（票 #33）：挂 app 根（K8s 惯例路径 /healthz /readyz，无 /api/v1 前缀）。
+// 探针路径已入 RATE_LIMIT_SKIP_PATHS 白名单：ipMonitor 根挂载处计数豁免 + generalLimiter skip 同源；
+// 探针不挂认证、无审计写入，无限流头（K8s 高频打点场景惯例）。
+app.use('/', probeRoutes);
 app.use('/api/v1/health', healthRoutes);
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', userRoutes);
@@ -121,6 +183,10 @@ app.use('/api/v1/projects/:id/members', memberRoutes);
 app.use('/api/v1/connections', connectionRoutes);
 app.use('/api/v1/audit-logs', auditRoutes);
 app.use('/api/v1/admin', monitoringRoutes);
+app.use('/api/v1/admin/backups', backupRoutes);
+// 票 #50 数据导入导出(内部仅定义 /export /import,不影响前挂载点的 backups/monitoring 路由)
+app.use('/api/v1/admin', adminRoutes);
+app.use('/api/v1/notifications', notificationRoutes);
 
 // ─── 404 ───
 app.use((_req: Request, _res: Response, next: NextFunction) => {
@@ -139,6 +205,27 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
     };
     if (err.details) response.error.details = err.details;
     res.status(err.statusCode).json(response);
+    return;
+  }
+
+  // 批 11 OQ(#50 畸形 JSON 落 500 而非 4xx):body-parser JSON 解析失败(entity.parse.failed)
+  // 是客户端 4xx 责任,旧口径「非 AppError 一律 500」把它吞成 500。统一错误壳 400 归口 SYS_004。
+  if ((err as { type?: string }).type === 'entity.parse.failed') {
+    res.status(400).json({
+      success: false,
+      error: { code: 'SYS_004', message: '请求体格式错误' },
+    });
+    return;
+  }
+
+  // 批 13a 裁量(lead 批准顺带):entity.too.large——/import 50mb parser 的 chunked(无 CL)兜底,
+  // 与 CL 预检 413 SYS_003 同语义异码是契约不一致,归口 413 SYS_003(nginx client_max_body_size
+  // 只是部署层兜底,不改变代码语义)。
+  if ((err as { type?: string }).type === 'entity.too.large') {
+    res.status(413).json({
+      success: false,
+      error: { code: 'SYS_003', message: '请求体超过大小限制' },
+    });
     return;
   }
 
@@ -183,10 +270,44 @@ async function bootstrap() {
   // 4. audit cleaner（每日 03:30，仅定时——不启动即清）
   startAuditCleaner();
 
-  // 5. listen（DB 就绪后才接请求）
-  app.listen(PORT, () => {
+  // 4.5 通知已读清理（#35，每日 04:00 错峰，仅定时——不启动即清）
+  startNotificationCleaner();
+
+  // 4.6 数据备份（#38，每日 02:00 与 03:00/03:30/04:00 错峰，仅定时——不启动即备）
+  startBackupScheduler();
+
+  // 5. WS 管道（#34：upgrade 鉴权/房间/心跳；noServer 独占 upgrade 监听器）
+  initWsServer(server);
+
+  // 6. listen（DB 就绪后才接请求；http server 实例承接，ws upgrade 同端口复用）
+  server.listen(PORT, () => {
     logger.info(`Server running on port ${PORT} (${env.NODE_ENV})`);
   });
+
+  // 7. SIGTERM 优雅关停（docker stop / K8s 删除 pod）：断 WS → 停接新连接 → 等在途排空。
+  //    注：Node server.close/closeAllConnections 均不断 upgraded socket（libcheck-ws §5），
+  //    WS 必须单独 closeWsServer 处理——时序在 gracefulShutdown 内固化。
+  process.on('SIGTERM', () => {
+    gracefulShutdown()
+      .then(() => { logger.info('优雅关停完成'); process.exit(0); })
+      .catch((err) => {
+        logger.error('优雅关停失败', { error: (err as Error).message });
+        process.exit(1);
+      });
+  });
+}
+
+/**
+ * 优雅关停（#34，可测导出——不 process.exit，退出语义在 SIGTERM handler 层）：
+ * ① 断 WS（closeWsServer：terminate 全部连接 + 停心跳 + 摘 upgrade 监听器）
+ * ② server.close 停止接受新 HTTP 连接并等在途请求排空（closeIdleConnections 清 keep-alive 空闲）
+ */
+export async function gracefulShutdown(): Promise<void> {
+  closeWsServer();
+  if (server.listening) {
+    server.closeIdleConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 }
 
 // 集成测试（supertest）import app 不得触发 listen/seed/cleaner——NODE_ENV guard（票 #16）
@@ -197,4 +318,4 @@ if (process.env.NODE_ENV !== 'test') {
   });
 }
 
-export { app };
+export { app, server };

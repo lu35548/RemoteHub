@@ -8,22 +8,41 @@ generator client {
 }
 
 model User {
-  id           String    @id @default(uuid())
-  username     String    @unique
-  nickname     String
-  passwordHash String    @map("password_hash")
-  role         String    @default("user")
-  isActive     Boolean   @default(true) @map("is_active")
-  lastActiveAt DateTime? @map("last_active_at")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
+  id               String    @id @default(uuid())
+  username         String    @unique
+  nickname         String
+  passwordHash     String    @map("password_hash")
+  role             String    @default("user")
+  isActive         Boolean   @default(true) @map("is_active")
+  twoFactorEnabled Boolean   @default(false) @map("two_factor_enabled")
+  totpSecret       String?   @map("totp_secret")
+  lastActiveAt     DateTime? @map("last_active_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
 
   projects ProjectMember[]
   sessions Session[]
   auditLogs AuditLog[]
+  resetTokens PasswordResetToken[]
+  recoveryCodes TwoFactorRecoveryCode[]
+  notifications NotificationQueue[]
 
   @@index([role])
   @@map("users")
+}
+
+/// 2FA 恢复码（票 #30，OWASP 口径：N 组单次码 + hash 存储 + 用后作废）
+model TwoFactorRecoveryCode {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  codeHash  String    @unique @map("code_hash")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("two_factor_recovery_codes")
 }
 
 model Session {
@@ -43,11 +62,31 @@ model Session {
   @@map("sessions")
 }
 
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  ip        String?
+  userAgent String?   @map("user_agent")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
+}
+
 model Project {
   id          String   @id @default(uuid())
   name        String   @unique
   description String?
   icon        String   @default("folder")
+  // #47 归档：active/archived 纯 string（spec §12 修正：不用 design 的 @db.VarChar(20)——SQLite 方言冲突）；
+  // 默认值即存量回填（migration ADD COLUMN DEFAULT 'active'）
+  status      String   @default("active")
   createdBy   String   @map("created_by")
   updatedBy   String   @map("updated_by")
   createdAt   DateTime @default(now()) @map("created_at")
@@ -56,6 +95,7 @@ model Project {
   members     ProjectMember[]
   connections Connection[]
 
+  @@index([status])
   @@map("projects")
 }
 
@@ -124,4 +164,22 @@ model AuditLog {
   @@index([resource, resourceId])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+/// 通知队列（票 #35，design §8.6：离线可达的关键事件通知，#36 事件源经 emitNotification 写入）
+model NotificationQueue {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  type      String // 值域 NOTIFICATION_TYPES（shared enums）
+  // JSON 字符串：整存整取的展示数据。可查询字段（userId/isRead/createdAt）保持独立列
+  //（可查询字段勿藏 JSON 列约定）。
+  payload   String
+  isRead    Boolean  @default(false) @map("is_read")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([createdAt])
+  @@map("notification_queue")
 }

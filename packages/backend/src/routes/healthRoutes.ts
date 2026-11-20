@@ -3,6 +3,26 @@ import { getSystemHealth } from '../services/monitoringService.js';
 
 export const healthRoutes: RouterType = Router();
 
+/**
+ * @swagger
+ * /api/v1/health:
+ *   get:
+ *     summary: 系统健康检查(degraded 矩阵)
+ *     tags: [Health]
+ *     responses:
+ *       200:
+ *         description: 健康矩阵(database 等)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessResponse'
+ *       503:
+ *         description: 数据库连接失败(SYS_001,Docker healthcheck 只看状态码)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
 healthRoutes.get('/', async (_req, res) => {
   const health = await getSystemHealth();
 

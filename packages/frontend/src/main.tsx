@@ -5,8 +5,13 @@ import { getAccessToken, refreshAccessToken } from './api/client.js';
 import { UIProvider } from './components/UIComponents.js';
 import App from './App.js';
 import LoginPage from './components/LoginPage.js';
+import MfaChallengePage from './components/MfaChallengePage.js';
+import ForgotPasswordPage from './components/ForgotPasswordPage.js';
+import ResetPasswordPage from './components/ResetPasswordPage.js';
 import AdminDashboardPage from './components/AdminDashboardPage.js';
 import AuditLogsPage from './components/AuditLogsPage.js';
+import BackupsPage from './components/BackupsPage.js';
+import AdminProjectsPage from './pages/AdminProjectsPage.js';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -37,10 +42,20 @@ async function bootstrap() {
   const router = createBrowserRouter([
     { path: '/', loader: requireAuth, element: <App /> },
     { path: '/login', loader: requireUnauth, element: <LoginPage /> },
+    // 2FA 挑战页（票 #31）：requireUnauth 域（挑战期间无 access token）；
+    // mfaPending 内存态丢失（刷新/直达）时页面级弹回 /login 重走密码
+    { path: '/mfa', loader: requireUnauth, element: <MfaChallengePage /> },
+    // 密码重置（票 #29）：requireUnauth 域——已登录用户访问弹回主界面
+    { path: '/forgot-password', loader: requireUnauth, element: <ForgotPasswordPage /> },
+    { path: '/reset-password', loader: requireUnauth, element: <ResetPasswordPage /> },
     // /admin 两页（票 #21）：loader 只验登录（第一段），admin 角色在页面组件内校验（第二段）——
     // access token payload 仅 { userId } 无 role，不动 jwt.ts 一期签名契约
     { path: '/admin/dashboard', loader: requireAuth, element: <AdminDashboardPage /> },
     { path: '/admin/audit-logs', loader: requireAuth, element: <AuditLogsPage /> },
+    // 备份管理（票 #39，§19 预留第三页落位）：两段式同上——loader 只验登录，admin 在页面内校验
+    { path: '/admin/backups', loader: requireAuth, element: <BackupsPage /> },
+    // 项目管理（批 13b C1）：两段式同三 admin 页——loader 只验登录，admin 在页面内校验
+    { path: '/admin/projects', loader: requireAuth, element: <AdminProjectsPage /> },
   ]);
 
   const root = document.getElementById('root')!;

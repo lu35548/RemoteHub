@@ -1,4 +1,5 @@
 import React from 'react';
+import { Pagination } from './Pagination';
 
 export interface DataTableProps<T> {
   /** 列定义：render 缺省时按 key 直出字段值 */
@@ -23,10 +24,6 @@ export interface DataTableProps<T> {
  */
 export function DataTable<T>(props: DataTableProps<T>): React.JSX.Element {
   const { columns, rows, isLoading, emptyText = '暂无数据', page, total, pageSize, onPageChange } = props;
-
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const canPrev = page > 1;
-  const canNext = page < totalPages;
 
   // 共享表头（loading/正常两形态同构）
   const thead = (
@@ -65,7 +62,8 @@ export function DataTable<T>(props: DataTableProps<T>): React.JSX.Element {
 
   return (
     <div>
-      <div className="border border-white/10 rounded-xl overflow-hidden bg-slate-950/60">
+      {/* #49 表格容器横向滚动：窄视口下列宽不被挤压，超出即出横向滚动条 */}
+      <div className="border border-white/10 rounded-xl overflow-hidden overflow-x-auto bg-slate-950/60">
         <table className="min-w-full divide-y divide-white/5">
           {thead}
           <tbody className="divide-y divide-white/5">
@@ -94,27 +92,8 @@ export function DataTable<T>(props: DataTableProps<T>): React.JSX.Element {
         </table>
       </div>
 
-      {/* 受控分页 footer */}
-      <div className="flex items-center justify-between mt-3 text-xs text-slate-500">
-        <span>共 {total} 条</span>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => onPageChange(page - 1)}
-            disabled={!canPrev}
-            className="px-3 py-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors disabled:opacity-40 disabled:pointer-events-none"
-          >
-            上一页
-          </button>
-          <span>第 {page} / {totalPages} 页</span>
-          <button
-            onClick={() => onPageChange(page + 1)}
-            disabled={!canNext}
-            className="px-3 py-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors disabled:opacity-40 disabled:pointer-events-none"
-          >
-            下一页
-          </button>
-        </div>
-      </div>
+      {/* 受控分页 footer（#49：抽取为通用 Pagination，三列表卡片态共用） */}
+      <Pagination page={page} total={total} pageSize={pageSize} onPageChange={onPageChange} className="mt-3" />
     </div>
   );
 }

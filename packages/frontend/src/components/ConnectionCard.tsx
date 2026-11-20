@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { MoreVertical, Copy, Check, Download, Edit2, Loader2, Trash2, Shield, Power, Eye, EyeOff, User as UserIcon, Clock, ExternalLink, ArrowRight, Zap } from 'lucide-react';
 import type { ConnectionListItem } from '@remotehub/shared';
-import { PROTOCOL_SHORT_LABELS, PROPRIETARY_PROTOCOLS, PROTOCOL_ACTION_META, VPN_TYPE_LABELS, getProtocolColor } from '../constants';
-import { useDecryptPassword } from '../api/queries';
+import { PROTOCOL_SHORT_LABELS, PROPRIETARY_PROTOCOLS, PROTOCOL_ACTION_META, VPN_TYPE_LABELS, getProtocolColor, COPY_TARGET_LABELS, type CopyTarget } from '../constants';
+import { useDecryptPassword, launchConnection } from '../api/queries';
 import { downloadRdpFile, generateRdpRegistryFile, isRdpConfigured, markRdpConfigured } from '../utils';
 import { ProtocolIcon } from './Icons';
 import { Modal, useUI } from './UIComponents';
@@ -12,6 +12,10 @@ interface ConnectionCardProps {
   vpnDependency?: ConnectionListItem;
   onEdit: (conn: ConnectionListItem) => void;
   onDelete: (id: string) => void;
+  /** #43 克隆入口（回调上浮 App 统一处理，与 onEdit/onDelete 同模式） */
+  onClone: (conn: ConnectionListItem) => void;
+  /** #48 归档项目只读态：写操作入口（编辑/克隆/删除，藏于菜单）整体遮蔽；主连接按钮属使用语义保留 */
+  readOnly?: boolean;
 }
 
 const getRelativeTime = (dateStr?: string) => {
@@ -25,7 +29,7 @@ const getRelativeTime = (dateStr?: string) => {
   return `${Math.floor(hours / 24)}天前`;
 };
 
-const ConnectionCard: React.FC<ConnectionCardProps> = ({ connection, vpnDependency, onEdit, onDelete }) => {
+const ConnectionCard: React.FC<ConnectionCardProps> = ({ connection, vpnDependency, onEdit, onDelete, onClone, readOnly = false }) => {
   const { toast } = useUI();
   const decrypt = useDecryptPassword();
   const [showMenu, setShowMenu] = useState(false);
@@ -34,33 +38,30 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({ connection, vpnDependen
   const [plainPassword, setPlainPassword] = useState('');
   // v1 等价复制反馈链：2s 内命中按钮显示 Check
   const [isCopied, setIsCopied] = useState(false);
-  const [copyTarget, setCopyTarget] = useState<string | null>(null);
+  const [copyTarget, setCopyTarget] = useState<CopyTarget | null>(null);
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // RDP 一键直连（v1 等价）：就绪标记来自 localStorage（惰性初始化，v1 为 effect 内 setState，行为等价）
+  // RDP 直连配置引导（v1 等价）：就绪标记来自 localStorage（rh-rdp:// 协议处理器配置状态，Zap 引导用）
   const [isRdpReady, setIsRdpReady] = useState(() => isRdpConfigured());
   const [showRdpSetup, setShowRdpSetup] = useState(false);
-  const [isDetecting, setIsDetecting] = useState(false);
+  // #46 launch 请求进行中（主按钮 loading）；v1 本地 rh-rdp:// 协议唤起/检测流已被 launch 端点分派替换
   const [isLaunching, setIsLaunching] = useState(false);
-  const launchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const blurTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     return () => {
       if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
-      if (launchTimeoutRef.current) clearTimeout(launchTimeoutRef.current);
-      if (blurTimeoutRef.current) clearTimeout(blurTimeoutRef.current);
     };
   }, []);
 
-  const handleCopy = (text: string, target: string) => {
+  const handleCopy = (text: string, target: CopyTarget) => {
     navigator.clipboard.writeText(text);
     if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
 
     setCopyTarget(target);
     setIsCopied(true);
 
-    const label = target.includes('user') ? '用户名' : target.includes('pass') ? '密码' : '地址';
+    // #52 魔法串收敛：label 改查 COPY_TARGET_LABELS 表（原 includes('user'/'pass') 猜测，逐键等价）
+    const label = COPY_TARGET_LABELS[target];
     toast('success', '已复制', `${label} 已复制到剪贴板`);
 
     copyTimeoutRef.current = setTimeout(() => {
@@ -137,101 +138,44 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({ connection, vpnDependen
     toast('success', '配置完成', '已保存连接首选项');
   };
 
-  // v1 等价：触发协议后 1.5s 内窗口失焦 = 系统已注册 rh-rdp:// 处理器
-  const detectProtocolSupport = (): Promise<boolean> => {
-    return new Promise((resolve) => {
-      let blurTriggered = false;
-      const onBlur = () => {
-        blurTriggered = true;
-        window.removeEventListener('blur', onBlur);
-        resolve(true);
-      };
-      window.addEventListener('blur', onBlur);
-      triggerRdpProtocol();
-      setTimeout(() => {
-        window.removeEventListener('blur', onBlur);
-        if (!blurTriggered) resolve(false);
-      }, 1500);
-    });
-  };
-
-  const stopRdpLaunch = () => {
-    setIsLaunching(false);
-    if (launchTimeoutRef.current) clearTimeout(launchTimeoutRef.current);
-    if (blurTimeoutRef.current) clearTimeout(blurTimeoutRef.current);
-  };
-
-  const handleRdpConnect = async () => {
-    if (isRdpReady) {
-      setIsLaunching(true);
-      const checkBlur = () => {
-        if (blurTimeoutRef.current) clearTimeout(blurTimeoutRef.current);
-        setTimeout(() => setIsLaunching(false), 500);
-        window.removeEventListener('blur', checkBlur);
-      };
-      window.addEventListener('blur', checkBlur);
-      launchTimeoutRef.current = setTimeout(() => {
-        triggerRdpProtocol();
-      }, 300);
-      blurTimeoutRef.current = setTimeout(() => {
-        window.removeEventListener('blur', checkBlur);
-        setIsLaunching(false);
-      }, 5000);
-      return;
-    }
-    setIsDetecting(true);
-    const isSupported = await detectProtocolSupport();
-    setIsDetecting(false);
-    if (isSupported) {
-      markRdpConfigured();
-      setIsRdpReady(true);
-      toast('success', '连接成功', '一键直连协议已就绪');
-    } else {
-      setShowRdpSetup(true);
-    }
-  };
-
-  // v1 handleConnect 等价迁移：协议 → 动作分派（vpnType.WEB ↔ SSL_VPN、登录 URL 恒取 host 为 T5 定型的 v2 映射）
-  const handleConnect = () => {
-    switch (connection.protocol) {
-      case 'RDP':
-        handleRdpConnect();
-        break;
-      case 'HTTP':
-      case 'HTTPS': {
-        const scheme = connection.protocol === 'HTTPS' ? 'https' : 'http';
-        const url = `${scheme}://${connection.host}:${connection.port || (connection.protocol === 'HTTPS' ? 443 : 80)}`;
-        window.open(url, '_blank');
-        toast('info', '正在打开', `正在新标签页访问 ${url}`);
-        break;
-      }
-      case 'SSH': {
-        const sshCmd = `ssh ${connection.username || 'user'}@${connection.host}${connection.port ? ` -p ${connection.port}` : ''}`;
-        navigator.clipboard.writeText(sshCmd);
-        toast('info', '终端命令已复制', 'SSH 协议已唤起');
-        window.location.href = `ssh://${connection.username ? connection.username + '@' : ''}${connection.host}`;
-        break;
-      }
-      case 'TODESK':
-      case 'SUNLOGIN':
-      case 'TEAMVIEWER':
-      case 'ANYDESK':
-        handleCopy(connection.host, 'host_main');
-        break;
-      case 'VPN':
-        if (connection.vpnType === 'SSL_VPN') {
-          openVpnPortal(connection.host);
-          toast('info', 'VPN 跳转', '正在前往认证页面');
-        } else {
-          handleCopy(connection.host, 'host_main');
+  // #46 一键直连：统一走 launch 端点（后端 PROTOCOL_REGISTRY 单一真相源），
+  // 按 launchConnection 解析结果分派：rdp_file → Blob 已由 queries 层下载，这里只 toast；
+  // command → 复制剪贴板；url → 新标签打开；CONN_006 → 「不支持直连」中文 toast。
+  const handleConnect = async () => {
+    if (isLaunching) return;
+    setIsLaunching(true);
+    try {
+      const result = await launchConnection(connection.id);
+      switch (result.type) {
+        case 'rdp_file':
+          toast('success', '已下载', 'RDP 文件已下载，打开即可连接远程桌面');
+          break;
+        case 'command': {
+          navigator.clipboard.writeText(result.command);
+          toast('success', '已复制', '连接命令已复制到剪贴板');
+          break;
         }
-        break;
-      // VNC 无动作（v1 即如此，等价保留）
+        case 'url':
+          window.open(result.url, '_blank');
+          toast('info', '正在打开', `正在新标签页访问 ${result.url}`);
+          break;
+      }
+    } catch (err) {
+      const launchErr = err as Error & { code?: string };
+      if (launchErr.code === 'CONN_006') {
+        toast('error', '无法直连', '该协议不支持直连');
+      } else {
+        toast('error', '直连失败', launchErr.message || '获取直连指令失败，请重试');
+      }
+    } finally {
+      setIsLaunching(false);
     }
   };
 
   const getActionLabel = () => {
-    if (connection.protocol === 'VPN') return connection.vpnType === 'SSL_VPN' ? '跳转登录' : '复制 VPN 地址';
+    // #46 review 修正：直连统一走 launch 端点，OTHER 类型 VPN 实际动作是打开 URL（window.open），
+    // 文案不再是「复制 VPN 地址」
+    if (connection.protocol === 'VPN') return connection.vpnType === 'SSL_VPN' ? '跳转登录' : '打开 VPN 地址';
     return PROTOCOL_ACTION_META[connection.protocol].actionLabel ?? '连接';
   };
 
@@ -265,18 +209,21 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({ connection, vpnDependen
             </div>
           </div>
 
-          {/* 右上操作区 */}
+          {/* 右上操作区（#48 readOnly：菜单写操作全禁 → 整菜单不渲染；RDP 引导钮属本地配置一并遮蔽） */}
           <div className="flex items-center gap-1">
-            {connection.protocol === 'RDP' && (
+            {connection.protocol === 'RDP' && !readOnly && (
               <button onClick={(e) => { e.stopPropagation(); setShowRdpSetup(true); }} className={`p-1.5 rounded-lg transition-all active:scale-90 ${isRdpReady ? 'text-amber-400 hover:bg-amber-500/10' : 'text-slate-600 hover:text-slate-400 hover:bg-white/5'}`} title={isRdpReady ? '已配置直连' : '未配置直连'}>
                 <Zap size={16} className={isRdpReady ? 'fill-current' : ''} />
               </button>
             )}
+            {!readOnly && (
             <div className="relative">
-              <button aria-label="更多操作" onClick={() => setShowMenu(!showMenu)} className="p-1.5 text-slate-500 hover:text-white rounded-lg hover:bg-white/10 transition-colors active:scale-90"><MoreVertical size={16} /></button>
+              <button aria-label="更多操作" aria-haspopup="menu" aria-expanded={showMenu} onClick={() => setShowMenu(!showMenu)} className="p-1.5 text-slate-500 hover:text-white rounded-lg hover:bg-white/10 transition-colors active:scale-90"><MoreVertical size={16} /></button>
               {showMenu && (
                 <div className="absolute right-0 top-8 w-36 bg-slate-900 border border-white/10 rounded-xl shadow-2xl z-20 py-1 animate-in fade-in zoom-in duration-150 ring-1 ring-black/50 origin-top-right">
                   <button onClick={() => { setShowMenu(false); onEdit(connection); }} className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white flex items-center gap-2"><Edit2 size={12} /> 编辑配置</button>
+                  {/* #43 克隆入口：服务端密文复制（POST /:id/clone），成功后 App 层打开编辑弹窗载入克隆件 */}
+                  <button onClick={() => { setShowMenu(false); onClone(connection); }} className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-white/5 flex items-center gap-2"><Copy size={12} /> 克隆连接</button>
                   {connection.protocol === 'RDP' && (
                     <>
                       <button onClick={() => { setShowMenu(false); setShowRdpSetup(true); }} className="w-full text-left px-3 py-2 text-xs text-amber-400 hover:bg-white/5 flex items-center gap-2"><Zap size={12} /> {isRdpReady ? '重新配置' : '配置直连'}</button>
@@ -287,6 +234,7 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({ connection, vpnDependen
                 </div>
               )}
             </div>
+            )}
           </div>
         </div>
 
@@ -376,55 +324,47 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({ connection, vpnDependen
         {/* 主操作按钮 */}
         <button
           onClick={handleConnect}
-          disabled={isDetecting}
+          disabled={isLaunching}
           className={`w-full mt-5 py-3 rounded-xl text-sm font-semibold text-white shadow-lg transition-all duration-200 transform active:scale-[0.98] flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-60
             ${actionMeta.neutralAction
               ? 'bg-slate-800 hover:bg-slate-700 border border-white/5 hover:border-white/10 shadow-black/20'
               : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-blue-900/20 hover:shadow-blue-900/40 border border-white/10'
             }`}
         >
-          {isDetecting ? (
-            <><Loader2 size={16} className="animate-spin text-white/70" /> <span className="text-white/90">呼叫中...</span></>
+          {isLaunching ? (
+            <><Loader2 size={16} className="animate-spin text-white/70" /> <span className="text-white/90">连接中...</span></>
           ) : (
             <>
-              {actionMeta.neutralAction && isCopied && copyTarget === 'host_main'
-                ? '已复制'
-                : getActionLabel()}
+              {getActionLabel()}
               {!actionMeta.neutralAction && connection.protocol !== 'RDP' && <ExternalLink size={14} className="opacity-70" />}
               {connection.protocol === 'RDP' && <Zap size={16} className={`${isRdpReady ? 'fill-current text-amber-200' : 'text-blue-200'}`} />}
             </>
           )}
         </button>
 
-        {/* 审计脚注 */}
+        {/* 审计脚注（#42：增 lastAccessed 相对时间，null 显「未访问」占位） */}
         <div className="mt-4 pt-3 border-t border-white/5 flex items-center justify-between text-[10px] text-slate-500 font-medium">
           <div className="flex items-center gap-1.5"><UserIcon size={12} className="opacity-70" /> {connection.updatedBy.nickname}</div>
-          <div className="flex items-center gap-1.5"><Clock size={12} className="opacity-70" /> {getRelativeTime(connection.updatedAt)}</div>
+          <div className="flex items-center gap-1.5" title={connection.lastAccessed ? '上次访问 · 上次更新' : '上次更新'}>
+            <Clock size={12} className="opacity-70" />
+            <span>{connection.lastAccessed ? `访问 ${getRelativeTime(connection.lastAccessed)}` : '未访问'}</span>
+            <span className="opacity-40">·</span>
+            <span>{`更新 ${getRelativeTime(connection.updatedAt)}`}</span>
+          </div>
         </div>
       </div>
     </div>
 
-    {/* RDP 唤起中 Modal（v1 等价） */}
-    <Modal isOpen={isLaunching} onClose={stopRdpLaunch} className="max-w-sm rounded-3xl border-0 overflow-hidden z-[100]">
-      <div className="relative p-8 flex flex-col items-center text-center bg-slate-950/80 backdrop-blur-3xl border border-white/10">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-blue-500/20 rounded-full blur-3xl animate-pulse pointer-events-none"></div>
-        <div className="relative mb-6"><div className="w-16 h-16 bg-slate-900/80 rounded-2xl border border-white/10 flex items-center justify-center shadow-2xl relative ring-1 ring-white/5"><Loader2 size={32} className="text-blue-400 animate-spin" /><div className="absolute -bottom-2 -right-2 bg-blue-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded border border-slate-900 shadow-lg">RDP</div></div></div>
-        <h3 className="text-xl font-bold text-white mb-2 tracking-tight">正在建立连接</h3>
-        <p className="text-sm text-slate-400 mb-6 leading-relaxed">正在呼叫远程桌面客户端。<br /><span className="text-slate-500 text-xs mt-2 block">请在系统弹窗中勾选 <span className="text-slate-300 font-medium border-b border-slate-700">始终允许</span> 以实现永久一键直连。</span></p>
-        <button onClick={stopRdpLaunch} className="px-6 py-2 bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white text-xs rounded-full transition-colors border border-white/5 backdrop-blur-md">取消呼叫</button>
-      </div>
-    </Modal>
-
-    {/* RDP 直连配置引导（v1 等价；底部文案照 v1 运行态：点击仅关闭弹窗） */}
+    {/* RDP 直连配置引导（#52 文案订正：承诺式口径改实际行为——连接=下载 .rdp；底部按钮点击仅关闭弹窗） */}
     <Modal isOpen={showRdpSetup} onClose={() => setShowRdpSetup(false)} className="max-w-md rounded-2xl overflow-hidden">
       <div className="relative p-8 flex flex-col items-center text-center bg-slate-950">
         <div className="relative mb-6"><div className={`w-20 h-20 rounded-3xl flex items-center justify-center shadow-2xl transition-all duration-500 ring-1 ring-white/10 ${isRdpReady ? 'bg-gradient-to-br from-emerald-500 to-teal-600 shadow-emerald-500/20' : 'bg-gradient-to-br from-blue-600 to-indigo-600 shadow-blue-500/20'}`}><Zap size={40} className="text-white fill-current drop-shadow-lg" /></div></div>
-        <div className="space-y-2 mb-8"><h3 className="text-2xl font-bold text-white tracking-tight">{isRdpReady ? '直连功能已就绪' : '启用一键直连'}</h3><p className="text-sm text-slate-400 leading-relaxed px-4">{isRdpReady ? '浏览器已获得调用系统权限，现在点击连接即可直接唤起 Windows 远程桌面。' : '由于浏览器安全限制，请下载并运行注册表脚本以解锁原生级远程桌面体验。'}</p></div>
+        <div className="space-y-2 mb-8"><h3 className="text-2xl font-bold text-white tracking-tight">{isRdpReady ? '直连功能已就绪' : '配置 RDP 直连'}</h3><p className="text-sm text-slate-400 leading-relaxed px-4">{isRdpReady ? '点击连接即可下载 .rdp 文件，打开文件即建立远程桌面连接。' : '下载并运行注册表脚本完成直连配置；之后点击连接即可下载 .rdp 文件建立远程桌面连接。'}</p></div>
         <div className="w-full space-y-3">
           <button onClick={generateRdpRegistryFile} className="w-full group relative flex items-center justify-between px-5 py-4 bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 rounded-xl transition-all duration-200"><div className="flex items-center gap-4"><div className="p-2 bg-slate-900 rounded-lg text-blue-400 group-hover:text-blue-300 ring-1 ring-white/5 transition-colors"><Download size={20} /></div><div className="text-left"><div className="text-sm font-bold text-slate-200 group-hover:text-white">1. 下载配置脚本</div><div className="text-[11px] text-slate-500 font-mono">RemoteHub-OneClick-Install.reg</div></div></div><ArrowRight size={18} className="text-slate-600 group-hover:text-white group-hover:translate-x-1 transition-all" /></button>
           <button onClick={handleRdpSetupComplete} className="w-full group relative flex items-center justify-center gap-2 px-5 py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-900/20 hover:shadow-blue-900/40 transition-all active:scale-[0.98] ring-1 ring-white/10"><span>2. 我已安装，完成设置</span><Check size={20} /></button>
         </div>
-        <button onClick={() => setShowRdpSetup(false)} className="mt-6 text-xs text-slate-500 hover:text-slate-300 transition-colors border-b border-transparent hover:border-slate-500 pb-0.5">暂不配置，仅下载 .rdp 文件</button>
+        <button onClick={() => setShowRdpSetup(false)} className="mt-6 text-xs text-slate-500 hover:text-slate-300 transition-colors border-b border-transparent hover:border-slate-500 pb-0.5">暂不配置</button>
       </div>
     </Modal>
     </>

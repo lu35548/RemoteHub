@@ -1,7 +1,7 @@
 // 枚举短码 → 中文显示文案（v1 enum 的文案值在 v2 拆为「机器码 + 展示层映射」）。
 // 仅含 PROTOCOL：v2 的 vpnType 语义是 VPN 协议类型，与 v1 VpnType（登录方式：网页登录/客户端/L2TP）
 // 是两个概念，T5 迁移 ConnectionModal 时按 shared 语义另行处理。
-import type { AuditAction, AuditResource, Protocol, VpnType } from '@remotehub/shared';
+import type { AuditAction, AuditResource, MemberRole, NotificationType, Protocol, VpnType } from '@remotehub/shared';
 
 // 协议族分类（ConnectionModal/ConnectionCard 共用的领域概念）
 export const PROPRIETARY_PROTOCOLS: Protocol[] = ['TODESK', 'SUNLOGIN', 'TEAMVIEWER', 'ANYDESK'];
@@ -43,6 +43,22 @@ export const VPN_TYPE_LABELS: Record<VpnType, string> = {
   OTHER: '其他客户端',
 };
 
+// 卡片复制位目标标识 → 反馈文案表（#52 copyTarget 魔法串收敛：'host_main'/'user_row'/'pass_row'
+// 散布于 ConnectionCard 的 state/JSX/handleCopy，label 原靠 target.includes('user'/'pass') 猜测）。
+// 键即复制位标识，类型化后拼写错误编译期报错；文案逐键与原 includes 判定等价（行为零变化）。
+export const COPY_TARGET_LABELS = {
+  host_main: '地址',
+  user_row: '用户名',
+  pass_row: '密码',
+} as const;
+
+// #48 rev（review nit）：归档列表分页大小（App 归档查询 + 总页数计算 + Sidebar 归档区 Pagination
+// 三处同值——分页正确性依赖三处一致，提为常量锁死）。值 100 与主列表/连接列表页大小一致，
+// 后端 pageSize clamp 500（批 13b-A6 抬升）；主列表/连接列表的既有 100 字面量属 #49 代码，不越界改动。
+export const ARCHIVED_LIST_PAGE_SIZE = 100;
+
+export type CopyTarget = keyof typeof COPY_TARGET_LABELS;
+
 // v1 getProtocolColor 的 default 分支（无显式 case 的协议共用紫色调）
 const DEFAULT_PROTOCOL_COLOR = 'text-purple-400 bg-purple-500/10 border-purple-500/50';
 
@@ -78,6 +94,8 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   AUTH_LOGIN: '登录',
   AUTH_LOGOUT: '退出登录',
   AUTH_PASSWORD_CHANGE: '修改密码',
+  AUTH_PASSWORD_RESET_REQUEST: '发起密码重置',
+  AUTH_PASSWORD_RESET: '重置密码',
   AUTH_PROFILE_UPDATE: '更新资料',
   USER_CREATE: '创建用户',
   USER_UPDATE: '更新用户',
@@ -85,6 +103,11 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   PROJECT_CREATE: '创建项目',
   PROJECT_UPDATE: '更新项目',
   PROJECT_DELETE: '删除项目',
+  // #47 shared 枚举扩展的前端标签接线（Record<AuditAction> 类型完整性强制全键；文案与后端 #47 行为对齐）
+  PROJECT_ARCHIVE: '归档项目',
+  PROJECT_RESTORE: '恢复项目',
+  PROJECT_TRANSFER: '转让项目',
+  PROJECT_COPY: '复制项目',
   MEMBER_ADD: '添加成员',
   MEMBER_UPDATE: '更新成员',
   MEMBER_REMOVE: '移除成员',
@@ -105,4 +128,31 @@ export const AUDIT_RESOURCE_LABELS: Record<AuditResource, string> = {
   member: '成员',
   system: '系统',
   security: '安全',
+};
+
+// 项目成员角色 → 中文标签（票 #40 成员弹窗；值域 = shared MEMBER_ROLES 三档，照 AUDIT_ACTION_LABELS 先例）
+export const MEMBER_ROLE_LABELS: Record<MemberRole, string> = {
+  owner: '所有者',
+  editor: '编辑者',
+  viewer: '查看者',
+};
+
+// 角色徽章配色（owner 金 / editor 蓝 / viewer 灰；批 13a 从 ProjectMembersModal 与
+// ProjectTransferModal 双组件内联常量收敛至此，两组件 import 消费，样式值零变更）
+export const ROLE_BADGE_STYLES: Record<MemberRole, string> = {
+  owner: 'bg-amber-500/10 text-amber-400 border-amber-500/30',
+  editor: 'bg-blue-500/10 text-blue-400 border-blue-500/30',
+  viewer: 'bg-slate-500/10 text-slate-400 border-slate-500/30',
+};
+
+// 通知类型 → 中文标签（票 #37 通知中心；值域 = shared NOTIFICATION_TYPES 八类，照 AUDIT_ACTION_LABELS 先例）
+export const NOTIFICATION_TYPE_LABELS: Record<NotificationType, string> = {
+  FORCE_LOGOUT: '强制登出',
+  MEMBER_ADDED: '成员加入',
+  MEMBER_REMOVED: '成员移除',
+  MEMBER_ROLE_UPDATED: '成员角色变更',
+  BACKUP_COMPLETED: '备份完成',
+  BACKUP_FAILED: '备份失败',
+  SYSTEM_ALERT: '系统告警',
+  CONNECTION_UPDATED: '连接变更',
 };

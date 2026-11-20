@@ -9,6 +9,16 @@ function getKey(): Buffer {
   return Buffer.from(env.ENCRYPTION_KEY, 'base64');
 }
 
+/**
+ * ENCRYPTION_KEY 指纹（票 #50）：SHA-256 前 8 hex。
+ * 口径裁量：作用于 **base64 解码后的 32 字节** 而非 env 原串——同一 key 的不同 base64
+ * 表示形式（padding/换行变体）判同 KEY；语义上「同 KEY」即解码字节相同。
+ * 导出文件携带此指纹，导入端不匹配即 422 VAL_001 拒绝（跨 KEY 明文中转范围外）。
+ */
+export function getKeyFingerprint(): string {
+  return crypto.createHash('sha256').update(getKey()).digest('hex').slice(0, 8);
+}
+
 function getOldKey(): Buffer | null {
   if (!env.ENCRYPTION_KEY_OLD) return null;
   return Buffer.from(env.ENCRYPTION_KEY_OLD, 'base64');

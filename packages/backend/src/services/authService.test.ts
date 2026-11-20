@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import '../test/helpers/env.js'; // 环境前置（#36 起 authService 经 logger 拉起 config/env，CI 无 .env 必崩）
 
 // ── Mocks ──────────────────────────────────────────────────────────────
 vi.mock('../utils/prisma.js', async () => {
@@ -15,6 +16,7 @@ vi.mock('../utils/jwt.js', () => ({
   signAccessToken: vi.fn(() => 'access-token'),
   generateRefreshToken: vi.fn(() => 'refresh-token-raw'),
   hashRefreshToken: vi.fn((t: string) => `hash:${t}`),
+  signMfaToken: vi.fn(() => 'mfa-token'),
 }));
 
 vi.mock('../utils/appError.js', () => ({
@@ -27,12 +29,21 @@ vi.mock('../utils/appError.js', () => ({
   handlePrismaUniqueViolation: vi.fn(async (e: any) => { throw e; }),
 }));
 
+// #36：changePassword 事务后 emit FORCE_LOGOUT（fire-and-forget）——mock 收口保持单测隔离。
+// 工厂必须 mockResolvedValue：service 侧对返回值直接挂 .catch，undefined.catch 会同步炸。
+vi.mock('./notificationService.js', () => ({
+  emitNotification: vi.fn().mockResolvedValue(undefined),
+  emitToAdmins: vi.fn().mockResolvedValue(undefined),
+  emitToProjectMembers: vi.fn().mockResolvedValue(undefined),
+}));
+
 // ── Imports (after mocks) ──────────────────────────────────────────────
-import { login, register, refresh, logout, changePassword, getMe, updateProfile, heartbeat, getOnlineUsers } from './authService.js';
+import { login, register, refresh, logout, changePassword, getMe, updateProfile, heartbeat, getOnlineUsers, validateRefreshSession } from './authService.js';
 import { prisma } from '../utils/prisma.js';
 import { verifyPassword } from '../utils/password.js';
-import { hashRefreshToken } from '../utils/jwt.js';
+import { hashRefreshToken, signAccessToken, signMfaToken } from '../utils/jwt.js';
 import { createAppError } from '../utils/appError.js';
+import { emitNotification } from './notificationService.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────
 const mockUser = (overrides: Record<string, any> = {}) => ({
@@ -97,6 +108,27 @@ describe('authService', () => {
       (verifyPassword as ReturnType<typeof vi.fn>).mockResolvedValue(true);
 
       await expect(login('testuser', 'password123')).rejects.toThrow('AppError:AUTH_001');
+    });
+  });
+
+  // ─── login 2FA 分流（票 #30）──────────────────────────────────
+  describe('login 2FA 分流', () => {
+    it('enabled 用户 → mfaPending：不建 session、不签 access token', async () => {
+      (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mockUser({ twoFactorEnabled: true, totpSecret: 'v1:encrypted' }));
+      const result = await login('testuser', 'password123');
+      expect(result.mfaPending).toBe(true);
+      expect(result.mfaStage).toBe('verify');
+      expect(result.mfaToken).toBe('mfa-token');
+      expect(signMfaToken).toHaveBeenCalledWith('user-1');
+      expect(prisma.session.create).not.toHaveBeenCalled();
+      expect(signAccessToken).not.toHaveBeenCalled();
+    });
+
+    it('enabled 但未完成绑定 → mfaStage=setup', async () => {
+      (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mockUser({ twoFactorEnabled: true }));
+      const result = await login('testuser', 'password123');
+      expect(result.mfaPending).toBe(true);
+      expect(result.mfaStage).toBe('setup');
     });
   });
 
@@ -266,6 +298,58 @@ describe('authService', () => {
     });
   });
 
+  // ─── validateRefreshSession（#34 review：WS 通道 session 校验与 REST 同源）───
+  describe('validateRefreshSession', () => {
+    const validSession = () => ({
+      id: 'sess-1',
+      tokenHash: 'hash:tok',
+      userId: 'user-1',
+      consumedAt: null as Date | null,
+      expiresAt: new Date(Date.now() + 60_000),
+      user: mockUser(),
+    });
+
+    it('未消费 + 未过期 + 活跃 → 返回 userId/role', async () => {
+      (prisma.session.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(validSession());
+
+      await expect(validateRefreshSession('tok')).resolves.toEqual({ userId: 'user-1', role: 'user' });
+      expect(prisma.session.findUnique).toHaveBeenCalledWith({
+        where: { tokenHash: 'hash:tok' },
+        include: { user: true },
+      });
+    });
+
+    it('consumedAt 非空（已轮换旧 token）→ null（严格拒绝，不享受 refresh 的 30s 并发宽容）', async () => {
+      const session = validSession();
+      session.consumedAt = new Date(Date.now() - 1000);
+      (prisma.session.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(session);
+
+      await expect(validateRefreshSession('tok')).resolves.toBeNull();
+    });
+
+    it('expiresAt 已过期 → null', async () => {
+      const session = validSession();
+      session.expiresAt = new Date(Date.now() - 1000);
+      (prisma.session.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(session);
+
+      await expect(validateRefreshSession('tok')).resolves.toBeNull();
+    });
+
+    it('用户已禁用 → null', async () => {
+      const session = validSession();
+      session.user = mockUser({ isActive: false });
+      (prisma.session.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(session);
+
+      await expect(validateRefreshSession('tok')).resolves.toBeNull();
+    });
+
+    it('session 不存在 → null', async () => {
+      (prisma.session.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+      await expect(validateRefreshSession('tok')).resolves.toBeNull();
+    });
+  });
+
   // ─── changePassword ────────────────────────────────────────────
   describe('changePassword', () => {
     it('成功修改', async () => {
@@ -294,6 +378,37 @@ describe('authService', () => {
       await expect(changePassword('user-1', 'Password1', '1')).rejects.toThrow(
         'AppError:VAL_001',
       );
+    });
+
+    it('#36 改密成功 → 事务后向本人 emit FORCE_LOGOUT（userId 已知直推）', async () => {
+      (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mockUser());
+      (verifyPassword as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+
+      await changePassword('user-1', 'Password1', 'NewPassword1');
+
+      expect(emitNotification).toHaveBeenCalledTimes(1);
+      expect(emitNotification).toHaveBeenCalledWith({
+        userId: 'user-1',
+        type: 'FORCE_LOGOUT',
+        payload: expect.objectContaining({ reason: 'password_changed' }),
+      });
+    });
+
+    it('#36 改密验证失败（未到事务）→ 不 emit', async () => {
+      (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mockUser());
+      (verifyPassword as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+
+      await expect(changePassword('user-1', 'wrong', 'NewPassword1')).rejects.toThrow();
+      expect(emitNotification).not.toHaveBeenCalled();
+    });
+
+    it('#36 emit 失败不破主流程：改密照常成功（fire-and-forget 调用侧收口）', async () => {
+      (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(mockUser());
+      (verifyPassword as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+      (emitNotification as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('notify down'));
+
+      await expect(changePassword('user-1', 'Password1', 'NewPassword1')).resolves.toBeUndefined();
+      expect(prisma.$transaction).toHaveBeenCalled();
     });
   });
 

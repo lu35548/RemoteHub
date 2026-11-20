@@ -18,7 +18,10 @@ export const CONNECTION_PASSWORD_MAX_LENGTH = 200;
 export const TAGS_MAX_LENGTH = 500;
 
 export const DEFAULT_PAGE_SIZE = 20;
-export const MAX_PAGE_SIZE = 100;
+/** 批 13b-A6 全局抬升 100→500（lead 裁决，cs 线汇证触发）：内网工具量级（~150 行/表）+ 登录门禁，
+ * 防滥用语义弱化可接受；分页默认值 20 不变，仅上限抬升。消费方（backend 六 service 的 Math.min
+ * 钳制）走本常量自动跟随，无硬编码 100 残留（grep 已核）。 */
+export const MAX_PAGE_SIZE = 500;
 
 export const USER_SEARCH_MAX_RESULTS = 20;
 export const USER_SEARCH_MIN_QUERY_LENGTH = 1;
@@ -47,4 +50,7 @@ export const ENCRYPTION_VERSION = 'v1';
 // 审计脱敏字段：值替换为 [REDACTED]（保留字段名以标识变更）
 // password：decrypt-password 端点响应体含明文密码（票 #16 实施发现，design §3.4 密码类字段脱敏意图）
 // accessToken/refreshToken：/auth/login 响应体整体进 AUTH_LOGIN after 快照（票 #25，Set 精确键名匹配故须逐键列出）
-export const SENSITIVE_FIELDS = new Set<string>(['password', 'passwordHash', 'encryptedPass', 'token', 'tokenHash', 'accessToken', 'refreshToken']);
+// resetLink：admin 代重置响应体内嵌一次性重置 token（票 #28，泄漏即等于交出改密权）
+// mfaToken：mfaPending 登录响应体进 AUTH_LOGIN after 快照（票 #30 review，15 分钟挑战 JWT 明文落审计）
+// secret/recoveryCode：2FA 绑定密钥/恢复码（票 #30 review 纵深——未来 mfa 端点若挂审计，confirm body 的 TOTP secret 是长期凭证）
+export const SENSITIVE_FIELDS = new Set<string>(['password', 'passwordHash', 'encryptedPass', 'token', 'tokenHash', 'accessToken', 'refreshToken', 'resetLink', 'mfaToken', 'secret', 'recoveryCode']);

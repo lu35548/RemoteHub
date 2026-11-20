@@ -3,12 +3,16 @@ import { prisma } from '../utils/prisma.js';
 import type { Prisma } from '@prisma/client';
 import { createAppError, handlePrismaUniqueViolation, hasErrorCode } from '../utils/appError.js';
 import { encrypt, decrypt } from '../utils/encryption.js';
+import { logger } from '../utils/logger.js';
+import { emitToProjectMembers } from './notificationService.js';
 import {
   validateConnectionName, validateHost, validatePort,
   validateProtocol, validateVpnType, validateTags,
   validateNotes, validateVpnLoginUrl,
+  validateProtocolAgainstRegistry, getProtocolRegistryEntry,
   DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE,
 } from '@remotehub/shared';
+import type { ConnectionListQuery, ConnectionStats } from '@remotehub/shared';
 
 // ─── lastAccessed 节流 ───
 
@@ -50,6 +54,8 @@ interface ConnectionCreateData {
 }
 
 interface ConnectionUpdateData {
+  /** #44 跨项目移动：显式传且 ≠ 当前值时触发目标项目写权校验（editor+ / admin 直通） */
+  projectId?: string;
   name?: string;
   host?: string;
   port?: number | null;
@@ -65,26 +71,72 @@ interface ConnectionUpdateData {
 
 // ─── Public Functions ───
 
-/** 连接列表 — admin 全部，非 admin 已加入项目的连接 */
+/** #41 连接列表过滤参数：tags 多值 OR（批 13b-A2 由单值 tag 替换而来）/ q 三字段模糊 / sort=lastAccessed。
+ * extends Pick 锁与 shared wire 形状（ConnectionListQuery）的字段级同步——shared 改字段名时此处编译期报错；
+ * 职责仍分离：wire 形含 projectId/page/pageSize，service 侧分页与项目过滤走独立位置参数。 */
+export interface ConnectionListFilters extends Pick<ConnectionListQuery, 'tags' | 'q' | 'sort'> {}
+
+/** 连接列表 — admin 全部，非 admin 已加入项目的连接。
+ * #41：tags 包夹法（批 13b-A2 扩展多值：逗号分隔 → 值间 OR，每值四条件 OR——等价 SQL
+ * 「','||tags||',' LIKE '%,tag,%'」逐值展开，防 test 命中 test2，NULL tags 自然排除）；
+ * q 对 name/host/username contains；sort='lastAccessed' 时最近访问优先。
+ * tags/q 匹配为 SQLite LIKE 家族——ASCII 大小写不敏感（语义详见 shared ConnectionListQuery 注释）。 */
 export async function listConnections(
   userId: string,
   userRole: string,
   projectId?: string,
   page: number = 1,
   pageSize: number = DEFAULT_PAGE_SIZE,
+  filters: ConnectionListFilters = {},
 ) {
   pageSize = Math.min(pageSize, MAX_PAGE_SIZE);
 
   const projectFilter = projectId ? { projectId } : {};
 
-  const where = userRole === 'admin'
+  const where: Prisma.ConnectionWhereInput = userRole === 'admin'
     ? projectFilter
     : { ...projectFilter, project: { members: { some: { userId } } } };
+
+  // #41 过滤条件叠加（AND 组内各自 OR）；批 13b-A2：tags 逗号分隔多值——片段 trim 归一
+  // （对齐旧 tag 整串 trim 口径）、空段剔除，全空段忽略条件；值间 OR，每值四条件包夹展平 4N 分支
+  const and: Prisma.ConnectionWhereInput[] = [];
+  const tagList = (filters.tags ?? '')
+    .split(',')
+    .map((t) => t.trim())
+    .filter((t) => t !== '');
+  if (tagList.length > 0) {
+    and.push({
+      OR: tagList.flatMap((tag) => [
+        { tags: tag },
+        { tags: { startsWith: `${tag},` } },
+        { tags: { endsWith: `,${tag}` } },
+        { tags: { contains: `,${tag},` } },
+      ]),
+    });
+  }
+  const q = filters.q?.trim();
+  if (q) {
+    and.push({
+      OR: [
+        { name: { contains: q } },
+        { host: { contains: q } },
+        { username: { contains: q } },
+      ],
+    });
+  }
+  if (and.length > 0) where.AND = and;
+
+  // #41 排序：lastAccessed 优先（SQLite DESC 下 NULL 恒殿后 = 从未访问垫底）+ updatedAt 次序稳定；
+  // sort 与 tag/q 同样 trim 归一（'?sort=%20lastAccessed' 不静默回退）；其他值宽容回退默认 updatedAt desc（不 400）
+  const orderBy: Prisma.ConnectionOrderByWithRelationInput | Prisma.ConnectionOrderByWithRelationInput[] =
+    filters.sort?.trim() === 'lastAccessed'
+      ? [{ lastAccessed: 'desc' }, { updatedAt: 'desc' }]
+      : { updatedAt: 'desc' };
 
   const [connections, total] = await Promise.all([
     prisma.connection.findMany({
       where,
-      orderBy: { updatedAt: 'desc' },
+      orderBy,
       skip: (page - 1) * pageSize,
       take: pageSize,
       include: { project: { select: { id: true, name: true } } },
@@ -111,17 +163,26 @@ export async function createConnection(userId: string, data: ConnectionCreateDat
   // VPN 一致性检查
   validateVpnConsistency(data.protocol, data);
 
+  // #45 协议注册表校验叠加（port:none 协议拒绝非 null port；host 校验为 validateHost 后的冗余兜底）
+  const registryErrors = validateProtocolAgainstRegistry(data.protocol, {
+    host: data.host, port: data.port, username: data.username,
+  });
+  if (registryErrors.length > 0) {
+    throw createAppError('VAL_001', registryErrors);
+  }
+
   // VPN 依赖检查
   if (data.requiredVpnId) {
     await validateVpnDependency(data.requiredVpnId, data.projectId);
   }
 
-  // 构建创建数据
+  // 构建创建数据（#45：port 缺省填 registry 默认——SSH 22 / HTTPS 443 / RDP 3389 等；
+  // null/undefined 统一视为缺省填充，spec W3-11 钦定口径，测试锚定）
   const createData: Prisma.ConnectionUncheckedCreateInput = {
     projectId: data.projectId,
     name: data.name,
     host: data.host,
-    port: data.port ?? null,
+    port: data.port ?? getProtocolRegistryEntry(data.protocol)?.defaultPort ?? null,
     username: data.username ?? null,
     encryptedPass: data.password ? encrypt(data.password) : null,
     protocol: data.protocol,
@@ -136,6 +197,12 @@ export async function createConnection(userId: string, data: ConnectionCreateDat
 
   try {
     const connection = await prisma.connection.create({ data: createData });
+    // #36：创建成功后通知项目全体成员（事务外 fire-and-forget；连接三操作统一
+    // CONNECTION_UPDATED 以 action 区分，design §8.4；失败只记日志不破主流程）
+    void emitToProjectMembers(data.projectId, {
+      type: 'CONNECTION_UPDATED',
+      payload: { projectId: data.projectId, connectionId: connection.id, action: 'created', name: connection.name },
+    }).catch((err: Error) => logger.error('连接创建通知下发失败（不传播）', { projectId: data.projectId, connectionId: connection.id, error: err.message }));
     const userMap = await resolveUserRefs([connection.createdBy, connection.updatedBy]);
     return toDetail(connection, false, userMap);
   } catch (error) {
@@ -161,32 +228,50 @@ export async function getConnection(connectionId: string, userId: string, userGl
   }
 
   // C5: lastAccessed 节流更新
-  const now = Date.now();
-  const lastUpdate = lastAccessedUpdates.get(connectionId);
-  if (!lastUpdate || now - lastUpdate > LAST_ACCESSED_THROTTLE_MS) {
-    lastAccessedUpdates.set(connectionId, now);
-    prisma.connection.update({
-      where: { id: connectionId },
-      data: { lastAccessed: new Date() },
-    }).catch(() => {}); // fire-and-forget
-  }
+  touchLastAccessed(connectionId);
 
   const userMap = await resolveUserRefs([connection.createdBy, connection.updatedBy]);
   return toDetail(connection, includeEncryptedPass, userMap);
 }
 
-/** 更新连接 */
-export async function updateConnection(userId: string, connectionId: string, data: ConnectionUpdateData) {
+/** 更新连接。
+ * #44 第 4 参 userGlobalRole：目标项目写权校验的 admin 直通（对齐路由层 projectRoleMiddleware
+ * 对 admin 的直通语义），controller 透传 req.user.role；缺省按非 admin 处理。 */
+export async function updateConnection(userId: string, connectionId: string, data: ConnectionUpdateData, userGlobalRole?: string) {
   // 获取当前连接
   const current = await prisma.connection.findUnique({ where: { id: connectionId } });
   if (!current) throw createAppError('CONN_002');
 
-  // 白名单过滤并构建 update payload
-  const fields = new Set(['name', 'host', 'port', 'username', 'password', 'protocol', 'vpnType', 'vpnLoginUrl', 'requiredVpnId', 'notes', 'tags']);
+  // 白名单过滤并构建 update payload（#44 加 projectId：跨项目移动）
+  const fields = new Set(['name', 'host', 'port', 'username', 'password', 'protocol', 'vpnType', 'vpnLoginUrl', 'requiredVpnId', 'notes', 'tags', 'projectId']);
   const updatePayload: Prisma.ConnectionUncheckedUpdateInput = {};
   for (const [key, value] of Object.entries(data)) {
     if (fields.has(key)) {
       (updatePayload as Record<string, unknown>)[key] = value;
+    }
+  }
+
+  // #44 跨项目移动：显式传 projectId 且 ≠ 当前值才触发校验（不传/同值 = 不移动，幂等零开销）。
+  // 源项目侧权限由路由层 projectRole('editor') 按连接当前项目门禁（现状语义不收紧）；
+  // 目标项目侧权限中间件无法表达「目标≠源」（projectId 兜底分支被 paramId 分支短路），由本层校验。
+  const targetProjectId = updatePayload.projectId as string | undefined;
+  const isMoving = typeof targetProjectId === 'string' && targetProjectId !== current.projectId;
+  if (isMoving) {
+    const targetProject = await prisma.project.findUnique({ where: { id: targetProjectId } });
+    if (!targetProject) throw createAppError('PROJ_002');
+    if (userGlobalRole !== 'admin') {
+      const membership = await prisma.projectMember.findUnique({
+        where: { projectId_userId: { projectId: targetProjectId, userId } },
+      });
+      if (membership?.role !== 'owner' && membership?.role !== 'editor') {
+        throw createAppError('AUTH_003');
+      }
+    }
+    // VPN 搬家保护：该连接是 VPN 且被依赖 → 移走后源项目依赖悬空（dependents 现状全在源项目，
+    // 由同项目约束保证）。复用 CONN_004「VPN 仍被其他连接依赖」；级联搬运 dependents 越权面积大，不做。
+    if (current.protocol === 'VPN') {
+      const dependents = await prisma.connection.count({ where: { requiredVpnId: connectionId } });
+      if (dependents > 0) throw createAppError('CONN_004');
     }
   }
 
@@ -204,6 +289,27 @@ export async function updateConnection(userId: string, connectionId: string, dat
 
   // 验证字段
   validateConnectionFields(merged);
+
+  // #45 registry 宽松校验：只查 client 传入的字段（updatePayload 白名单拷贝自 body，
+  // 未传入的键 undefined → registry 跳过——存量行未触碰的字段不因 registry 规则被拒，零破坏）。
+  // protocol 用合并视图（切协议 + 传 port 的组合按目标协议拒绝）。
+  const registryErrors = validateProtocolAgainstRegistry(merged.protocol, {
+    host: updatePayload.host as string | undefined,
+    port: updatePayload.port as number | null | undefined,
+  });
+  if (registryErrors.length > 0) {
+    throw createAppError('VAL_001', registryErrors);
+  }
+
+  // #45 review 修复 4：显式切到 port:none 协议（设备码四协议/VNC）时强制清 port——设备码协议
+  // port 无意义，清脏数据；限定「显式传 protocol」才触发（局部更新不动 client 未触碰的字段，
+  // 存量行改 notes 不因此被写 port）。有 port 协议间切换（SSH→RDP 等）的残留维持 OQ1 交用户。
+  if (updatePayload.protocol !== undefined) {
+    const targetEntry = getProtocolRegistryEntry(merged.protocol);
+    if (targetEntry?.fields.port === 'none') {
+      updatePayload.port = null;
+    }
+  }
 
   // VPN 一致性检查
   validateVpnConsistency(merged.protocol, {
@@ -231,10 +337,13 @@ export async function updateConnection(userId: string, connectionId: string, dat
     }
   }
 
-  // VPN 依赖检查
+  // VPN 依赖检查（#44：projectId 用合并视图——换项目后按目标项目校验，requiredVpnId 指向
+  // 源项目 VPN 时命中 validateVpnDependency 现有「依赖的 VPN 连接不在同一项目」VAL_001 拒绝，
+  // 零新错误码；自动清空依赖备选因静默丢用户配置而否决）
   const vpnId = updatePayload.requiredVpnId !== undefined ? updatePayload.requiredVpnId as string | null : current.requiredVpnId;
   if (vpnId) {
-    await validateVpnDependency(vpnId, current.projectId, connectionId);
+    const vpnProjectId = isMoving ? (targetProjectId as string) : current.projectId;
+    await validateVpnDependency(vpnId, vpnProjectId, connectionId);
   }
 
   // 密码处理
@@ -257,6 +366,18 @@ export async function updateConnection(userId: string, connectionId: string, dat
       where: { id: connectionId },
       data: updateData,
     });
+    // #36：更新成功后通知项目全体成员（fire-and-forget，失败只记日志）
+    void emitToProjectMembers(connection.projectId, {
+      type: 'CONNECTION_UPDATED',
+      payload: { projectId: connection.projectId, connectionId, action: 'updated', name: connection.name },
+    }).catch((err: Error) => logger.error('连接更新通知下发失败（不传播）', { projectId: connection.projectId, connectionId, error: err.message }));
+    // #44 换项目通知双发：源项目成员的连接列表同样变化（感知对称；payload.projectId 归属各自项目）
+    if (isMoving) {
+      void emitToProjectMembers(current.projectId, {
+        type: 'CONNECTION_UPDATED',
+        payload: { projectId: current.projectId, connectionId, action: 'updated', name: connection.name },
+      }).catch((err: Error) => logger.error('连接更新通知下发失败（不传播）', { projectId: current.projectId, connectionId, error: err.message }));
+    }
     const userMap = await resolveUserRefs([connection.createdBy, connection.updatedBy]);
     return toDetail(connection, false, userMap);
   } catch (error) {
@@ -283,7 +404,112 @@ export async function deleteConnection(connectionId: string) {
   }
 
   await prisma.connection.delete({ where: { id: connectionId } });
+  // #36：删除成功后通知项目全体成员（projectId/name 取自删除前快照——删除后已不可查；
+  // fire-and-forget，失败只记日志）
+  void emitToProjectMembers(connection.projectId, {
+    type: 'CONNECTION_UPDATED',
+    payload: { projectId: connection.projectId, connectionId, action: 'deleted', name: connection.name },
+  }).catch((err: Error) => logger.error('连接删除通知下发失败（不传播）', { projectId: connection.projectId, connectionId, error: err.message }));
   return { id: connectionId };
+}
+
+/** #43 克隆连接（POST /connections/:id/clone）。
+ * v1 参照消费点（ConnectionRepository.ts:501-526），本票完成后 v1 backend/ 目录可删。
+ *
+ * 密文服务端复制（spec W3-9 / 票面 L52）：直查 prisma 原行拿 encryptedPass 原样落新行——
+ * 不走 DTO 脱敏层、不 decrypt+encrypt（同 ENCRYPTION_KEY 下解密即一致），
+ * 密码全程不过前端明文中转。
+ * 权限差异（票面钦定，与 v1 owner-only 不同）：目标项目写权（路由层 projectRole('editor')）；
+ * 权限拒绝由路由中间件短路，本函数只管数据边界（不存在 → CONN_002）。
+ * 并发备案：并发克隆同名原件时后者 create 撞 @@unique([projectId,name]) → P2002 → CONN_005 409
+ * （handlePrismaUniqueViolation 先例同款），窗口极窄不做重试。 */
+export async function cloneConnection(userId: string, connectionId: string) {
+  const original = await prisma.connection.findUnique({ where: { id: connectionId } });
+  if (!original) throw createAppError('CONN_002');
+
+  // 改名递增（@@unique([projectId,name]) 避让）+ 超长校验（复制语义下唯一新生成字段）
+  const name = await resolveCloneName(original.projectId, original.name);
+  const vName = validateConnectionName(name);
+  if (!vName.valid) {
+    throw createAppError('VAL_001', [{ field: 'name', message: vName.message }]);
+  }
+
+  try {
+    const connection = await prisma.connection.create({
+      data: {
+        projectId: original.projectId,
+        name,
+        host: original.host,
+        port: original.port,
+        username: original.username,
+        encryptedPass: original.encryptedPass,
+        protocol: original.protocol,
+        vpnType: original.vpnType,
+        vpnLoginUrl: original.vpnLoginUrl,
+        requiredVpnId: original.requiredVpnId,
+        notes: original.notes,
+        tags: original.tags,
+        lastAccessed: null, // 新连接从未访问
+        createdBy: userId,
+        updatedBy: userId,
+      },
+    });
+    // #36：克隆即新建，通知项目全体成员（fire-and-forget，失败只记日志——create 先例同款）
+    void emitToProjectMembers(connection.projectId, {
+      type: 'CONNECTION_UPDATED',
+      payload: { projectId: connection.projectId, connectionId: connection.id, action: 'created', name: connection.name },
+    }).catch((err: Error) => logger.error('连接克隆通知下发失败（不传播）', { projectId: connection.projectId, connectionId: connection.id, error: err.message }));
+    const userMap = await resolveUserRefs([connection.createdBy, connection.updatedBy]);
+    // clonedFrom 进响应体 → auditMiddleware 的 detail.after 从 envelope.data 自动携带（无自定义通道，留痕零成本）
+    return { ...toDetail(connection, false, userMap), clonedFrom: connectionId };
+  } catch (error) {
+    await handlePrismaUniqueViolation(error);
+    throw error;
+  }
+}
+
+/** #43 克隆名递增（@@unique([projectId,name]) 避让，v1 RemoteConnection.clone 先例格式）：
+ * 「X」→「X (副本)」→「X (副本) 2」→「X (副本) 3」…（半角括号 + 单半角空格，测试锁死）。
+ * startsWith 收集后 Set 精确判等——「X (副本)A」前缀命中不占号；「X (副本)」空缺时
+ * 即使「X (副本) 2」存在也回填（无冲突即用，票面三级规则）。 */
+async function resolveCloneName(projectId: string, originalName: string): Promise<string> {
+  const base = `${originalName} (副本)`;
+  const siblings = await prisma.connection.findMany({
+    where: { projectId, name: { startsWith: base } },
+    select: { name: true },
+  });
+  const names = new Set(siblings.map((s) => s.name));
+  if (!names.has(base)) return base;
+  let n = 2;
+  while (names.has(`${base} ${n}`)) n++;
+  return `${base} ${n}`;
+}
+
+/** #41 项目连接统计 — 按协议 groupBy 语义聚合计数 + 标签 JS 侧 split 计数。
+ * tags 为逗号分隔单串（queryable-fields 约定不迁移 JSON），空片段剔除、字面匹配（不 trim 片段，
+ * 与列表 tag 过滤的包夹法字面语义保持一致）；NULL tags 跳过。
+ * 返回类型标注 shared ConnectionStats（对齐 monitoringService SystemHealth 先例，编译期锁契约）。 */
+export async function getConnectionStats(projectId: string): Promise<ConnectionStats> {
+  const project = await prisma.project.findUnique({ where: { id: projectId } });
+  if (!project) throw createAppError('PROJ_002');
+
+  const connections = await prisma.connection.findMany({
+    where: { projectId },
+    select: { protocol: true, tags: true },
+  });
+
+  const protocols: Record<string, number> = {};
+  const tags: Record<string, number> = {};
+  for (const c of connections) {
+    protocols[c.protocol] = (protocols[c.protocol] ?? 0) + 1;
+    if (!c.tags) continue;
+    for (const fragment of c.tags.split(',')) {
+      if (fragment === '') continue; // 空片段剔除（"a,,b"）
+      tags[fragment] = (tags[fragment] ?? 0) + 1;
+    }
+  }
+
+  return { protocols, tags };
 }
 
 /** 解密密码 */
@@ -295,6 +521,136 @@ export async function decryptPassword(connectionId: string) {
   if (!connection) throw createAppError('CONN_002');
 
   // C5: lastAccessed 节流更新
+  touchLastAccessed(connectionId);
+
+  if (!connection.encryptedPass) {
+    return { password: '' };
+  }
+  return { password: decrypt(connection.encryptedPass) };
+}
+
+/** 批 13b-A4 全局协议分布聚合（GET /connections/stats，挂 authMiddleware 无项目角色门）。
+ * 聚合范围 = 该用户可见的**活跃项目**（非 archived；admin=全部活跃项目 / 非 admin=已加入项目，
+ * 可见性口径对齐 listProjects）的全部分连接；归档项目连接不计入（归档=冻结，分布只看活水）。
+ * 返回形状对齐 shared ConnectionStats（编译期锁契约，getConnectionStats 同款）。 */
+export async function getGlobalConnectionStats(userId: string, userRole: string): Promise<ConnectionStats> {
+  const connections = await prisma.connection.findMany({
+    where: {
+      project: {
+        status: 'active',
+        ...(userRole === 'admin' ? {} : { members: { some: { userId } } }),
+      },
+    },
+    select: { protocol: true, tags: true },
+  });
+
+  const protocols: Record<string, number> = {};
+  const tags: Record<string, number> = {};
+  for (const c of connections) {
+    protocols[c.protocol] = (protocols[c.protocol] ?? 0) + 1;
+    if (!c.tags) continue;
+    for (const fragment of c.tags.split(',')) {
+      if (fragment === '') continue; // 空片段剔除（"a,,b"）
+      tags[fragment] = (tags[fragment] ?? 0) + 1;
+    }
+  }
+
+  return { protocols, tags };
+}
+
+// ─── #45 直连分派（launch）───
+
+/** launch 结果三形态：rdp_file 带文件体（controller 设 Content-Type/Disposition 后 Buffer 直发）；
+ * command/url 即 shared LaunchJsonResponse 的 data 形状（包统一响应壳 JSON）。 */
+export type LaunchResult =
+  | { type: 'rdp_file'; filename: string; body: Buffer }
+  | { type: 'command'; command: string }
+  | { type: 'url'; url: string };
+
+/** 生成 .rdp 文件字节（libcheck §3-§5 实证口径）：UTF-16 LE + BOM（0xFF 0xFE）、
+ * CRLF 行尾、最小集五键——screen mode / desktop 分辨率 / full address（唯一必填，
+ * port null 时裸 host 由 mstsc 自默认 3389）/ username（可选，无则整行省略）。
+ * 内容纯 ASCII——中文连接名只进 Content-Disposition 文件名，不进文件体。 */
+function buildRdpFileBody(host: string, port: number | null, username: string | null): Buffer {
+  const lines = [
+    'screen mode id:i:1',
+    'desktopwidth:i:1280',
+    'desktopheight:i:800',
+    `full address:s:${host}${port != null ? `:${port}` : ''}`,
+  ];
+  if (username) {
+    lines.push(`username:s:${username}`);
+  }
+  // 尾行也带 CRLF（Windows 工具链格式惯例——最后一行有无 CRLF mstsc 均可开，统一带）
+  const content = `${lines.join('\r\n')}\r\n`;
+  return Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(content, 'utf16le')]);
+}
+
+/** URL 形态通用拼装：port 显式存在且非 registry 默认时拼接（默认端口省略）。
+ * #45 真机修复（跨票）：host 已含 scheme（完整 URL，如 https://x.example.com/portal——
+ * 前端「网址 URL」placeholder 引导用户可填完整 URL）时原样返回——不拼协议前缀、
+ * 也不拼 port 后缀（完整 URL 语义下端口已含在 URL 内）。守卫对齐同文件 launchConnection
+ * vpnLoginUrl 分支先例（https://https:// 双拼实锤于真机 toast）。 */
+function buildUrl(scheme: 'http' | 'https', host: string, port: number | null, defaultPort: number | null): string {
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(host)) return host;
+  const suffix = port != null && port !== defaultPort ? `:${port}` : '';
+  return `${scheme}://${host}${suffix}`;
+}
+
+/** GET /connections/:id/launch（票 #45）：按 PROTOCOL_REGISTRY 分派三类直连动作。
+ * viewer 可见字段构成（无密码），敏感度低于 decrypt-password——路由权限门 projectRole('viewer')。 */
+export async function launchConnection(connectionId: string): Promise<LaunchResult> {
+  const connection = await prisma.connection.findUnique({ where: { id: connectionId } });
+  if (!connection) throw createAppError('CONN_002');
+
+  const entry = getProtocolRegistryEntry(connection.protocol);
+  if (!entry || entry.launchAction === 'unsupported') {
+    throw createAppError('CONN_006');
+  }
+
+  // lastAccessed 节流更新（launch 语义 = 访问连接，与 getConnection/decryptPassword 同款）
+  touchLastAccessed(connectionId);
+
+  switch (entry.launchAction) {
+    case 'rdp_file':
+      return {
+        type: 'rdp_file',
+        filename: `${connection.name}.rdp`,
+        body: buildRdpFileBody(connection.host, connection.port, connection.username),
+      };
+    case 'command': {
+      // 设备码协议（hostSemantics=device_id）：command 即设备码本身（host 列复用存设备 ID）
+      if (entry.hostSemantics === 'device_id') {
+        return { type: 'command', command: connection.host };
+      }
+      // SSH：libcheck 钦定拼串口径——默认端口 22 省略 -p，非 22 加 -p；username 缺省裸 host
+      const userPrefix = connection.username ? `${connection.username}@` : '';
+      const portSuffix = connection.port != null && connection.port !== entry.defaultPort
+        ? ` -p ${connection.port}`
+        : '';
+      return { type: 'command', command: `ssh ${userPrefix}${connection.host}${portSuffix}` };
+    }
+    case 'url': {
+      // VPN：vpnLoginUrl 优先（无 scheme 补 https://），缺省回退 https://host[:port]
+      if (connection.protocol === 'VPN') {
+        if (connection.vpnLoginUrl) {
+          const url = /^[a-z][a-z0-9+.-]*:\/\//i.test(connection.vpnLoginUrl)
+            ? connection.vpnLoginUrl
+            : `https://${connection.vpnLoginUrl}`;
+          return { type: 'url', url };
+        }
+        return { type: 'url', url: buildUrl('https', connection.host, connection.port, entry.defaultPort) };
+      }
+      // HTTP / HTTPS（HTTP 为自然延伸——http:// 语义与 https 同构，裁量记施工报告）
+      return { type: 'url', url: buildUrl(connection.protocol === 'HTTP' ? 'http' : 'https', connection.host, connection.port, entry.defaultPort) };
+    }
+  }
+}
+
+// ─── Private Helpers ───
+
+/** C5: lastAccessed 节流更新（fire-and-forget）——getConnection/decryptPassword/launch 三处共用语义收敛 */
+function touchLastAccessed(connectionId: string) {
   const now = Date.now();
   const lastUpdate = lastAccessedUpdates.get(connectionId);
   if (!lastUpdate || now - lastUpdate > LAST_ACCESSED_THROTTLE_MS) {
@@ -304,14 +660,7 @@ export async function decryptPassword(connectionId: string) {
       data: { lastAccessed: new Date() },
     }).catch(() => {}); // fire-and-forget
   }
-
-  if (!connection.encryptedPass) {
-    return { password: '' };
-  }
-  return { password: decrypt(connection.encryptedPass) };
 }
-
-// ─── Private Helpers ───
 
 function validateConnectionFields(data: {
   name: string;
@@ -484,6 +833,8 @@ function toDetail(c: {
     host: c.host,
     port: c.port,
     username: c.username,
+    // #44 密码存在性派生键（不泄露密文本身；克隆响应同样携带，克隆件编辑态判断不依赖条件脱敏字段）
+    hasPassword: c.encryptedPass != null,
     ...(includeEncryptedPass && { encryptedPass: c.encryptedPass }),
     protocol: c.protocol,
     vpnType: c.vpnType,

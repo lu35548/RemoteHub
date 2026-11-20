@@ -23,9 +23,12 @@ export default defineConfig({
     // 5173 在本机防火墙拦截段（EACCES，实测 5173/5188/5199/7777/8888 被拦，3000/4173 可用）
     port: 3000,
     proxy: {
+      // #34：ws:true 使 upgrade 请求（/api/v1/ws）也被代理（rewrite 对 upgrade 同样生效）；
+      // dev 前端 WS 走相对路径同源连接，无需区分环境
       '/api': {
         target: 'http://localhost:3001',
         changeOrigin: true,
+        ws: true,
       },
     },
   },

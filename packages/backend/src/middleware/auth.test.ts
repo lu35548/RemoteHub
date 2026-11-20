@@ -23,7 +23,7 @@ vi.mock('../utils/logger.js', () => ({
 
 import { authMiddleware } from './auth.js';
 import { prisma } from '../utils/prisma.js';
-import { signAccessToken } from '../utils/jwt.js';
+import { signAccessToken, signMfaToken } from '../utils/jwt.js';
 import type { Request, Response, NextFunction } from 'express';
 
 function mockReqRes(authHeader?: string) {
@@ -92,5 +92,17 @@ describe('authMiddleware', () => {
     await authMiddleware(req, res, next);
     expect(next).toHaveBeenCalled();
     expect(req.user).toEqual(expect.objectContaining({ id: 'user-1', role: 'admin' }));
+  });
+
+  // 票 #30 红线：authMiddleware 拒收 aud='mfa' 的 token（verifyAccessToken 显式 audience:'access'）
+  it('mfa token（aud=mfa）→ 401 拒收，不放行业务 API', async () => {
+    const mfaToken = await signMfaToken('user-1');
+    (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'user-1', username: 'test', nickname: 'Test', role: 'user', isActive: true,
+    });
+    const { req, res, next } = mockReqRes(`Bearer ${mfaToken}`);
+    await authMiddleware(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
   });
 });

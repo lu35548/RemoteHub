@@ -22,6 +22,7 @@ import { prisma as _prisma } from '../utils/prisma.js';
 import {
   getDashboard,
   getProjectConnectionStats,
+  getReadiness,
   getSystemHealth,
   getUserActivityStats,
 } from './monitoringService.js';
@@ -96,6 +97,46 @@ describe('getSystemHealth - degraded 判定矩阵（db×mem×disk）', () => {
     const h = await getSystemHealth();
     expect(h.diskUsage).toBe(-1);
     expect(h.status).toBe('healthy');
+  });
+});
+
+describe('getReadiness - K8s readiness 判定（票 #33：database 可用且磁盘 ≤ 阈值）', () => {
+  it('db 通 + disk 75% → ready:true（与 degraded 矩阵同源阈值 95）', async () => {
+    vi.mocked(prisma.$queryRaw).mockResolvedValue([]);
+    vi.mocked(statfs).mockResolvedValue({ blocks: 100, bfree: 25 } as never);
+
+    const r = await getReadiness();
+
+    expect(r).toEqual({ ready: true, database: true, diskUsage: 75 });
+  });
+
+  it('db 断 → ready:false + database:false（磁盘正常）', async () => {
+    vi.mocked(prisma.$queryRaw).mockRejectedValue(new Error('db down'));
+    vi.mocked(statfs).mockResolvedValue({ blocks: 100, bfree: 25 } as never);
+
+    const r = await getReadiness();
+
+    expect(r).toEqual({ ready: false, database: false, diskUsage: 75 });
+  });
+
+  it('disk 97% 越阈值 → ready:false（db 正常）——readyz 须自行判定磁盘，现 /health 的 503 分支不覆盖', async () => {
+    vi.mocked(prisma.$queryRaw).mockResolvedValue([]);
+    vi.mocked(statfs).mockResolvedValue({ blocks: 1000, bfree: 30 } as never); // 97%
+
+    const r = await getReadiness();
+
+    expect(r.ready).toBe(false);
+    expect(r.database).toBe(true);
+    expect(r.diskUsage).toBe(97);
+  });
+
+  it('statfs 失败 → diskUsage -1，db 通时不阻断 readiness（与 degraded「未知不阻断」同口径）', async () => {
+    vi.mocked(prisma.$queryRaw).mockResolvedValue([]);
+    vi.mocked(statfs).mockRejectedValue(new Error('no statfs'));
+
+    const r = await getReadiness();
+
+    expect(r).toEqual({ ready: true, database: true, diskUsage: -1 });
   });
 });
 

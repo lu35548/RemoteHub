@@ -48,6 +48,20 @@ describe('redactDetail', () => {
       .toEqual({ after: { accessToken: '[REDACTED]', refreshToken: '[REDACTED]', user: { username: 'admin' } } });
   });
 
+  it('mfaToken/secret/recoveryCode 键脱敏（票 #30 review：AUTH_LOGIN after 泄漏 mfaPending 响应明文 mfaToken；secret=TOTP 绑定密钥、recoveryCode=长期凭证，纯纵深）', () => {
+    expect(redactDetail({
+      mfaPending: true,
+      mfaToken: 'eyJhbGciOiJIUzI1NiJ9.mfa-payload.sig',
+      secret: 'JBSWY3DPEHPK3PXP',
+      recoveryCode: 'ABCDE-FGHJK',
+    })).toEqual({
+      mfaPending: true,
+      mfaToken: '[REDACTED]',
+      secret: '[REDACTED]',
+      recoveryCode: '[REDACTED]',
+    });
+  });
+
   it('嵌套对象递归脱敏', () => {
     expect(redactDetail({ user: { nickname: '张三', tokenHash: 'secret' } }))
       .toEqual({ user: { nickname: '张三', tokenHash: '[REDACTED]' } });

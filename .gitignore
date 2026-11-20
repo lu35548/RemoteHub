@@ -15,3 +15,7 @@ packages/backend/prisma/seed.js
 *.db-journal
 *.db-wal
 *.db-shm
+
+# 备份目录（#38 dev 默认 BACKUP_DIR；*.db 已覆盖正式产物，此处补目录与 tmp 残留）
+packages/backend/backups/
+*.db.tmp

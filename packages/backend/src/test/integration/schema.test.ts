@@ -1,8 +1,9 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { setupTestDb } from '../helpers/testDb.js';
 
-// 真实 SQLite migration 在并行满载（如 root pnpm -r test）下可能超过默认 5s，放宽到 15s
-vi.setConfig({ testTimeout: 15_000 });
+// 真实 SQLite migration 在并行满载（如 root pnpm -r test）下可能超过默认 5s，放宽到 15s；
+// #47 后迁移 5→6（add_project_status 表重建迁移），满载冷启动实测 17-19s——重标定 30s
+vi.setConfig({ testTimeout: 30_000 });
 
 const instances: Array<() => Promise<void>> = [];
 
@@ -11,14 +12,14 @@ afterEach(async () => {
 });
 
 describe('schema 约束（真实 SQLite）', () => {
-  it('migrate deploy 建出 6 张表', async () => {
+  it('migrate deploy 建出 9 张表', async () => {
     const { prisma, cleanUp } = await setupTestDb();
     instances.push(cleanUp);
     const tables = await prisma.$queryRaw<Array<{ name: string }>>`
       SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_prisma_%'
     `;
     const names = tables.map((t) => t.name).sort();
-    expect(names).toEqual(['audit_logs', 'connections', 'project_members', 'projects', 'sessions', 'users']);
+    expect(names).toEqual(['audit_logs', 'connections', 'notification_queue', 'password_reset_tokens', 'project_members', 'projects', 'sessions', 'two_factor_recovery_codes', 'users']);
   });
 
   it('@@unique([projectId, name]) 抛 P2002', async () => {

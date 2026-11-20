@@ -26,9 +26,13 @@
     "helmet": "^8.0.0",
     "jose": "^6.2.2",
     "node-cron": "^3.0.3",
+    "otpauth": "9.5.2",
     "prisma": "^6.0.0",
+    "swagger-jsdoc": "6.3.0",
+    "swagger-ui-express": "5.0.1",
     "uuid": "^11.0.0",
-    "winston": "^3.17.0"
+    "winston": "^3.17.0",
+    "ws": "8.21.3"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
@@ -37,7 +41,10 @@
     "@types/express": "^5.0.0",
     "@types/node-cron": "^3.0.11",
     "@types/supertest": "^7.2.1",
+    "@types/swagger-jsdoc": "^6.0.4",
+    "@types/swagger-ui-express": "^4.1.8",
     "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
     "esbuild": "^0.25.0",

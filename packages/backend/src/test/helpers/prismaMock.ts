@@ -11,10 +11,13 @@ export function createPrismaMock() {
   const prismaMock: Record<string, any> = {
     user: modelFns(),
     session: modelFns(),
+    passwordResetToken: modelFns(),
+    twoFactorRecoveryCode: modelFns(),
     project: modelFns(),
     projectMember: modelFns(),
     connection: modelFns(),
     auditLog: modelFns(),
+    notificationQueue: modelFns(),
     $transaction: vi.fn(async (arg: unknown) =>
       typeof arg === 'function' ? (arg as (tx: unknown) => unknown)(prismaMock) : Promise.all(arg as Promise<unknown>[])),
     $queryRaw: vi.fn(),
@@ -32,6 +35,7 @@ function modelFns() {
     create: vi.fn(),
     update: vi.fn(),
     upsert: vi.fn(),
+    createMany: vi.fn(),
     delete: vi.fn(),
     updateMany: vi.fn(),
     deleteMany: vi.fn(),

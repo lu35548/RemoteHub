@@ -46,6 +46,18 @@ describe('LoginPage（T3）', () => {
     expect(screen.getByRole('button', { name: /安全登录/ })).toBeInTheDocument();
   });
 
+  it('a11y（批 13a）：form field id/name 齐全且 label 关联（htmlFor → id，getByLabelText 可达）', () => {
+    mockedUseLogin.mockReturnValue({ mutateAsync: vi.fn(), isPending: false });
+    renderLogin();
+
+    const username = screen.getByLabelText('账号');
+    expect(username).toHaveAttribute('id', 'login-username');
+    expect(username).toHaveAttribute('name', 'username');
+    const password = screen.getByLabelText('密码');
+    expect(password).toHaveAttribute('id', 'login-password');
+    expect(password).toHaveAttribute('name', 'password');
+  });
+
   it('登录成功 → 欢迎回来 toast + 跳转 /', async () => {
     const user = { id: 'u1', username: 'admin', nickname: '管理员' };
     const mutateAsync = vi.fn().mockResolvedValue({ accessToken: 'tok', user });
@@ -96,5 +108,33 @@ describe('LoginPage（T3）', () => {
       expect(screen.getByText('登录服务异常')).toBeInTheDocument();
     });
     expect(screen.getByTestId('location')).toHaveTextContent('/login');
+  });
+
+  // 票 #31：enabled 用户登录响应 mfaPending → 存内存态 + 跳 /mfa（不 setAccessToken）
+  it('mfaPending 响应 → 跳 /mfa 挑战页', async () => {
+    const mutateAsync = vi.fn().mockResolvedValue({ mfaPending: true, mfaStage: 'verify', mfaToken: 'mt' });
+    mockedUseLogin.mockReturnValue({ mutateAsync, isPending: false });
+
+    const events = userEvent.setup();
+    renderLogin();
+    await events.type(screen.getByPlaceholderText('请输入用户名'), 'admin');
+    await events.type(screen.getByPlaceholderText('••••••••'), 'Admin123');
+    await events.click(screen.getByRole('button', { name: /安全登录/ }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location')).toHaveTextContent('/mfa');
+    });
+  });
+});
+
+describe('a11y：input name/autocomplete 属性落位（#49 backlog 落位）', () => {
+  it('账号 input name=username + autoComplete=username；密码 input name=password + autoComplete=current-password', () => {
+    renderLogin();
+    const userInput = screen.getByPlaceholderText('请输入用户名');
+    expect(userInput).toHaveAttribute('name', 'username');
+    expect(userInput).toHaveAttribute('autocomplete', 'username');
+    const passInput = screen.getByPlaceholderText('••••••••');
+    expect(passInput).toHaveAttribute('name', 'password');
+    expect(passInput).toHaveAttribute('autocomplete', 'current-password');
   });
 });
