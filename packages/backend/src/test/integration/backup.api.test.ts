@@ -213,7 +213,10 @@ describe('备份失败路径（函数级：backupDir 指向文件 → mkdir 失�
 
     const before = await b.prisma.notificationQueue.count({ where: { type: 'BACKUP_FAILED' } });
     await expect(
-      svc.createBackup({ backupDir: blocker }), // sourceUrl 默认 env.DATABASE_URL（本套临时库，源校验通过）
+      // backupDir 指向「已存在文件的子路径」——mkdir 逐级建目录时父是文件,跨平台必抛
+      // (ENOTDIR/EEXIST)。#56 CI 实录:纯文件路径在 Linux recursive mkdir 下静默成功
+      // (Node 跨平台行为差,本机 Windows 抛 EEXIST 恒绿),不能作为失败注入面。
+      svc.createBackup({ backupDir: path.join(blocker, 'sub') }), // sourceUrl 默认 env.DATABASE_URL（本套临时库，源校验通过）
     ).rejects.toThrow();
     // #56 CI 实录:失败通知为 fire-and-forget 异步落行——CI 快机上断言抢在 Queue
     // 写入前(本机慢 fs 恒绿)。waitFor 轮询等落行,与本文件既有 waitFor 先例同法。
